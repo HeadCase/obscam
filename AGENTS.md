@@ -1,5 +1,16 @@
 # AGENTS.md - Coding Guidelines for obscam
 
+## General Guidelines
+- This application's purpose to provide monitoring (CCTV-style) for my remote
+  astrophotography observatory 
+- I access my observatory and all its functions remotely via Wireguard
+- The camera used for monitoring is pointed at my telescope, with a view of the
+  observatory roof which rolls on and off at my instruction
+- Monitoring my telescope during slewing actions is particularly important, and
+  frames need to be updated every 200-500 milliseconds to make this worthwhile
+- Sometimes I need a long exposure (1-10 seconds) when it's really dark or the
+  roof is closed
+
 ## Build/Test Commands
 - **Install dependencies**: `uv install` or `uv sync`
 - **Run main application**: `uv run obscam` 

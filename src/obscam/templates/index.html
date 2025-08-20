@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>FastCam - Ultra-Fast Observatory Monitor</title>
+    <title>ObsCam - Observatory Monitor</title>
     <style>
         * {
             margin: 0;
@@ -12,9 +12,10 @@
         }
         
         body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-            background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%);
-            color: #fff;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'SF Pro Text', sans-serif;
+            /* Tokyo Night Dark Theme - Observatory Appropriate */
+            background: linear-gradient(135deg, #16161e 0%, #1a1a29 50%, #24243e 100%);
+            color: #c0caf5;
             min-height: 100vh;
             overflow-x: hidden;
         }
@@ -25,38 +26,209 @@
             min-height: 100vh;
         }
         
-        /* Header */
+        /* CONSOLIDATED Header Bar - All Controls in One Compact Row */
         .header {
-            background: rgba(0,0,0,0.2);
+            background: rgba(26, 27, 38, 0.95);
             backdrop-filter: blur(10px);
-            padding: 10px 20px;
-            display: flex;
-            justify-content: space-between;
+            padding: 8px 20px;
+            border-bottom: 1px solid #414868;
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+            display: grid;
+            grid-template-columns: auto 1fr auto auto;
+            gap: 20px;
             align-items: center;
-            border-bottom: 1px solid rgba(255,255,255,0.1);
         }
         
         .header h1 {
-            font-size: 1.5rem;
+            font-size: 1.1rem;
             font-weight: 600;
-            color: #fff;
+            color: #7aa2f7;
+            white-space: nowrap;
+        }
+
+        /* Consolidated Controls Section - Exposure & Gain in Header */
+        .header-controls {
+            display: flex;
+            justify-content: center;
+            gap: 25px;
+            align-items: center;
+            min-width: 0;
         }
         
+        .control-group {
+            display: flex;
+            flex-direction: column;
+            gap: 3px;
+            min-width: 180px;  /* LARGER sliders for precision */
+        }
+
+        .control-group.disabled {
+            opacity: 0.5;
+            pointer-events: none;
+        }
+        
+        .control-label {
+            font-size: 0.7rem;
+            color: #9aa5ce;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            white-space: nowrap;
+        }
+        
+        .control-value {
+            font-family: 'SF Mono', 'Monaco', 'Menlo', monospace;
+            font-weight: bold;
+            color: #7aa2f7;
+            font-size: 0.8rem;
+        }
+        
+        /* Advanced Logarithmic Sliders with Detents */
+        .control-slider {
+            width: 100%;
+            height: 5px;
+            border-radius: 3px;
+            background: rgba(65, 72, 104, 0.5);
+            outline: none;
+            -webkit-appearance: none;
+            border: 1px solid #414868;
+            position: relative;
+        }
+        
+        .control-slider::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            width: 14px;
+            height: 14px;
+            border-radius: 50%;
+            background: linear-gradient(135deg, #7aa2f7 0%, #bb9af7 100%);
+            cursor: pointer;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
+            border: 1px solid #1a1b26;
+            transition: all 0.2s ease;
+        }
+        
+        .control-slider::-moz-range-thumb {
+            width: 14px;
+            height: 14px;
+            border-radius: 50%;
+            background: linear-gradient(135deg, #7aa2f7 0%, #bb9af7 100%);
+            cursor: pointer;
+            border: 1px solid #1a1b26;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.3);
+        }
+
+        /* Slider with Detent Indicators */
+        .slider-container {
+            position: relative;
+        }
+
+        .slider-detents {
+            position: absolute;
+            top: 50%;
+            left: 0;
+            right: 0;
+            height: 1px;
+            pointer-events: none;
+            transform: translateY(-50%);
+        }
+
+        .detent {
+            position: absolute;
+            width: 1px;
+            height: 8px;
+            background: #565f89;
+            top: -3px;
+        }
+
+        .detent.major {
+            height: 12px;
+            background: #7aa2f7;
+            width: 2px;
+            top: -5px;
+        }
+
+        /* WHITE BALANCE SLIDER STYLING - Color coded */
+        .control-slider.wb-red::-webkit-slider-thumb {
+            background: linear-gradient(135deg, #f7768e 0%, #ff9e64 100%); /* Red tint */
+        }
+
+        .control-slider.wb-blue::-webkit-slider-thumb {
+            background: linear-gradient(135deg, #7aa2f7 0%, #7dcfff 100%); /* Blue tint */
+        }
+
+        .control-slider.wb-red::-moz-range-thumb {
+            background: linear-gradient(135deg, #f7768e 0%, #ff9e64 100%);
+        }
+
+        .control-slider.wb-blue::-moz-range-thumb {
+            background: linear-gradient(135deg, #7aa2f7 0%, #7dcfff 100%);
+        }
+
+        /* Master/Observer Status - Compact */
+        .master-status {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .master-indicator {
+            display: flex;
+            align-items: center;
+            gap: 4px;
+            padding: 3px 8px;
+            border-radius: 12px;
+            font-weight: 600;
+            font-size: 0.7rem;
+            white-space: nowrap;
+        }
+
+        .master-indicator.controlling {
+            background: linear-gradient(135deg, #7aa2f7 0%, #9ece6a 100%);
+            color: #1a1b26;
+        }
+
+        .master-indicator.observing {
+            background: rgba(65, 72, 104, 0.5);
+            color: #c0caf5;
+            border: 1px solid #414868;
+        }
+
+        .control-request-btn {
+            background: linear-gradient(135deg, #e0af68 0%, #ff9e64 100%);
+            color: #1a1b26;
+            border: none;
+            padding: 3px 8px;
+            border-radius: 10px;
+            cursor: pointer;
+            font-size: 0.65rem;
+            font-weight: 600;
+            transition: all 0.3s ease;
+            white-space: nowrap;
+        }
+
+        .control-request-btn:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 4px 12px rgba(224, 175, 104, 0.4);
+        }
+
+        /* Connection Status - Compact */
         .connection-status {
             display: flex;
             align-items: center;
-            gap: 8px;
-            padding: 4px 12px;
-            border-radius: 20px;
-            background: rgba(255,255,255,0.1);
-            font-size: 0.9rem;
+            gap: 4px;
+            padding: 3px 8px;
+            border-radius: 12px;
+            background: rgba(65, 72, 104, 0.3);
+            font-size: 0.7rem;
+            border: 1px solid #414868;
+            white-space: nowrap;
         }
         
         .status-indicator {
-            width: 8px;
-            height: 8px;
+            width: 5px;
+            height: 5px;
             border-radius: 50%;
-            background: #28a745;
+            background: #9ece6a;
             animation: pulse 2s infinite;
         }
         
@@ -66,74 +238,10 @@
         }
         
         .status-indicator.error {
-            background: #dc3545;
-        }
-        
-        /* Top Controls Above Image */
-        .top-controls {
-            background: rgba(0,0,0,0.7);
-            backdrop-filter: blur(10px);
-            padding: 15px 20px;
-            border-bottom: 1px solid rgba(255,255,255,0.1);
-            display: flex;
-            justify-content: center;
-            gap: 40px;
-            align-items: center;
-            flex-wrap: wrap;
-        }
-        
-        .top-control-group {
-            display: flex;
-            flex-direction: column;
-            gap: 8px;
-            min-width: 200px;
-        }
-        
-        .top-control-label {
-            font-size: 0.9rem;
-            color: rgba(255,255,255,0.8);
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-        }
-        
-        .top-control-value {
-            font-family: monospace;
-            font-weight: bold;
-            color: #00d4ff;
-            font-size: 1rem;
-        }
-        
-        .top-control-slider {
-            width: 100%;
-            height: 8px;
-            border-radius: 4px;
-            background: rgba(255,255,255,0.2);
-            outline: none;
-            -webkit-appearance: none;
-        }
-        
-        .top-control-slider::-webkit-slider-thumb {
-            -webkit-appearance: none;
-            width: 20px;
-            height: 20px;
-            border-radius: 50%;
-            background: #00d4ff;
-            cursor: pointer;
-            box-shadow: 0 2px 6px rgba(0,0,0,0.3);
-        }
-        
-        .top-control-slider::-moz-range-thumb {
-            width: 20px;
-            height: 20px;
-            border-radius: 50%;
-            background: #00d4ff;
-            cursor: pointer;
-            border: none;
-            box-shadow: 0 2px 6px rgba(0,0,0,0.3);
+            background: #f7768e;
         }
 
-        /* Main Feed Container - FULL WINDOW */
+        /* Main Feed Container - MAXIMIZED SCREEN */
         .feed-container {
             flex: 1;
             display: flex;
@@ -157,11 +265,11 @@
         }
         
         .camera-image {
-            /* FULL BROWSER WINDOW SCALING - ALL DEVICES */
+            /* MAXIMIZED BROWSER WINDOW - Minimal header overhead */
             width: 100vw;
-            height: calc(100vh - 140px); /* Account for header + top controls + bottom controls */
+            height: calc(100vh - 90px); /* Only header + bottom bar */
             max-width: 100vw;
-            max-height: calc(100vh - 140px);
+            max-height: calc(100vh - 90px);
             object-fit: contain;
             border-radius: 0;
             box-shadow: none;
@@ -173,114 +281,126 @@
             width: 80%;
             max-width: 800px;
             aspect-ratio: 16/9;
-            background: rgba(255,255,255,0.1);
-            border: 2px dashed rgba(255,255,255,0.3);
+            background: rgba(65, 72, 104, 0.2);
+            border: 2px dashed #414868;
             border-radius: 12px;
             display: flex;
             align-items: center;
             justify-content: center;
             font-size: 1.2rem;
-            color: rgba(255,255,255,0.7);
+            color: #9aa5ce;
         }
         
-        /* Bottom Control Panel - Minimal */
+        /* Bottom Status Bar - Minimal */
         .bottom-controls {
-            background: rgba(0,0,0,0.8);
+            background: rgba(26, 27, 38, 0.95);
             backdrop-filter: blur(10px);
-            padding: 10px 20px;
-            border-top: 1px solid rgba(255,255,255,0.1);
+            padding: 6px 20px;
+            border-top: 1px solid #414868;
             display: flex;
             justify-content: center;
             align-items: center;
-            gap: 20px;
+            gap: 15px;
             flex-wrap: wrap;
         }
         
         .control-btn {
-            background: rgba(255,255,255,0.1);
-            color: #fff;
-            border: none;
-            padding: 10px 20px;
-            border-radius: 25px;
+            background: rgba(65, 72, 104, 0.3);
+            color: #c0caf5;
+            border: 1px solid #414868;
+            padding: 6px 15px;
+            border-radius: 15px;
             cursor: pointer;
-            font-size: 0.9rem;
+            font-size: 0.75rem;
             font-weight: 500;
             transition: all 0.3s ease;
-            min-width: 120px;
+            min-width: 80px;
         }
         
         .control-btn:hover {
-            background: rgba(255,255,255,0.2);
+            background: rgba(65, 72, 104, 0.5);
             transform: translateY(-1px);
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
         }
         
         .control-btn.active {
-            background: #00d4ff;
-            box-shadow: 0 0 20px rgba(0,212,255,0.5);
+            background: linear-gradient(135deg, #7aa2f7 0%, #bb9af7 100%);
+            color: #1a1b26;
+            border-color: #7aa2f7;
+            box-shadow: 0 0 15px rgba(122, 162, 247, 0.4);
         }
         
         .fps-display {
-            font-size: 0.8rem;
-            color: rgba(255,255,255,0.6);
+            font-size: 0.7rem;
+            color: #9aa5ce;
             text-align: center;
+            font-family: 'SF Mono', 'Monaco', 'Menlo', monospace;
         }
         
         /* Status Info */
         .status-info {
             display: flex;
-            gap: 20px;
+            gap: 15px;
             align-items: center;
-            font-size: 0.8rem;
-            color: rgba(255,255,255,0.6);
+            font-size: 0.7rem;
+            color: #9aa5ce;
         }
         
         .status-info span {
             white-space: nowrap;
         }
         
-        /* Responsive Design - ALL DEVICES GET FULL WINDOW */
+        /* Responsive Design */
         @media (max-width: 768px) {
             .header {
-                padding: 8px 15px;
+                padding: 6px 15px;
+                grid-template-columns: 1fr;
+                gap: 8px;
+                text-align: center;
             }
             
             .header h1 {
-                font-size: 1.2rem;
+                font-size: 1rem;
+                grid-row: 1;
+            }
+
+            .header-controls {
+                grid-row: 2;
+                gap: 10px;
+                flex-wrap: wrap;
+                justify-content: center;
             }
             
-            .top-controls {
-                flex-direction: column;
-                gap: 15px;
-                padding: 10px 15px;
+            .master-status {
+                grid-row: 3;
+                justify-self: center;
+            }
+
+            .connection-status {
+                grid-row: 3;
+                justify-self: center;
             }
             
-            .top-control-group {
-                min-width: unset;
-                width: 100%;
-                max-width: 300px;
+            .control-group {
+                min-width: 140px;  /* Smaller on mobile but still usable */
             }
             
             .camera-image {
-                /* Mobile: STILL FULL WINDOW - just adjust for smaller UI */
-                width: 100vw;
-                height: calc(100vh - 160px); /* Account for stacked mobile controls */
-                max-width: 100vw;
-                max-height: calc(100vh - 160px);
+                height: calc(100vh - 120px); /* Account for stacked mobile header */
+                max-height: calc(100vh - 120px);
             }
             
             .bottom-controls {
-                padding: 8px 15px;
-                gap: 15px;
+                padding: 6px 15px;
+                gap: 10px;
             }
         }
         
-        /* Extra large displays - 4K monitors etc */
+        /* Extra large displays */
         @media (min-width: 1920px) {
             .camera-image {
-                width: 100vw;
-                height: calc(100vh - 120px); /* Minimal UI overhead on large screens */
-                max-width: 100vw;
-                max-height: calc(100vh - 120px);
+                height: calc(100vh - 80px);
+                max-height: calc(100vh - 80px);
             }
         }
         
@@ -294,43 +414,96 @@
             0%, 100% { opacity: 0.7; }
             50% { opacity: 0.4; }
         }
+
+        /* Tokyo Night Accents */
+        .accent-blue { color: #7aa2f7; }
+        .accent-green { color: #9ece6a; }
+        .accent-purple { color: #bb9af7; }
+        .accent-orange { color: #ff9e64; }
+        .accent-yellow { color: #e0af68; }
+        .accent-red { color: #f7768e; }
     </style>
 </head>
 <body>
     <div class="app-container">
-        <!-- Header -->
+        <!-- CONSOLIDATED Header Bar - Everything in One Row -->
         <header class="header">
-            <h1>FastCam Observatory Monitor</h1>
+            <h1>🔭 ObsCam</h1>
+            
+            <!-- EXPANDED Controls Section - Exposure, Gain, White Balance -->
+            <div class="header-controls">
+                <!-- Ultra-granular Exposure Control (30 detents) -->
+                <div class="control-group" id="exposure-control-group">
+                    <label class="control-label">
+                        Exposure
+                        <span class="control-value" id="exposure-value">200ms</span>
+                    </label>
+                    <div class="slider-container">
+                        <input type="range" class="control-slider" id="exposure-slider" 
+                               min="0" max="29" value="17" step="1">
+                        <div class="slider-detents" id="exposure-detents"></div>
+                    </div>
+                </div>
+                
+                <!-- Fine-grained Gain Control (20 detents) -->
+                <div class="control-group" id="gain-control-group">
+                    <label class="control-label">
+                        Gain
+                        <span class="control-value" id="gain-value">250</span>
+                    </label>
+                    <div class="slider-container">
+                        <input type="range" class="control-slider" id="gain-slider" 
+                               min="0" max="19" value="8" step="1">
+                        <div class="slider-detents" id="gain-detents"></div>
+                    </div>
+                </div>
+
+                <!-- WHITE BALANCE RED - Reduce Magenta Cast -->
+                <div class="control-group" id="wb-r-control-group">
+                    <label class="control-label">
+                        🔴 WB Red
+                        <span class="control-value" id="wb-r-value">75</span>
+                    </label>
+                    <div class="slider-container">
+                        <input type="range" class="control-slider wb-red" id="wb-r-slider" 
+                               min="0" max="10" value="3" step="1">
+                        <div class="slider-detents" id="wb-r-detents"></div>
+                    </div>
+                </div>
+
+                <!-- WHITE BALANCE BLUE - Reduce Magenta Cast -->  
+                <div class="control-group" id="wb-b-control-group">
+                    <label class="control-label">
+                        🔵 WB Blue
+                        <span class="control-value" id="wb-b-value">120</span>
+                    </label>
+                    <div class="slider-container">
+                        <input type="range" class="control-slider wb-blue" id="wb-b-slider" 
+                               min="0" max="10" value="7" step="1">
+                        <div class="slider-detents" id="wb-b-detents"></div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Master/Observer Status -->
+            <div class="master-status">
+                <div class="master-indicator" id="master-indicator">
+                    <span id="master-icon">👁️</span>
+                    <span id="master-text">Connecting...</span>
+                </div>
+                <button class="control-request-btn" id="control-request-btn" onclick="requestControl()" style="display: none;">
+                    Request
+                </button>
+            </div>
+            
+            <!-- Connection Status -->
             <div class="connection-status">
                 <div class="status-indicator" id="connection-indicator"></div>
                 <span id="connection-text">Connecting...</span>
             </div>
         </header>
         
-        <!-- Top Controls - Above Image -->
-        <div class="top-controls">
-            <!-- Exposure Control -->
-            <div class="top-control-group">
-                <label class="top-control-label">
-                    Exposure Time
-                    <span class="top-control-value" id="exposure-value">100ms</span>
-                </label>
-                <input type="range" class="top-control-slider" id="exposure-slider" 
-                       min="1" max="10000" value="100" step="1">
-            </div>
-            
-            <!-- Gain Control -->
-            <div class="top-control-group">
-                <label class="top-control-label">
-                    Gain
-                    <span class="top-control-value" id="gain-value">250</span>
-                </label>
-                <input type="range" class="top-control-slider" id="gain-slider" 
-                       min="50" max="800" value="250" step="1">
-            </div>
-        </div>
-        
-        <!-- Main Camera Feed - FULL WINDOW -->
+        <!-- Main Camera Feed - MAXIMIZED SCREEN -->
         <main class="feed-container">
             <div class="image-wrapper">
                 <div class="placeholder" id="camera-image">
@@ -339,55 +512,421 @@
             </div>
         </main>
         
-        <!-- Bottom Control Panel - Minimal -->
+        <!-- Minimal Bottom Status Bar -->
         <div class="bottom-controls">
             <button class="control-btn" id="connect-btn" onclick="connectCamera()">
                 Connect
             </button>
             <button class="control-btn active" id="stream-btn" onclick="toggleStream()">
-                Streaming
+                Stream
             </button>
             <div class="fps-display" id="fps-display">-- FPS</div>
             <div class="status-info">
-                <span>Camera: <span id="camera-status">Initializing</span></span>
+                <span>Cam: <span id="camera-status">Init</span></span>
                 <span>Last: <span id="last-update">--</span></span>
+                <span>Master: <span id="master-ip" class="accent-blue">--</span></span>
+                <span>Sessions: <span id="session-count" class="accent-green">-</span></span>
             </div>
         </div>
     </div>
 
     <script>
+        // EXPANDED Ultra-granular exposure scale (30 detents: 0.1ms to 30s)
+        const EXPOSURE_SCALE = [
+            {value: 0.1, label: '0.1ms'},
+            {value: 0.2, label: '0.2ms'},
+            {value: 0.5, label: '0.5ms'},
+            {value: 1, label: '1ms'},
+            {value: 1.5, label: '1.5ms'},
+            {value: 2, label: '2ms'},
+            {value: 3, label: '3ms'},
+            {value: 5, label: '5ms'},
+            {value: 8, label: '8ms'},
+            {value: 10, label: '10ms'},
+            {value: 15, label: '15ms'},
+            {value: 20, label: '20ms'},
+            {value: 30, label: '30ms'},
+            {value: 50, label: '50ms'},
+            {value: 75, label: '75ms'},
+            {value: 100, label: '100ms'},
+            {value: 150, label: '150ms'},
+            {value: 200, label: '200ms', major: true}, // User requested
+            {value: 300, label: '300ms'},
+            {value: 500, label: '500ms', major: true}, // User requested
+            {value: 750, label: '750ms'},
+            {value: 800, label: '800ms', major: true}, // User requested  
+            {value: 1000, label: '1s'},
+            {value: 1500, label: '1.5s'},
+            {value: 2000, label: '2s'},
+            {value: 3000, label: '3s'},
+            {value: 5000, label: '5s'},
+            {value: 10000, label: '10s'},
+            {value: 20000, label: '20s'},
+            {value: 30000, label: '30s'}
+        ];
+
+        // EXPANDED Fine-grained gain scale (20 detents: 0 to 1000)
+        const GAIN_SCALE = [
+            {value: 0, label: '0'},
+            {value: 25, label: '25'},
+            {value: 50, label: '50'},
+            {value: 75, label: '75'},
+            {value: 100, label: '100'},
+            {value: 125, label: '125'},
+            {value: 150, label: '150'},
+            {value: 200, label: '200'},
+            {value: 250, label: '250', major: true}, // Observatory standard
+            {value: 300, label: '300'},
+            {value: 350, label: '350'},
+            {value: 400, label: '400'},
+            {value: 450, label: '450'},
+            {value: 500, label: '500', major: true},
+            {value: 550, label: '550'},
+            {value: 600, label: '600'},
+            {value: 650, label: '650'},
+            {value: 700, label: '700'},
+            {value: 800, label: '800', major: true},
+            {value: 1000, label: '1000'}
+        ];
+
+        // White Balance scales for color correction (magenta cast fix)
+        const WB_RED_SCALE = [
+            {value: 50, label: '50'},
+            {value: 60, label: '60'},
+            {value: 70, label: '70'},
+            {value: 75, label: '75', major: true}, // Reduced to fix magenta
+            {value: 80, label: '80'},
+            {value: 90, label: '90'},
+            {value: 100, label: '100'},
+            {value: 110, label: '110'},
+            {value: 120, label: '120'},
+            {value: 130, label: '130'},
+            {value: 150, label: '150'}
+        ];
+
+        const WB_BLUE_SCALE = [
+            {value: 50, label: '50'},
+            {value: 60, label: '60'},
+            {value: 70, label: '70'},
+            {value: 80, label: '80'},
+            {value: 90, label: '90'},
+            {value: 100, label: '100'},
+            {value: 110, label: '110'},
+            {value: 120, label: '120', major: true}, // Increased to fix magenta
+            {value: 130, label: '130'},
+            {value: 140, label: '140'},
+            {value: 150, label: '150'}
+        ];
+
         // Application State
         let appState = {
             streaming: false,
-            exposure: 100,
-            gain: 250,
+            exposure: 200, // Start at 200ms (index 17 in new scale)
+            gain: 250,     // Start at 250 (index 8 in new scale)
+            wb_r: 75,      // Start at 75 (index 3 in red scale) - reduce magenta
+            wb_b: 120,     // Start at 120 (index 7 in blue scale) - reduce magenta
             isConnected: false,
+            isMaster: false,
+            sessionId: null,
             streamInterval: null,
             frameCount: 0,
             lastFrameTime: Date.now(),
-            fps: 0
+            fps: 0,
+            websocket: null,
+            sessionInfo: {}
         };
         
-        // Get the current host and use port 8000 for API calls
         const API_BASE = `http://${window.location.hostname}:8000`;
+        const WS_BASE = `ws://${window.location.hostname}:8000`;
+
+        // Initialize all sliders with detents
+        function initializeSliders() {
+            createDetents('exposure-detents', EXPOSURE_SCALE);
+            createDetents('gain-detents', GAIN_SCALE);
+            createDetents('wb-r-detents', WB_RED_SCALE);
+            createDetents('wb-b-detents', WB_BLUE_SCALE);
+            
+            // Set initial values with new expanded scales
+            document.getElementById('exposure-slider').value = 17; // 200ms default (new index)
+            document.getElementById('gain-slider').value = 8;      // 250 default (new index)
+            document.getElementById('wb-r-slider').value = 3;      // 75 default (reduce magenta)
+            document.getElementById('wb-b-slider').value = 7;      // 120 default (reduce magenta)
+            
+            updateSliderDisplays();
+        }
+
+        function createDetents(containerId, scale) {
+            const container = document.getElementById(containerId);
+            container.innerHTML = '';
+            
+            scale.forEach((point, index) => {
+                const detent = document.createElement('div');
+                detent.className = `detent ${point.major ? 'major' : ''}`;
+                detent.style.left = `${(index / (scale.length - 1)) * 100}%`;
+                detent.title = point.label;
+                container.appendChild(detent);
+            });
+        }
+
+        function exposureIndexToValue(index) {
+            return EXPOSURE_SCALE[Math.min(Math.max(index, 0), EXPOSURE_SCALE.length - 1)].value;
+        }
+
+        function gainIndexToValue(index) {
+            return GAIN_SCALE[Math.min(Math.max(index, 0), GAIN_SCALE.length - 1)].value;
+        }
+
+        function wbRedIndexToValue(index) {
+            return WB_RED_SCALE[Math.min(Math.max(index, 0), WB_RED_SCALE.length - 1)].value;
+        }
+
+        function wbBlueIndexToValue(index) {
+            return WB_BLUE_SCALE[Math.min(Math.max(index, 0), WB_BLUE_SCALE.length - 1)].value;
+        }
+
+        function formatExposureValue(ms) {
+            if (ms >= 1000) {
+                return (ms / 1000).toFixed(ms % 1000 === 0 ? 0 : 1) + 's';
+            }
+            return ms + 'ms';
+        }
+
+        // Application State  
+        function updateSliderDisplays() {
+            const exposureIndex = parseInt(document.getElementById('exposure-slider').value);
+            const gainIndex = parseInt(document.getElementById('gain-slider').value);
+            const wbRedIndex = parseInt(document.getElementById('wb-r-slider').value);
+            const wbBlueIndex = parseInt(document.getElementById('wb-b-slider').value);
+            
+            appState.exposure = exposureIndexToValue(exposureIndex);
+            appState.gain = gainIndexToValue(gainIndex);
+            appState.wb_r = wbRedIndexToValue(wbRedIndex);
+            appState.wb_b = wbBlueIndexToValue(wbBlueIndex);
+            
+            document.getElementById('exposure-value').textContent = formatExposureValue(appState.exposure);
+            document.getElementById('gain-value').textContent = appState.gain.toString();
+            document.getElementById('wb-r-value').textContent = appState.wb_r.toString();
+            document.getElementById('wb-b-value').textContent = appState.wb_b.toString();
+        }
 
         // Initialize application
         function initializeApp() {
-            updateSliderDisplays();
+            initializeSliders();
+            initializeWebSocket();
             checkStatus();
-            
-            // Start streaming automatically after brief delay
-            setTimeout(() => {
-                if (appState.isConnected) {
-                    startStreaming();
-                }
-            }, 1000);
         }
-        
-        // Update slider value displays
-        function updateSliderDisplays() {
-            document.getElementById('exposure-value').textContent = appState.exposure + 'ms';
-            document.getElementById('gain-value').textContent = appState.gain;
+
+        // WebSocket Connection Management
+        function initializeWebSocket() {
+            const clientIP = 'browser-' + Math.random().toString(36).substr(2, 9);
+            const forceMaster = new URLSearchParams(window.location.search).get('force_master') === 'true';
+            const wsUrl = `${WS_BASE}/ws/${clientIP}${forceMaster ? '?force_master=true' : ''}`;
+            
+            appState.websocket = new WebSocket(wsUrl);
+            
+            appState.websocket.onopen = function(event) {
+                console.log('WebSocket connected');
+                startHeartbeat();
+            };
+            
+            appState.websocket.onmessage = function(event) {
+                const data = JSON.parse(event.data);
+                handleWebSocketMessage(data);
+            };
+            
+            appState.websocket.onclose = function(event) {
+                console.log('WebSocket disconnected');
+                setTimeout(initializeWebSocket, 5000);
+            };
+            
+            appState.websocket.onerror = function(error) {
+                console.error('WebSocket error:', error);
+            };
+        }
+
+        function handleWebSocketMessage(data) {
+            switch (data.type) {
+                case 'session_created':
+                    appState.sessionId = data.session_id;
+                    appState.isMaster = data.is_master;
+                    updateMasterObserverUI(data.session_info);
+                    
+                    setTimeout(() => {
+                        if (appState.isConnected) {
+                            startStreaming();
+                        }
+                    }, 1000);
+                    break;
+                    
+                case 'session_update':
+                    updateMasterObserverUI(data.session_info);
+                    break;
+                    
+                case 'parameter_update':
+                    if (!appState.isMaster) {
+                        updateObserverSettings(data.parameters);
+                    }
+                    break;
+                    
+                case 'heartbeat_ack':
+                    break;
+            }
+        }
+
+        function startHeartbeat() {
+            setInterval(() => {
+                if (appState.websocket && appState.websocket.readyState === WebSocket.OPEN) {
+                    appState.websocket.send(JSON.stringify({
+                        type: 'heartbeat'
+                    }));
+                }
+            }, 25000);
+        }
+
+        function updateMasterObserverUI(sessionInfo) {
+            appState.sessionInfo = sessionInfo;
+            
+            document.getElementById('session-count').textContent = sessionInfo.total_sessions || 0;
+            
+            const masterIndicator = document.getElementById('master-indicator');
+            const masterIcon = document.getElementById('master-icon');
+            const masterText = document.getElementById('master-text');
+            const controlRequestBtn = document.getElementById('control-request-btn');
+            const masterIpDisplay = document.getElementById('master-ip');
+            
+            const exposureControlGroup = document.getElementById('exposure-control-group');
+            const gainControlGroup = document.getElementById('gain-control-group');
+            const wbRedControlGroup = document.getElementById('wb-r-control-group');
+            const wbBlueControlGroup = document.getElementById('wb-b-control-group');
+            
+            if (appState.isMaster) {
+                masterIndicator.classList.remove('observing');
+                masterIndicator.classList.add('controlling');
+                masterIcon.textContent = '🎛️';
+                masterText.textContent = `CONTROL`;
+                controlRequestBtn.style.display = 'none';
+                
+                // Enable all controls for master
+                exposureControlGroup.classList.remove('disabled');
+                gainControlGroup.classList.remove('disabled');
+                wbRedControlGroup.classList.remove('disabled');
+                wbBlueControlGroup.classList.remove('disabled');
+                
+            } else {
+                masterIndicator.classList.remove('controlling');
+                masterIndicator.classList.add('observing');
+                masterIcon.textContent = '👁️';
+                masterText.textContent = 'OBSERVE';
+                controlRequestBtn.style.display = 'inline-block';
+                
+                // Disable all controls for observers
+                exposureControlGroup.classList.add('disabled');
+                gainControlGroup.classList.add('disabled');
+                wbRedControlGroup.classList.add('disabled');
+                wbBlueControlGroup.classList.add('disabled');
+            }
+            
+            if (sessionInfo.master_ip) {
+                masterIpDisplay.textContent = sessionInfo.master_ip;
+            } else {
+                masterIpDisplay.textContent = '--';
+            }
+        }
+
+        function updateObserverSettings(parameters) {
+            if (parameters.exposure_ms !== undefined) {
+                // Find closest index for the exposure value
+                let closestIndex = 0;
+                let closestDiff = Math.abs(EXPOSURE_SCALE[0].value - parameters.exposure_ms);
+                
+                for (let i = 1; i < EXPOSURE_SCALE.length; i++) {
+                    const diff = Math.abs(EXPOSURE_SCALE[i].value - parameters.exposure_ms);
+                    if (diff < closestDiff) {
+                        closestDiff = diff;
+                        closestIndex = i;
+                    }
+                }
+                
+                document.getElementById('exposure-slider').value = closestIndex;
+                appState.exposure = parameters.exposure_ms;
+                document.getElementById('exposure-value').textContent = formatExposureValue(parameters.exposure_ms);
+            }
+            
+            if (parameters.gain !== undefined) {
+                // Find closest index for the gain value
+                let closestIndex = 0;
+                let closestDiff = Math.abs(GAIN_SCALE[0].value - parameters.gain);
+                
+                for (let i = 1; i < GAIN_SCALE.length; i++) {
+                    const diff = Math.abs(GAIN_SCALE[i].value - parameters.gain);
+                    if (diff < closestDiff) {
+                        closestDiff = diff;
+                        closestIndex = i;
+                    }
+                }
+                
+                document.getElementById('gain-slider').value = closestIndex;
+                appState.gain = parameters.gain;
+                document.getElementById('gain-value').textContent = parameters.gain;
+            }
+
+            if (parameters.wb_r !== undefined) {
+                // Find closest index for red WB value
+                let closestIndex = 0;
+                let closestDiff = Math.abs(WB_RED_SCALE[0].value - parameters.wb_r);
+                
+                for (let i = 1; i < WB_RED_SCALE.length; i++) {
+                    const diff = Math.abs(WB_RED_SCALE[i].value - parameters.wb_r);
+                    if (diff < closestDiff) {
+                        closestDiff = diff;
+                        closestIndex = i;
+                    }
+                }
+                
+                document.getElementById('wb-r-slider').value = closestIndex;
+                appState.wb_r = parameters.wb_r;
+                document.getElementById('wb-r-value').textContent = parameters.wb_r;
+            }
+
+            if (parameters.wb_b !== undefined) {
+                // Find closest index for blue WB value
+                let closestIndex = 0;
+                let closestDiff = Math.abs(WB_BLUE_SCALE[0].value - parameters.wb_b);
+                
+                for (let i = 1; i < WB_BLUE_SCALE.length; i++) {
+                    const diff = Math.abs(WB_BLUE_SCALE[i].value - parameters.wb_b);
+                    if (diff < closestDiff) {
+                        closestDiff = diff;
+                        closestIndex = i;
+                    }
+                }
+                
+                document.getElementById('wb-b-slider').value = closestIndex;
+                appState.wb_b = parameters.wb_b;
+                document.getElementById('wb-b-value').textContent = parameters.wb_b;
+            }
+        }
+
+        function requestControl() {
+            if (appState.websocket && appState.websocket.readyState === WebSocket.OPEN) {
+                appState.websocket.send(JSON.stringify({
+                    type: 'request_master'
+                }));
+            }
+        }
+
+        function broadcastParameterChange() {
+            if (appState.isMaster && appState.websocket && appState.websocket.readyState === WebSocket.OPEN) {
+                appState.websocket.send(JSON.stringify({
+                    type: 'parameter_change',
+                    parameters: {
+                        exposure_ms: appState.exposure,
+                        gain: appState.gain,
+                        wb_r: appState.wb_r,
+                        wb_b: appState.wb_b
+                    }
+                }));
+            }
         }
         
         // Connection management
@@ -401,11 +940,11 @@
             if (connected) {
                 indicator.classList.remove('error');
                 text.textContent = message || 'Connected';
-                statusValue.textContent = 'Connected';
+                statusValue.textContent = 'OK';
             } else {
                 indicator.classList.add('error');
-                text.textContent = message || 'Disconnected';
-                statusValue.textContent = 'Disconnected';
+                text.textContent = message || 'Error';
+                statusValue.textContent = 'Error';
             }
         }
         
@@ -415,9 +954,9 @@
                 const data = await response.json();
                 
                 if (data.status === 'connected') {
-                    updateConnectionStatus(true, 'Connected');
+                    updateConnectionStatus(true, 'OK');
                 } else {
-                    updateConnectionStatus(false, data.message || 'Not connected');
+                    updateConnectionStatus(false, data.message || 'Error');
                 }
                 
             } catch (error) {
@@ -438,11 +977,11 @@
                     updateConnectionStatus(true, 'Connected');
                     setTimeout(startStreaming, 500);
                 } else {
-                    updateConnectionStatus(false, data.message || 'Connection failed');
+                    updateConnectionStatus(false, data.message || 'Failed');
                 }
                 
             } catch (error) {
-                updateConnectionStatus(false, 'Connection error');
+                updateConnectionStatus(false, 'Error');
                 console.error('Connection failed:', error);
             } finally {
                 document.getElementById('connect-btn').classList.remove('loading');
@@ -455,11 +994,11 @@
             
             if (appState.streaming) {
                 stopStreaming();
-                btn.textContent = 'Start Stream';
+                btn.textContent = 'Start';
                 btn.classList.remove('active');
             } else {
                 startStreaming();
-                btn.textContent = 'Stop Stream';
+                btn.textContent = 'Stream';
                 btn.classList.add('active');
             }
         }
@@ -471,9 +1010,8 @@
             appState.frameCount = 0;
             appState.lastFrameTime = Date.now();
             
-            // Update button state
             const btn = document.getElementById('stream-btn');
-            btn.textContent = 'Streaming';
+            btn.textContent = 'Stream';
             btn.classList.add('active');
             
             console.log('Starting continuous capture stream...');
@@ -497,31 +1035,26 @@
             if (!appState.streaming) return;
             
             try {
-                const startTime = performance.now();
+                let captureUrl = `${API_BASE}/api/capture-fast?exp=${appState.exposure}&gain=${appState.gain}&wb_r=${appState.wb_r}&wb_b=${appState.wb_b}`;
+                if (appState.sessionId) {
+                    captureUrl += `&session_id=${appState.sessionId}`;
+                }
                 
-                // Fetch image with current settings
-                const response = await fetch(
-                    `${API_BASE}/api/capture-fast?exp=${appState.exposure}&gain=${appState.gain}`,
-                    { cache: 'no-cache' }
-                );
+                const response = await fetch(captureUrl, { cache: 'no-cache' });
                 
                 if (response.ok) {
                     const blob = await response.blob();
                     const imageUrl = URL.createObjectURL(blob);
                     
-                    // Update image immediately
                     const imgContainer = document.getElementById('camera-image');
                     imgContainer.innerHTML = `<img src="${imageUrl}" alt="Camera Feed" class="camera-image">`;
                     
-                    // Cleanup the blob URL to prevent memory leaks
                     setTimeout(() => URL.revokeObjectURL(imageUrl), 1000);
                     
-                    // Update FPS counter
                     updateFpsCounter();
                     
-                    // Update status
                     const now = new Date();
-                    document.getElementById('last-update').textContent = now.toLocaleTimeString();
+                    document.getElementById('last-update').textContent = now.toLocaleTimeString().slice(0, -3);
                     
                 } else {
                     console.error('Capture failed:', response.status, response.statusText);
@@ -532,9 +1065,8 @@
                 updateConnectionStatus(false, 'Capture error');
             }
             
-            // Schedule next capture immediately if still streaming
             if (appState.streaming) {
-                appState.streamInterval = setTimeout(continuousCapture, 10); // Minimal delay
+                appState.streamInterval = setTimeout(continuousCapture, 10);
             }
         }
         
@@ -543,12 +1075,10 @@
             const now = Date.now();
             const elapsed = now - appState.lastFrameTime;
             
-            // Update FPS every 10 frames or every 2 seconds
             if (appState.frameCount % 10 === 0 || elapsed > 2000) {
                 appState.fps = (appState.frameCount * 1000) / elapsed;
                 document.getElementById('fps-display').textContent = `${appState.fps.toFixed(1)} FPS`;
                 
-                // Reset counters
                 appState.frameCount = 0;
                 appState.lastFrameTime = now;
             }
@@ -558,14 +1088,34 @@
         document.addEventListener('DOMContentLoaded', function() {
             // Exposure slider
             document.getElementById('exposure-slider').addEventListener('input', function() {
-                appState.exposure = parseInt(this.value);
-                document.getElementById('exposure-value').textContent = appState.exposure + 'ms';
+                if (!appState.isMaster) return;
+                
+                updateSliderDisplays();
+                broadcastParameterChange();
             });
             
             // Gain slider  
             document.getElementById('gain-slider').addEventListener('input', function() {
-                appState.gain = parseInt(this.value);
-                document.getElementById('gain-value').textContent = appState.gain;
+                if (!appState.isMaster) return;
+                
+                updateSliderDisplays();
+                broadcastParameterChange();
+            });
+
+            // White Balance Red slider
+            document.getElementById('wb-r-slider').addEventListener('input', function() {
+                if (!appState.isMaster) return;
+                
+                updateSliderDisplays();
+                broadcastParameterChange();
+            });
+
+            // White Balance Blue slider  
+            document.getElementById('wb-b-slider').addEventListener('input', function() {
+                if (!appState.isMaster) return;
+                
+                updateSliderDisplays();
+                broadcastParameterChange();
             });
             
             // Keyboard shortcuts
@@ -575,17 +1125,16 @@
                     toggleStream();
                 } else if (e.key === 'c') {
                     connectCamera();
+                } else if (e.key === 'r' && !appState.isMaster) {
+                    requestControl();
                 }
             });
-            
-            // Initialize slider values
-            updateSliderDisplays();
         });
 
         // Start the application
         initializeApp();
         
-        // Periodic status check (every 30 seconds when not streaming)
+        // Periodic status check
         setInterval(() => {
             if (!appState.streaming) {
                 checkStatus();
