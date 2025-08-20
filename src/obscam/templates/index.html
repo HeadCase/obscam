@@ -69,33 +69,104 @@
             background: #dc3545;
         }
         
-        /* Main Feed Container */
+        /* Top Controls Above Image */
+        .top-controls {
+            background: rgba(0,0,0,0.7);
+            backdrop-filter: blur(10px);
+            padding: 15px 20px;
+            border-bottom: 1px solid rgba(255,255,255,0.1);
+            display: flex;
+            justify-content: center;
+            gap: 40px;
+            align-items: center;
+            flex-wrap: wrap;
+        }
+        
+        .top-control-group {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            min-width: 200px;
+        }
+        
+        .top-control-label {
+            font-size: 0.9rem;
+            color: rgba(255,255,255,0.8);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        
+        .top-control-value {
+            font-family: monospace;
+            font-weight: bold;
+            color: #00d4ff;
+            font-size: 1rem;
+        }
+        
+        .top-control-slider {
+            width: 100%;
+            height: 8px;
+            border-radius: 4px;
+            background: rgba(255,255,255,0.2);
+            outline: none;
+            -webkit-appearance: none;
+        }
+        
+        .top-control-slider::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            width: 20px;
+            height: 20px;
+            border-radius: 50%;
+            background: #00d4ff;
+            cursor: pointer;
+            box-shadow: 0 2px 6px rgba(0,0,0,0.3);
+        }
+        
+        .top-control-slider::-moz-range-thumb {
+            width: 20px;
+            height: 20px;
+            border-radius: 50%;
+            background: #00d4ff;
+            cursor: pointer;
+            border: none;
+            box-shadow: 0 2px 6px rgba(0,0,0,0.3);
+        }
+
+        /* Main Feed Container - FULL WINDOW */
         .feed-container {
             flex: 1;
             display: flex;
             align-items: center;
             justify-content: center;
-            padding: 10px;
+            padding: 0;
+            margin: 0;
             position: relative;
+            overflow: hidden;
         }
         
         .image-wrapper {
             width: 100%;
-            height: calc(100vh - 160px); /* Leave room for controls */
+            height: 100%;
             display: flex;
             align-items: center;
             justify-content: center;
             position: relative;
+            margin: 0;
+            padding: 0;
         }
         
         .camera-image {
-            /* TARGET THE IMAGE ITSELF for maximum size on desktop */
-            width: 85vw;  /* Image uses 85% of viewport width */
-            height: 75vh; /* Image uses 75% of viewport height */
+            /* FULL BROWSER WINDOW SCALING - ALL DEVICES */
+            width: 100vw;
+            height: calc(100vh - 140px); /* Account for header + top controls + bottom controls */
+            max-width: 100vw;
+            max-height: calc(100vh - 140px);
             object-fit: contain;
-            border-radius: 8px;
-            box-shadow: 0 8px 32px rgba(0,0,0,0.3);
+            border-radius: 0;
+            box-shadow: none;
             transition: opacity 0.2s ease;
+            display: block;
         }
         
         .placeholder {
@@ -112,78 +183,17 @@
             color: rgba(255,255,255,0.7);
         }
         
-        /* Control Panel */
-        .controls {
-            background: rgba(0,0,0,0.7);
+        /* Bottom Control Panel - Minimal */
+        .bottom-controls {
+            background: rgba(0,0,0,0.8);
             backdrop-filter: blur(10px);
-            padding: 20px;
+            padding: 10px 20px;
             border-top: 1px solid rgba(255,255,255,0.1);
-        }
-        
-        .controls-grid {
-            display: grid;
-            grid-template-columns: 1fr auto 1fr;
+            display: flex;
+            justify-content: center;
+            align-items: center;
             gap: 20px;
-            align-items: center;
-            max-width: 800px;
-            margin: 0 auto;
-        }
-        
-        .control-group {
-            display: flex;
-            flex-direction: column;
-            gap: 8px;
-        }
-        
-        .control-label {
-            font-size: 0.9rem;
-            color: rgba(255,255,255,0.8);
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-        }
-        
-        .control-value {
-            font-family: monospace;
-            font-weight: bold;
-            color: #00d4ff;
-        }
-        
-        .control-slider {
-            width: 100%;
-            height: 6px;
-            border-radius: 3px;
-            background: rgba(255,255,255,0.2);
-            outline: none;
-            -webkit-appearance: none;
-        }
-        
-        .control-slider::-webkit-slider-thumb {
-            -webkit-appearance: none;
-            width: 18px;
-            height: 18px;
-            border-radius: 50%;
-            background: #00d4ff;
-            cursor: pointer;
-            box-shadow: 0 2px 6px rgba(0,0,0,0.3);
-        }
-        
-        .control-slider::-moz-range-thumb {
-            width: 18px;
-            height: 18px;
-            border-radius: 50%;
-            background: #00d4ff;
-            cursor: pointer;
-            border: none;
-            box-shadow: 0 2px 6px rgba(0,0,0,0.3);
-        }
-        
-        /* Control Buttons */
-        .control-buttons {
-            display: flex;
-            flex-direction: column;
-            gap: 10px;
-            align-items: center;
+            flex-wrap: wrap;
         }
         
         .control-btn {
@@ -218,13 +228,17 @@
         /* Status Info */
         .status-info {
             display: flex;
-            justify-content: space-between;
+            gap: 20px;
             align-items: center;
             font-size: 0.8rem;
             color: rgba(255,255,255,0.6);
         }
         
-        /* Responsive Design */
+        .status-info span {
+            white-space: nowrap;
+        }
+        
+        /* Responsive Design - ALL DEVICES GET FULL WINDOW */
         @media (max-width: 768px) {
             .header {
                 padding: 8px 15px;
@@ -234,25 +248,39 @@
                 font-size: 1.2rem;
             }
             
-            .camera-image {
-                /* Mobile: Use smaller, mobile-friendly image sizing */
-                width: 95%;
-                height: auto;
-                max-width: 100%;
-                max-height: calc(100vh - 200px);
+            .top-controls {
+                flex-direction: column;
+                gap: 15px;
+                padding: 10px 15px;
             }
             
-            .controls-grid {
-                grid-template-columns: 1fr;
+            .top-control-group {
+                min-width: unset;
+                width: 100%;
+                max-width: 300px;
+            }
+            
+            .camera-image {
+                /* Mobile: STILL FULL WINDOW - just adjust for smaller UI */
+                width: 100vw;
+                height: calc(100vh - 160px); /* Account for stacked mobile controls */
+                max-width: 100vw;
+                max-height: calc(100vh - 160px);
+            }
+            
+            .bottom-controls {
+                padding: 8px 15px;
                 gap: 15px;
             }
-            
-            .control-buttons {
-                order: -1;
-            }
-            
-            .controls {
-                padding: 15px;
+        }
+        
+        /* Extra large displays - 4K monitors etc */
+        @media (min-width: 1920px) {
+            .camera-image {
+                width: 100vw;
+                height: calc(100vh - 120px); /* Minimal UI overhead on large screens */
+                max-width: 100vw;
+                max-height: calc(100vh - 120px);
             }
         }
         
@@ -279,7 +307,30 @@
             </div>
         </header>
         
-        <!-- Main Camera Feed -->
+        <!-- Top Controls - Above Image -->
+        <div class="top-controls">
+            <!-- Exposure Control -->
+            <div class="top-control-group">
+                <label class="top-control-label">
+                    Exposure Time
+                    <span class="top-control-value" id="exposure-value">100ms</span>
+                </label>
+                <input type="range" class="top-control-slider" id="exposure-slider" 
+                       min="1" max="10000" value="100" step="1">
+            </div>
+            
+            <!-- Gain Control -->
+            <div class="top-control-group">
+                <label class="top-control-label">
+                    Gain
+                    <span class="top-control-value" id="gain-value">250</span>
+                </label>
+                <input type="range" class="top-control-slider" id="gain-slider" 
+                       min="50" max="800" value="250" step="1">
+            </div>
+        </div>
+        
+        <!-- Main Camera Feed - FULL WINDOW -->
         <main class="feed-container">
             <div class="image-wrapper">
                 <div class="placeholder" id="camera-image">
@@ -288,45 +339,18 @@
             </div>
         </main>
         
-        <!-- Control Panel -->
-        <div class="controls">
-            <div class="controls-grid">
-                <!-- Exposure Control -->
-                <div class="control-group">
-                    <label class="control-label">
-                        Exposure Time
-                        <span class="control-value" id="exposure-value">100ms</span>
-                    </label>
-                    <input type="range" class="control-slider" id="exposure-slider" 
-                           min="1" max="10000" value="100" step="1">
-                </div>
-                
-                <!-- Control Buttons -->
-                <div class="control-buttons">
-                    <button class="control-btn" id="connect-btn" onclick="connectCamera()">
-                        Connect
-                    </button>
-                    <button class="control-btn active" id="stream-btn" onclick="toggleStream()">
-                        Streaming
-                    </button>
-                    <div class="fps-display" id="fps-display">-- FPS</div>
-                </div>
-                
-                <!-- Gain Control -->
-                <div class="control-group">
-                    <label class="control-label">
-                        Gain
-                        <span class="control-value" id="gain-value">250</span>
-                    </label>
-                    <input type="range" class="control-slider" id="gain-slider" 
-                           min="50" max="800" value="250" step="1">
-                </div>
-            </div>
-            
-            <!-- Status Info -->
+        <!-- Bottom Control Panel - Minimal -->
+        <div class="bottom-controls">
+            <button class="control-btn" id="connect-btn" onclick="connectCamera()">
+                Connect
+            </button>
+            <button class="control-btn active" id="stream-btn" onclick="toggleStream()">
+                Streaming
+            </button>
+            <div class="fps-display" id="fps-display">-- FPS</div>
             <div class="status-info">
-                <span id="status-left">Camera: <span id="camera-status">Initializing</span></span>
-                <span id="status-right">Last update: <span id="last-update">--</span></span>
+                <span>Camera: <span id="camera-status">Initializing</span></span>
+                <span>Last: <span id="last-update">--</span></span>
             </div>
         </div>
     </div>
@@ -553,6 +577,9 @@
                     connectCamera();
                 }
             });
+            
+            // Initialize slider values
+            updateSliderDisplays();
         });
 
         // Start the application
