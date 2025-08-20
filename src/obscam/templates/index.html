@@ -1,0 +1,1145 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ObsCam - Observatory CCTV Monitor</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%);
+            color: #fff;
+            min-height: 100vh;
+            overflow-x: hidden;
+        }
+        
+        .app-container {
+            display: flex;
+            flex-direction: column;
+            min-height: 100vh;
+            position: relative;
+        }
+        
+        /* Header */
+        .header {
+            background: rgba(0,0,0,0.2);
+            backdrop-filter: blur(10px);
+            padding: 10px 20px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-bottom: 1px solid rgba(255,255,255,0.1);
+            position: sticky;
+            top: 0;
+            z-index: 100;
+        }
+        
+        .header h1 {
+            font-size: 1.5rem;
+            font-weight: 600;
+            color: #fff;
+            margin: 0;
+        }
+        
+        .header-info {
+            display: flex;
+            align-items: center;
+            gap: 20px;
+            font-size: 0.9rem;
+        }
+        
+        .connection-status {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 4px 12px;
+            border-radius: 20px;
+            background: rgba(255,255,255,0.1);
+        }
+        
+        .status-indicator {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: #28a745;
+            animation: pulse 2s infinite;
+        }
+        
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+        
+        .status-indicator.error {
+            background: #dc3545;
+        }
+        
+        /* Main Feed Container - Standard Interface */
+        .feed-container {
+            flex: 1;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 10px;
+            position: relative;
+        }
+        
+        .image-wrapper {
+            width: 100%;
+            height: calc(100vh - 80px); /* Standard container size */
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            position: relative;
+        }
+        
+        .camera-image {
+            /* TARGET THE IMAGE ITSELF for 1080p scaling */
+            width: 85vw;  /* Image uses 85% of viewport width */
+            height: 75vh; /* Image uses 75% of viewport height */
+            
+            /* Keep aspect ratio while allowing larger size */
+            object-fit: contain;
+            border-radius: 8px;
+            box-shadow: 0 8px 32px rgba(0,0,0,0.3);
+            transition: opacity 0.3s ease;
+        }
+        
+        .placeholder {
+            width: 80%;
+            max-width: 800px;
+            aspect-ratio: 16/9;
+            background: rgba(255,255,255,0.1);
+            border: 2px dashed rgba(255,255,255,0.3);
+            border-radius: 12px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1.2rem;
+            color: rgba(255,255,255,0.7);
+        }
+        
+        /* Overlay Controls */
+        .controls-overlay {
+            position: fixed;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: rgba(0,0,0,0.7);
+            backdrop-filter: blur(10px);
+            border-radius: 50px;
+            padding: 15px 25px;
+            display: flex;
+            gap: 12px;
+            align-items: center;
+            z-index: 200;
+            border: 1px solid rgba(255,255,255,0.1);
+        }
+        
+        /* Mode Buttons */
+        .mode-buttons {
+            display: flex;
+            gap: 8px;
+            align-items: center;
+            padding: 0 15px;
+            border-left: 1px solid rgba(255,255,255,0.2);
+            border-right: 1px solid rgba(255,255,255,0.2);
+        }
+        
+        .mode-btn {
+            background: rgba(255,255,255,0.1);
+            color: #fff;
+            border: none;
+            padding: 8px 16px;
+            border-radius: 20px;
+            cursor: pointer;
+            font-size: 0.9rem;
+            font-weight: 500;
+            transition: all 0.3s ease;
+            position: relative;
+            overflow: hidden;
+        }
+        
+        .mode-btn:hover {
+            background: rgba(255,255,255,0.2);
+            transform: translateY(-1px);
+        }
+        
+        .mode-btn.active {
+            background: #007bff;
+            box-shadow: 0 0 20px rgba(0,123,255,0.5);
+        }
+        
+        .mode-btn.loading {
+            background: #ffc107;
+            animation: loading-pulse 1.5s infinite;
+        }
+        
+        @keyframes loading-pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.6; }
+        }
+        
+        .mode-btn.success {
+            background: #28a745;
+            animation: success-flash 0.6s ease;
+        }
+        
+        @keyframes success-flash {
+            0% { background: #28a745; }
+            50% { background: #34ce57; }
+            100% { background: #28a745; }
+        }
+        
+        /* Control Buttons */
+        .control-btn {
+            background: rgba(255,255,255,0.1);
+            color: #fff;
+            border: none;
+            padding: 10px;
+            border-radius: 50%;
+            cursor: pointer;
+            font-size: 1.1rem;
+            transition: all 0.3s ease;
+            width: 40px;
+            height: 40px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        
+        .control-btn:hover {
+            background: rgba(255,255,255,0.2);
+            transform: scale(1.1);
+        }
+        
+        .control-btn.active {
+            background: #dc3545;
+            animation: pulse 2s infinite;
+        }
+        
+        /* Status Display */
+        .status-display {
+            position: fixed;
+            top: 70px;
+            right: 20px;
+            background: rgba(0,0,0,0.7);
+            backdrop-filter: blur(10px);
+            border-radius: 12px;
+            padding: 15px 20px;
+            min-width: 250px;
+            z-index: 150;
+            border: 1px solid rgba(255,255,255,0.1);
+            transition: all 0.3s ease;
+        }
+        
+        .status-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 8px;
+            font-size: 0.9rem;
+        }
+        
+        .status-item:last-child {
+            margin-bottom: 0;
+        }
+        
+        .status-label {
+            color: rgba(255,255,255,0.7);
+        }
+        
+        .status-value {
+            color: #fff;
+            font-weight: 500;
+        }
+        
+        /* Settings Panel - Hidden by default */
+        .settings-panel {
+            position: fixed;
+            left: 20px;
+            top: 50%;
+            transform: translateY(-50%) translateX(-300px);
+            background: rgba(0,0,0,0.8);
+            backdrop-filter: blur(10px);
+            border-radius: 12px;
+            padding: 20px;
+            width: 280px;
+            z-index: 150;
+            border: 1px solid rgba(255,255,255,0.1);
+            transition: transform 0.3s ease;
+        }
+        
+        .settings-panel.open {
+            transform: translateY(-50%) translateX(0);
+        }
+        
+        .settings-toggle {
+            position: fixed;
+            left: 20px;
+            top: 50%;
+            transform: translateY(-50%);
+            background: rgba(0,0,0,0.7);
+            color: #fff;
+            border: none;
+            padding: 15px 8px;
+            border-radius: 0 12px 12px 0;
+            cursor: pointer;
+            z-index: 160;
+            transition: all 0.3s ease;
+        }
+        
+        .settings-toggle:hover {
+            background: rgba(0,0,0,0.9);
+            padding-right: 12px;
+        }
+        
+        /* Form Controls */
+        .form-group {
+            margin-bottom: 15px;
+        }
+        
+        .form-label {
+            display: block;
+            margin-bottom: 5px;
+            font-size: 0.9rem;
+            color: rgba(255,255,255,0.8);
+        }
+        
+        .form-control {
+            width: 100%;
+            background: rgba(255,255,255,0.1);
+            border: 1px solid rgba(255,255,255,0.2);
+            border-radius: 6px;
+            padding: 8px 12px;
+            color: #fff;
+            font-size: 0.9rem;
+        }
+        
+        .form-control:focus {
+            outline: none;
+            border-color: #007bff;
+            box-shadow: 0 0 0 2px rgba(0,123,255,0.25);
+        }
+        
+        .range-group {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        
+        .range-input {
+            flex: 1;
+        }
+        
+        .range-value {
+            min-width: 60px;
+            text-align: center;
+            font-family: monospace;
+            font-size: 0.8rem;
+            background: rgba(255,255,255,0.1);
+            padding: 4px 8px;
+            border-radius: 4px;
+        }
+        
+        /* Responsive Design - Mobile/Tablet Optimization */
+        @media (max-width: 768px) {
+            .header {
+                padding: 8px 15px;
+            }
+            
+            .header h1 {
+                font-size: 1.2rem;
+            }
+            
+            .header-info {
+                gap: 10px;
+                font-size: 0.8rem;
+            }
+            
+            /* Mobile: Revert to conservative image scaling for usability */
+            .feed-container {
+                padding: 10px;
+            }
+            
+            .image-wrapper {
+                width: 100%;
+                height: calc(100vh - 160px); /* More space for mobile controls */
+            }
+            
+            .camera-image {
+                /* Mobile: Use smaller, mobile-friendly image sizing */
+                width: 95%;
+                height: auto;
+                max-width: 100%;
+                max-height: 100%;
+                object-fit: contain;
+            }
+            
+            .controls-overlay {
+                bottom: 10px;
+                padding: 12px 20px;
+                flex-wrap: wrap;
+                max-width: calc(100% - 20px);
+            }
+            
+            .mode-buttons {
+                padding: 0 10px;
+                order: 2;
+                flex-basis: 100%;
+                justify-content: center;
+                border: none;
+                border-top: 1px solid rgba(255,255,255,0.2);
+                margin-top: 8px;
+                padding-top: 8px;
+            }
+            
+            .mode-btn {
+                padding: 6px 12px;
+                font-size: 0.8rem;
+            }
+            
+            .status-display {
+                position: static;
+                margin: 10px;
+                min-width: auto;
+            }
+            
+            .settings-panel {
+                width: calc(100% - 40px);
+                left: 20px;
+                top: auto;
+                bottom: 20px;
+                transform: translateY(100%);
+            }
+            
+            .settings-panel.open {
+                transform: translateY(0);
+            }
+            
+            .settings-toggle {
+                left: 50%;
+                transform: translateX(-50%);
+                top: auto;
+                bottom: 20px;
+                border-radius: 12px 12px 0 0;
+            }
+        }
+
+        
+        /* Accessibility */
+        @media (prefers-reduced-motion: reduce) {
+            *, *::before, *::after {
+                animation-duration: 0.01ms !important;
+                animation-iteration-count: 1 !important;
+                transition-duration: 0.01ms !important;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="app-container">
+        <!-- Header -->
+        <header class="header">
+            <h1>ObsCam Observatory Monitor</h1>
+            <div class="header-info">
+                <div class="connection-status">
+                    <div class="status-indicator" id="connection-indicator"></div>
+                    <span id="connection-text">Connecting...</span>
+                </div>
+                <div id="timestamp">--</div>
+            </div>
+        </header>
+        
+        <!-- Main Camera Feed -->
+        <main class="feed-container">
+            <div class="image-wrapper">
+                <div class="placeholder" id="camera-image">
+                    🔭 Observatory Camera Feed Loading...
+                </div>
+            </div>
+        </main>
+        
+        <!-- Overlay Controls -->
+        <div class="controls-overlay">
+            <!-- Connection Controls -->
+            <button class="control-btn" id="connect-btn" onclick="connectCamera()" title="Connect Camera">
+                🔌
+            </button>
+            
+            <button class="control-btn" id="refresh-btn" onclick="refreshImage()" title="Refresh Image">
+                🔄
+            </button>
+            
+            <!-- Mode Selection -->
+            <div class="mode-buttons">
+                <button class="mode-btn" id="auto-btn" onclick="captureImageAuto()" title="AUTO Mode - Adaptive exposure with low gain">
+                    AUTO
+                </button>
+                <button class="mode-btn" id="slewing-btn" onclick="captureImageSlewing()" title="SLEWING Mode - Max 500ms for real-time monitoring">
+                    SLEWING
+                </button>
+                <button class="mode-btn" id="manual-btn" onclick="toggleManualControls()" title="MANUAL Mode - Custom exposure/gain">
+                    MANUAL
+                </button>
+            </div>
+            
+            <!-- Manual Controls Panel (Hidden by default) -->
+            <div id="manual-controls" style="display: none; margin-top: 15px; padding: 15px; background: rgba(0,0,0,0.3); border-radius: 8px;">
+                <h4>Manual Settings</h4>
+                <div style="margin: 10px 0;">
+                    <label>Exposure (ms): <span id="exposure-value">100</span></label>
+                    <input type="range" id="exposure-slider" min="1" max="10000" value="100" 
+                           oninput="document.getElementById('exposure-value').textContent = this.value; updateManualSettings()">
+                </div>
+                <div style="margin: 10px 0;">
+                    <label>Gain: <span id="gain-value">250</span></label>
+                    <input type="range" id="gain-slider" min="50" max="800" value="250" 
+                           oninput="document.getElementById('gain-value').textContent = this.value; updateManualSettings()">
+                </div>
+                <button onclick="captureImageManual()" style="margin-top: 10px; padding: 8px 16px; background: #007bff; color: white; border: none; border-radius: 4px;">
+                    Capture with Manual Settings
+                </button>
+            </div>
+            
+            <!-- Stop All Modes Button -->
+            <button class="control-btn" id="stop-btn" onclick="stopCurrentMode()" title="Stop All Modes">
+                ⏹️
+            </button>
+        </div>
+        
+        <!-- Status Display -->
+        <div class="status-display">
+            <div class="status-item">
+                <span class="status-label">Camera Status:</span>
+                <span class="status-value" id="camera-status">Initializing</span>
+            </div>
+            <div class="status-item">
+                <span class="status-label">Current Mode:</span>
+                <span class="status-value" id="current-mode">--</span>
+            </div>
+            <div class="status-item">
+                <span class="status-label">Scene Type:</span>
+                <span class="status-value" id="scene-type">--</span>
+            </div>
+            <div class="status-item">
+                <span class="status-label">Refresh Rate:</span>
+                <span class="status-value" id="refresh-rate">--</span>
+            </div>
+            <div class="status-item">
+                <span class="status-label">Storage Used:</span>
+                <span class="status-value" id="storage-usage">--</span>
+            </div>
+        </div>
+        
+        <!-- Settings Panel -->
+        <button class="settings-toggle" onclick="toggleSettings()">⚙️</button>
+        <div class="settings-panel" id="settings-panel">
+            <h3 style="margin-bottom: 15px; color: #fff;">Camera Settings</h3>
+            
+            <div class="form-group">
+                <label class="form-label">Exposure</label>
+                <div class="range-group">
+                    <input type="range" class="form-control range-input" 
+                           id="exposure" min="1000" max="10000000" value="100000">
+                    <div class="range-value" id="exposure-display">100ms</div>
+                </div>
+                <select class="form-control" id="exposure-unit" onchange="convertExposureUnit()" 
+                        style="margin-top: 5px; width: auto;">
+                    <option value="us">Microseconds (μs)</option>
+                    <option value="ms" selected>Milliseconds (ms)</option>
+                    <option value="s">Seconds (s)</option>
+                </select>
+            </div>
+            
+            <div class="form-group">
+                <label class="form-label">Gain</label>
+                <div class="range-group">
+                    <input type="range" class="form-control range-input" 
+                           id="gain" min="0" max="600" value="150">
+                    <div class="range-value" id="gain-value">150</div>
+                </div>
+            </div>
+            
+            <button class="mode-btn" onclick="updateSettings()" style="width: 100%;">
+                Apply Settings
+            </button>
+        </div>
+    </div>
+
+    <script>
+        // Application State
+        let appState = {
+            // Mode Management
+            currentMode: null,              // 'auto', 'slewing', 'manual', or null (inactive)
+            modeInterval: null,             // Active mode's capture interval
+            modeEnabled: false,             // Whether any mode is currently active
+            
+            // Mode Settings
+            manualExposureMs: 100,         // Manual mode settings
+            manualGain: 250,
+            
+            // Legacy (keeping for compatibility during transition)
+            currentRefreshRate: 5000,
+            settingsOpen: false,
+            isConnected: false
+        };
+        
+        // Get the current host and use port 8000 for API calls
+        const API_BASE = `http://${window.location.hostname}:8000`;
+
+        // UI State Management
+        function setButtonLoading(buttonId, isLoading = true) {
+            const button = document.getElementById(buttonId);
+            if (!button) return;
+            
+            if (isLoading) {
+                button.classList.add('loading');
+                button.dataset.originalText = button.textContent;
+                // Don't change text for emoji buttons
+                if (!button.textContent.match(/[\u{1F300}-\u{1F9FF}]/u)) {
+                    button.textContent = 'Loading...';
+                }
+            } else {
+                button.classList.remove('loading');
+                if (button.dataset.originalText && !button.textContent.match(/[\u{1F300}-\u{1F9FF}]/u)) {
+                    button.textContent = button.dataset.originalText;
+                }
+            }
+        }
+        
+        function setButtonSuccess(buttonId, duration = 1000) {
+            const button = document.getElementById(buttonId);
+            if (!button) return;
+            
+            button.classList.add('success');
+            setTimeout(() => {
+                button.classList.remove('success');
+            }, duration);
+        }
+        
+        function setActiveModeButton(mode) {
+            // Remove active class from all mode buttons
+            document.querySelectorAll('.mode-btn').forEach(btn => {
+                btn.classList.remove('active');
+            });
+            
+            // Set active mode
+            const buttonMap = {
+                'auto': 'auto-btn',
+                'fast': 'fast-btn', 
+                'medium': 'medium-btn',
+                'full': 'full-btn'
+            };
+            
+            const activeButton = document.getElementById(buttonMap[mode]);
+            if (activeButton) {
+                activeButton.classList.add('active');
+            }
+        }
+        
+        function updateConnectionStatus(connected, message = '') {
+            const indicator = document.getElementById('connection-indicator');
+            const text = document.getElementById('connection-text');
+            const statusValue = document.getElementById('camera-status');
+            
+            appState.isConnected = connected;
+            
+            if (connected) {
+                indicator.classList.remove('error');
+                text.textContent = message || 'Connected';
+                statusValue.textContent = 'Connected';
+            } else {
+                indicator.classList.add('error');
+                text.textContent = message || 'Disconnected';
+                statusValue.textContent = 'Disconnected';
+            }
+        }
+        
+        function updateStatusDisplay(data) {
+            if (data.camera_model) {
+                document.getElementById('camera-status').textContent = `${data.camera_model} - ${data.status}`;
+            }
+            
+            if (data.capture_mode) {
+                document.getElementById('current-mode').textContent = data.capture_mode.toUpperCase();
+                appState.currentCaptureMode = data.capture_mode;
+                setActiveModeButton(data.capture_mode);
+            }
+            
+            if (data.scene_type) {
+                document.getElementById('scene-type').textContent = data.scene_type.toUpperCase();
+            }
+            
+            if (data.refresh_interval) {
+                appState.currentRefreshRate = data.refresh_interval;
+                document.getElementById('refresh-rate').textContent = `${data.refresh_interval}ms`;
+            }
+            
+            // Update storage information
+            if (data.storage_used_percent !== undefined) {
+                const storagePercent = Math.round(data.storage_used_percent);
+                const storageGB = data.storage_used_gb || 0;
+                const maxGB = data.storage_max_gb || 3;
+                document.getElementById('storage-usage').textContent = `${storagePercent}% (${storageGB.toFixed(2)}GB/${maxGB}GB)`;
+                
+                // Color code storage usage
+                const storageElement = document.getElementById('storage-usage');
+                if (storagePercent > 90) {
+                    storageElement.style.color = '#dc3545'; // Red
+                } else if (storagePercent > 75) {
+                    storageElement.style.color = '#ffc107'; // Yellow
+                } else {
+                    storageElement.style.color = '#28a745'; // Green
+                }
+            }
+            
+            // Update timestamp
+            if (data.timestamp) {
+                const time = new Date(data.timestamp * 1000).toLocaleTimeString();
+                document.getElementById('timestamp').textContent = time;
+            }
+        }
+
+        // Mode Management Functions
+        function stopCurrentMode() {
+            console.log(`Stopping current mode: ${appState.currentMode}`);
+            
+            // Clear any active capture interval
+            if (appState.modeInterval) {
+                clearInterval(appState.modeInterval);
+                appState.modeInterval = null;
+            }
+            
+            // Update state
+            appState.modeEnabled = false;
+            appState.currentMode = null;
+            
+            // Update UI - remove all active states
+            document.querySelectorAll('.mode-btn').forEach(btn => {
+                btn.classList.remove('active');
+            });
+            
+            updateConnectionStatus(true, 'All modes stopped');
+            document.getElementById('current-mode').textContent = 'STOPPED';
+        }
+        
+        async function activateMode(mode, settings = {}) {
+            console.log(`Activating mode: ${mode}`, settings);
+            
+            // Stop current mode first
+            if (appState.currentMode && appState.currentMode !== mode) {
+                stopCurrentMode();
+            }
+            
+            // If clicking same mode that's already active, toggle it off
+            if (appState.currentMode === mode && appState.modeEnabled) {
+                stopCurrentMode();
+                return;
+            }
+            
+            // Update state
+            appState.currentMode = mode;
+            appState.modeEnabled = true;
+            
+            // Update manual settings if provided
+            if (settings.exposureMs) appState.manualExposureMs = settings.exposureMs;
+            if (settings.gain) appState.manualGain = settings.gain;
+            
+            // Update UI
+            updateModeButtonStates(mode);
+            updateConnectionStatus(true, `${mode.toUpperCase()} mode activated`);
+            document.getElementById('current-mode').textContent = mode.toUpperCase();
+            
+            // Start continuous capture for this mode
+            startModeContinuousCapture(mode);
+        }
+        
+        function updateModeButtonStates(activeMode) {
+            // Clear all active states
+            document.querySelectorAll('.mode-btn').forEach(btn => {
+                btn.classList.remove('active');
+            });
+            
+            // Set active mode
+            const modeButtons = {
+                'auto': 'auto-btn',
+                'slewing': 'slewing-btn', 
+                'manual': 'manual-btn'
+            };
+            
+            const activeButton = document.getElementById(modeButtons[activeMode]);
+            if (activeButton) {
+                activeButton.classList.add('active');
+            }
+        }
+        
+        function startModeContinuousCapture(mode) {
+            // Clear any existing interval
+            if (appState.modeInterval) {
+                clearInterval(appState.modeInterval);
+            }
+            
+            // Get mode-specific settings
+            const modeConfig = getModeConfig(mode);
+            
+            // Immediate first capture
+            captureInMode(mode, modeConfig);
+            
+            // Set up continuous capture interval
+            appState.modeInterval = setInterval(() => {
+                if (appState.modeEnabled && appState.currentMode === mode) {
+                    captureInMode(mode, modeConfig);
+                }
+            }, modeConfig.interval);
+            
+            console.log(`Started continuous capture for ${mode} mode (${modeConfig.interval}ms interval)`);
+        }
+        
+        function getModeConfig(mode) {
+            const configs = {
+                'auto': {
+                    endpoint: '/api/capture/auto',
+                    interval: 1000,  // 1 second for auto mode
+                    description: 'AUTO adaptive capture'
+                },
+                'slewing': {
+                    endpoint: '/api/capture/slewing', 
+                    interval: 500,   // 0.5 second for slewing (real-time)
+                    description: 'SLEWING real-time capture'
+                },
+                'manual': {
+                    endpoint: `/api/capture/manual/${appState.manualExposureMs}/${appState.manualGain}`,
+                    interval: Math.max(1000, appState.manualExposureMs + 200), // Based on exposure time
+                    description: `MANUAL capture (${appState.manualExposureMs}ms, gain ${appState.manualGain})`
+                }
+            };
+            
+            return configs[mode] || configs['auto'];
+        }
+        
+        async function captureInMode(mode, config) {
+            try {
+                const response = await fetch(`${API_BASE}${config.endpoint}`);
+                const data = await response.json();
+                
+                if (data.status === 'success') {
+                    displayImage(data.image_url);
+                    updateStatusFromCapture(data);
+                } else {
+                    console.error(`${mode} capture failed:`, data.message);
+                    updateConnectionStatus(false, data.message || `${mode} capture failed`);
+                }
+                
+            } catch (error) {
+                console.error(`${mode} capture error:`, error);
+                updateConnectionStatus(false, `${mode} capture error`);
+            }
+        }
+        
+        function updateStatusFromCapture(data) {
+            // Update various status displays based on capture response
+            if (data.refresh_interval) {
+                document.getElementById('refresh-rate').textContent = `${data.refresh_interval}ms`;
+            }
+            
+            if (data.scene_type) {
+                document.getElementById('scene-type').textContent = data.scene_type.toUpperCase();
+            }
+            
+            if (data.timestamp) {
+                const time = new Date(data.timestamp * 1000).toLocaleTimeString();
+                document.getElementById('timestamp').textContent = time;
+            }
+        }
+
+        // API Functions
+        async function checkStatus() {
+            try {
+                const response = await fetch(`${API_BASE}/api/status`);
+                const data = await response.json();
+                
+                updateConnectionStatus(true, 'Connected');
+                updateStatusDisplay(data);
+                
+            } catch (error) {
+                updateConnectionStatus(false, 'API Error');
+                console.error('Status check failed:', error);
+            }
+        }
+
+        async function connectCamera() {
+            const buttonId = 'connect-btn';  // Assuming we add an ID
+            
+            try {
+                setButtonLoading('connect-btn', true);
+                updateConnectionStatus(false, 'Connecting...');
+                
+                const response = await fetch(`${API_BASE}/api/connect`);
+                const data = await response.json();
+                
+                if (data.status === 'connected') {
+                    updateConnectionStatus(true, 'Connected');
+                    setButtonSuccess('connect-btn');
+                    setTimeout(checkStatus, 1000);
+                } else {
+                    updateConnectionStatus(false, data.message || 'Connection failed');
+                }
+                
+            } catch (error) {
+                updateConnectionStatus(false, 'Connection error');
+                console.error('Connection failed:', error);
+            } finally {
+                setButtonLoading('connect-btn', false);
+            }
+        }
+
+        // New Mode Button Functions - Using Real Mode Management
+        async function captureImageAuto() {
+            await activateMode('auto');
+        }
+
+        async function captureImageSlewing() {
+            await activateMode('slewing');
+        }
+
+        async function captureImageManual() {
+            // Get current slider values
+            const exposureMs = document.getElementById('exposure-slider').value;
+            const gain = document.getElementById('gain-slider').value;
+            
+            // Activate manual mode with these settings
+            await activateMode('manual', { exposureMs: parseInt(exposureMs), gain: parseInt(gain) });
+        }
+
+        // Toggle manual controls visibility AND activate manual mode
+        function toggleManualControls() {
+            const controls = document.getElementById('manual-controls');
+            const isVisible = controls.style.display !== 'none';
+            
+            if (isVisible) {
+                // Hide controls and deactivate manual mode
+                controls.style.display = 'none';
+                if (appState.currentMode === 'manual') {
+                    stopCurrentMode();
+                }
+            } else {
+                // Show controls and activate manual mode with current slider values
+                controls.style.display = 'block';
+                captureImageManual(); // This will activate manual mode
+            }
+        }
+
+        // Update manual settings in real-time
+        function updateManualSettings() {
+            if (appState.currentMode === 'manual' && appState.modeEnabled) {
+                // If manual mode is active, update it with new settings
+                captureImageManual();
+            }
+        }
+
+        async function captureImageMode(endpoint, mode, description) {
+            const buttonId = `${mode}-btn`;
+            
+            try {
+                setButtonLoading(buttonId, true);
+                updateConnectionStatus(true, `${description}...`);
+                
+                const response = await fetch(`${API_BASE}${endpoint}`);
+                const data = await response.json();
+                
+                if (data.status === 'success') {
+                    displayImage(data.image_url);
+                    setButtonSuccess(buttonId);
+                    updateConnectionStatus(true, `${description} completed`);
+                    updateStatusDisplay(data);
+                    
+                    // Store active endpoint for auto-refresh
+                    appState.activeEndpoint = endpoint;
+                    
+                    // Update auto-refresh if enabled
+                    if (appState.autoRefreshEnabled) {
+                        restartAutoRefresh(endpoint);
+                    }
+                    
+                } else {
+                    updateConnectionStatus(false, data.message || 'Capture failed');
+                }
+                
+            } catch (error) {
+                updateConnectionStatus(false, 'Capture error');
+                console.error('Capture failed:', error);
+            } finally {
+                setButtonLoading(buttonId, false);
+            }
+        }
+
+        async function refreshImage() {
+            try {
+                setButtonLoading('refresh-btn', true);  // Assuming we add ID
+                
+                const response = await fetch(`${API_BASE}/api/image`);
+                const data = await response.json();
+                
+                if (data.status === 'success' && data.image_url) {
+                    displayImage(data.image_url);
+                    setButtonSuccess('refresh-btn');
+                }
+                
+                updateConnectionStatus(true, data.message || 'Image refreshed');
+                    
+            } catch (error) {
+                updateConnectionStatus(false, 'Refresh error');
+                console.error('Image refresh failed:', error);
+            } finally {
+                setButtonLoading('refresh-btn', false);
+            }
+        }
+
+        function displayImage(imageUrl) {
+            const imageContainer = document.getElementById('camera-image');
+            
+            // Add cache-busting parameter
+            const cacheBustedUrl = imageUrl + '?t=' + Date.now();
+            
+            // Smooth image transition
+            const existingImg = imageContainer.querySelector('img');
+            if (existingImg) {
+                const newImg = new Image();
+                newImg.onload = function() {
+                    imageContainer.innerHTML = `<img src="${cacheBustedUrl}" alt="Observatory Camera Feed" class="camera-image" />`;
+                };
+                newImg.onerror = function() {
+                    console.error('Failed to load image:', cacheBustedUrl);
+                };
+                newImg.src = cacheBustedUrl;
+            } else {
+                // First image load
+                imageContainer.innerHTML = `<img src="${cacheBustedUrl}" alt="Observatory Camera Feed" class="camera-image" />`;
+            }
+        }
+
+        // Legacy functions removed - mode system now handles continuous capture
+
+        // Settings Panel
+        function toggleSettings() {
+            const panel = document.getElementById('settings-panel');
+            appState.settingsOpen = !appState.settingsOpen;
+            
+            if (appState.settingsOpen) {
+                panel.classList.add('open');
+            } else {
+                panel.classList.remove('open');
+            }
+        }
+
+        async function updateSettings() {
+            try {
+                const exposure = document.getElementById('exposure').value;
+                const gain = document.getElementById('gain').value;
+                
+                updateConnectionStatus(true, 'Updating settings...');
+                
+                const response = await fetch(`${API_BASE}/api/settings`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        exposure: parseInt(exposure),
+                        gain: parseInt(gain)
+                    })
+                });
+                
+                const data = await response.json();
+                updateConnectionStatus(true, data.message || 'Settings updated');
+                
+            } catch (error) {
+                updateConnectionStatus(false, 'Settings update failed');
+                console.error('Settings update failed:', error);
+            }
+        }
+
+        // Exposure formatting functions
+        function formatExposure(microseconds) {
+            const us = parseInt(microseconds);
+            const unit = document.getElementById('exposure-unit').value;
+            
+            if (unit === 's') {
+                return (us / 1000000).toFixed(us >= 1000000 ? 1 : 3) + 's';
+            } else if (unit === 'ms') {
+                const ms = us / 1000;
+                return (ms >= 100 ? Math.round(ms) : ms.toFixed(1)) + 'ms';
+            } else {
+                return us.toLocaleString() + 'μs';
+            }
+        }
+        
+        function convertExposureUnit() {
+            updateExposureDisplay();
+        }
+        
+        function updateExposureDisplay() {
+            const value = document.getElementById('exposure').value;
+            document.getElementById('exposure-display').textContent = formatExposure(value);
+        }
+
+        // Event Listeners
+        document.addEventListener('DOMContentLoaded', function() {
+            // Exposure slider
+            document.getElementById('exposure').addEventListener('input', updateExposureDisplay);
+            
+            // Gain slider  
+            document.getElementById('gain').addEventListener('input', function() {
+                document.getElementById('gain-value').textContent = this.value;
+            });
+            
+            // Keyboard shortcuts
+            document.addEventListener('keydown', function(e) {
+                if (e.key === ' ') {
+                    e.preventDefault();
+                    captureImage();
+                } else if (e.key === 'r') {
+                    refreshImage();
+                } else if (e.key === 'a') {
+                    toggleAutoRefresh();
+                } else if (e.key === 's') {
+                    toggleSettings();
+                }
+            });
+            
+            // Close settings when clicking outside
+            document.addEventListener('click', function(e) {
+                const panel = document.getElementById('settings-panel');
+                const toggle = document.querySelector('.settings-toggle');
+                
+                if (appState.settingsOpen && !panel.contains(e.target) && !toggle.contains(e.target)) {
+                    toggleSettings();
+                }
+            });
+        });
+
+        // Initialize application
+        function initializeApp() {
+            updateExposureDisplay();
+            checkStatus();
+            
+            // Update status every 15 seconds when no mode is active
+            setInterval(() => {
+                if (!appState.modeEnabled) {
+                    checkStatus();
+                }
+            }, 15000);
+        }
+
+        // Start the application
+        initializeApp();
+    </script>
+</body>
+</html>
