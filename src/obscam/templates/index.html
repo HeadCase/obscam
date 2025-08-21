@@ -165,11 +165,7 @@
         }
 
         /* Master/Observer Status - Compact */
-        .master-status {
-            display: flex;
-            align-items: center;
-            gap: 6px;
-        }
+
 
         .master-indicator {
             display: flex;
@@ -371,10 +367,7 @@
                 justify-content: center;
             }
             
-            .master-status {
-                grid-row: 3;
-                justify-self: center;
-            }
+
 
             .connection-status {
                 grid-row: 3;
@@ -486,11 +479,7 @@
             </div>
             
             <!-- Master/Observer Status -->
-            <div class="master-status">
-                <div class="master-indicator" id="master-indicator">
-                    <span id="master-icon">👁️</span>
-                    <span id="master-text">Connecting...</span>
-                </div>
+
                 <button class="control-request-btn" id="control-request-btn" onclick="requestControl()" style="display: none;">
                     Request
                 </button>
@@ -514,17 +503,21 @@
         
         <!-- Minimal Bottom Status Bar -->
         <div class="bottom-controls">
-            <button class="control-btn" id="connect-btn" onclick="connectCamera()">
-                Connect
-            </button>
+
             <button class="control-btn active" id="stream-btn" onclick="toggleStream()">
                 Stream
+            </button>
+            <button class="control-btn" id="bg-start-btn" onclick="startBackgroundCapture()" title="Start background capture thread">
+                Start BG
+            </button>
+            <button class="control-btn" id="bg-stop-btn" onclick="stopBackgroundCapture()" title="Stop background capture thread">
+                Stop BG
             </button>
             <div class="fps-display" id="fps-display">-- FPS</div>
             <div class="status-info">
                 <span>Cam: <span id="camera-status">Init</span></span>
                 <span>Last: <span id="last-update">--</span></span>
-                <span>Master: <span id="master-ip" class="accent-blue">--</span></span>
+
                 <span>Sessions: <span id="session-count" class="accent-green">-</span></span>
             </div>
         </div>
@@ -710,10 +703,44 @@
         }
 
         // Initialize application
-        function initializeApp() {
+        // Fetch current settings from server and sync UI on load
+        async function syncSettingsOnLoad() {
+            try {
+                const response = await fetch(`${API_BASE}/api/frame-info`, { cache: 'no-cache' });
+                
+                if (response.ok) {
+                    const data = await response.json();
+                    if (data.current_settings) {
+                        console.log('Syncing settings from server:', data.current_settings);
+                        syncSettingsFromServer(data.current_settings);
+                    }
+                } else {
+                    console.log('Could not fetch current settings from server');
+                }
+                
+            } catch (error) {
+                console.error('Settings sync error:', error);
+            }
+        }
+
+        async function initializeApp() {
             initializeSliders();
+            
+            // Auto-start background capture (no Connect button needed)
+            await startBackgroundCapture();
+            
+            // Fetch and sync current settings from server
+            await syncSettingsOnLoad();
+            
+            // Auto-start streaming (if background capture is active)
+            setTimeout(() => {
+                if (!appState.streaming) {
+                    startStreaming();
+                }
+            }, 1000);
+            
+            // Initialize WebSocket for multi-client coordination (optional)
             initializeWebSocket();
-            checkStatus();
         }
 
         // WebSocket Connection Management
@@ -759,13 +786,12 @@
                     break;
                     
                 case 'session_update':
-                    updateMasterObserverUI(data.session_info);
+                    updateSessionCount(data.session_info);
                     break;
                     
                 case 'parameter_update':
-                    if (!appState.isMaster) {
-                        updateObserverSettings(data.parameters);
-                    }
+                    // Sync settings from other clients (no master restriction)
+                    syncSettingsFromServer(data.parameters);
                     break;
                     
                 case 'heartbeat_ack':
@@ -783,57 +809,12 @@
             }, 25000);
         }
 
-        function updateMasterObserverUI(sessionInfo) {
+        function updateSessionCount(sessionInfo) {
             appState.sessionInfo = sessionInfo;
-            
             document.getElementById('session-count').textContent = sessionInfo.total_sessions || 0;
-            
-            const masterIndicator = document.getElementById('master-indicator');
-            const masterIcon = document.getElementById('master-icon');
-            const masterText = document.getElementById('master-text');
-            const controlRequestBtn = document.getElementById('control-request-btn');
-            const masterIpDisplay = document.getElementById('master-ip');
-            
-            const exposureControlGroup = document.getElementById('exposure-control-group');
-            const gainControlGroup = document.getElementById('gain-control-group');
-            const wbRedControlGroup = document.getElementById('wb-r-control-group');
-            const wbBlueControlGroup = document.getElementById('wb-b-control-group');
-            
-            if (appState.isMaster) {
-                masterIndicator.classList.remove('observing');
-                masterIndicator.classList.add('controlling');
-                masterIcon.textContent = '🎛️';
-                masterText.textContent = `CONTROL`;
-                controlRequestBtn.style.display = 'none';
-                
-                // Enable all controls for master
-                exposureControlGroup.classList.remove('disabled');
-                gainControlGroup.classList.remove('disabled');
-                wbRedControlGroup.classList.remove('disabled');
-                wbBlueControlGroup.classList.remove('disabled');
-                
-            } else {
-                masterIndicator.classList.remove('controlling');
-                masterIndicator.classList.add('observing');
-                masterIcon.textContent = '👁️';
-                masterText.textContent = 'OBSERVE';
-                controlRequestBtn.style.display = 'inline-block';
-                
-                // Disable all controls for observers
-                exposureControlGroup.classList.add('disabled');
-                gainControlGroup.classList.add('disabled');
-                wbRedControlGroup.classList.add('disabled');
-                wbBlueControlGroup.classList.add('disabled');
-            }
-            
-            if (sessionInfo.master_ip) {
-                masterIpDisplay.textContent = sessionInfo.master_ip;
-            } else {
-                masterIpDisplay.textContent = '--';
-            }
         }
 
-        function updateObserverSettings(parameters) {
+        function syncSettingsFromServer(parameters) {
             if (parameters.exposure_ms !== undefined) {
                 // Find closest index for the exposure value
                 let closestIndex = 0;
@@ -907,16 +888,41 @@
             }
         }
 
-        function requestControl() {
-            if (appState.websocket && appState.websocket.readyState === WebSocket.OPEN) {
-                appState.websocket.send(JSON.stringify({
-                    type: 'request_master'
-                }));
+
+
+        async function updateCameraSettings() {
+            try {
+                const response = await fetch(`${API_BASE}/api/update-settings`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        exposure_ms: appState.exposure,
+                        gain: appState.gain,
+                        wb_r: appState.wb_r,
+                        wb_b: appState.wb_b
+                    })
+                });
+                
+                if (response.ok) {
+                    const data = await response.json();
+                    console.log('Settings updated successfully:', data.current_settings);
+                    
+                    // Broadcast via WebSocket for UI synchronization (if connected)
+                    broadcastParameterChange();
+                } else {
+                    console.error('Settings update failed:', response.status);
+                }
+                
+            } catch (error) {
+                console.error('Settings update error:', error);
             }
         }
 
         function broadcastParameterChange() {
-            if (appState.isMaster && appState.websocket && appState.websocket.readyState === WebSocket.OPEN) {
+            // Still use WebSocket for UI synchronization between clients
+            if (appState.websocket && appState.websocket.readyState === WebSocket.OPEN) {
                 appState.websocket.send(JSON.stringify({
                     type: 'parameter_change',
                     parameters: {
@@ -950,13 +956,29 @@
         
         async function checkStatus() {
             try {
-                const response = await fetch(`${API_BASE}/api/status`);
-                const data = await response.json();
+                // Check both camera status and frame info
+                const [statusResponse, frameResponse] = await Promise.all([
+                    fetch(`${API_BASE}/api/status`),
+                    fetch(`${API_BASE}/api/frame-info`).catch(() => null)
+                ]);
                 
-                if (data.status === 'connected') {
-                    updateConnectionStatus(true, 'OK');
+                const statusData = await statusResponse.json();
+                const frameData = frameResponse ? await frameResponse.json() : null;
+                
+                if (statusData.status === 'connected') {
+                    if (frameData && frameData.background_running) {
+                        updateConnectionStatus(true, 'Background Active');
+                    } else {
+                        updateConnectionStatus(true, 'Connected');
+                    }
                 } else {
-                    updateConnectionStatus(false, data.message || 'Error');
+                    updateConnectionStatus(false, statusData.message || 'Error');
+                }
+                
+                // Update frame info in status bar
+                if (frameData) {
+                    document.getElementById('camera-status').textContent = 
+                        frameData.background_running ? 'BG Active' : 'Manual';
                 }
                 
             } catch (error) {
@@ -975,7 +997,12 @@
                 
                 if (data.status === 'connected') {
                     updateConnectionStatus(true, 'Connected');
-                    setTimeout(startStreaming, 500);
+                    
+                    // Try to start background capture automatically
+                    setTimeout(async () => {
+                        await startBackgroundCapture();
+                        setTimeout(startStreaming, 500);
+                    }, 100);
                 } else {
                     updateConnectionStatus(false, data.message || 'Failed');
                 }
@@ -985,6 +1012,43 @@
                 console.error('Connection failed:', error);
             } finally {
                 document.getElementById('connect-btn').classList.remove('loading');
+            }
+        }
+
+        async function startBackgroundCapture() {
+            try {
+                const response = await fetch(`${API_BASE}/api/start-background`, { method: 'POST' });
+                const data = await response.json();
+                
+                if (data.status === 'success') {
+                    console.log('Background capture started');
+                    updateConnectionStatus(true, 'Background Active');
+                    document.getElementById('camera-status').textContent = 'BG Active';
+                    return true;
+                } else {
+                    console.error('Failed to start background capture');
+                    return false;
+                }
+            } catch (error) {
+                console.error('Background capture start error:', error);
+                return false;
+            }
+        }
+
+        async function stopBackgroundCapture() {
+            try {
+                const response = await fetch(`${API_BASE}/api/stop-background`, { method: 'POST' });
+                const data = await response.json();
+                
+                if (data.status === 'success') {
+                    console.log('Background capture stopped');
+                    updateConnectionStatus(true, 'Manual');
+                    document.getElementById('camera-status').textContent = 'Manual';
+                } else {
+                    console.error('Failed to stop background capture');
+                }
+            } catch (error) {
+                console.error('Background capture stop error:', error);
             }
         }
         
@@ -1030,17 +1094,28 @@
             document.getElementById('fps-display').textContent = '-- FPS';
         }
         
-        // Ultra-fast continuous capture loop
+        // Calculate intelligent polling interval based on exposure time
+        function getPollingInterval(exposureMs) {
+            if (exposureMs < 100) return 50;        // Fast: 50ms polling for <100ms exposures  
+            if (exposureMs < 1000) return 100;      // Medium: 100ms polling for <1s exposures
+            if (exposureMs < 5000) return 500;      // Slow: 500ms polling for <5s exposures  
+            return Math.min(exposureMs * 0.8, 10000); // Long: 80% of exposure time, max 10s
+        }
+
+        // Stateless frame polling loop with dynamic intervals - No session dependency!
         async function continuousCapture() {
             if (!appState.streaming) return;
             
             try {
-                let captureUrl = `${API_BASE}/api/capture-fast?exp=${appState.exposure}&gain=${appState.gain}&wb_r=${appState.wb_r}&wb_b=${appState.wb_b}`;
-                if (appState.sessionId) {
-                    captureUrl += `&session_id=${appState.sessionId}`;
-                }
+                // Primary: Use stateless latest-frame endpoint
+                let response = await fetch(`${API_BASE}/api/latest-frame`, { cache: 'no-cache' });
                 
-                const response = await fetch(captureUrl, { cache: 'no-cache' });
+                // Fallback: Try session-based capture if available
+                if (!response.ok && appState.sessionId) {
+                    console.log('Stateless frame failed, trying session-based fallback...');
+                    let captureUrl = `${API_BASE}/api/capture-fast?exp=${appState.exposure}&gain=${appState.gain}&wb_r=${appState.wb_r}&wb_b=${appState.wb_b}&session_id=${appState.sessionId}`;
+                    response = await fetch(captureUrl, { cache: 'no-cache' });
+                }
                 
                 if (response.ok) {
                     const blob = await response.blob();
@@ -1052,21 +1127,26 @@
                     setTimeout(() => URL.revokeObjectURL(imageUrl), 1000);
                     
                     updateFpsCounter();
+                    updateConnectionStatus(true, 'Streaming');
                     
                     const now = new Date();
                     document.getElementById('last-update').textContent = now.toLocaleTimeString().slice(0, -3);
                     
                 } else {
-                    console.error('Capture failed:', response.status, response.statusText);
+                    console.error('All capture methods failed:', response.status, response.statusText);
+                    updateConnectionStatus(false, 'Frame error');
                 }
                 
             } catch (error) {
                 console.error('Capture error:', error);
-                updateConnectionStatus(false, 'Capture error');
+                updateConnectionStatus(false, 'Network error');
             }
             
             if (appState.streaming) {
-                appState.streamInterval = setTimeout(continuousCapture, 10);
+                // Dynamic polling interval based on exposure time
+                const pollingInterval = getPollingInterval(appState.exposure);
+                console.log(`Next poll in ${pollingInterval}ms (exposure: ${appState.exposure}ms)`);
+                appState.streamInterval = setTimeout(continuousCapture, pollingInterval);
             }
         }
         
@@ -1084,38 +1164,30 @@
             }
         }
         
-        // Settings update handlers
+        // Settings update handlers - Now stateless!
         document.addEventListener('DOMContentLoaded', function() {
             // Exposure slider
             document.getElementById('exposure-slider').addEventListener('input', function() {
-                if (!appState.isMaster) return;
-                
                 updateSliderDisplays();
-                broadcastParameterChange();
+                updateCameraSettings(); // Direct API call, no session required
             });
             
             // Gain slider  
             document.getElementById('gain-slider').addEventListener('input', function() {
-                if (!appState.isMaster) return;
-                
                 updateSliderDisplays();
-                broadcastParameterChange();
+                updateCameraSettings(); // Direct API call, no session required
             });
 
             // White Balance Red slider
             document.getElementById('wb-r-slider').addEventListener('input', function() {
-                if (!appState.isMaster) return;
-                
                 updateSliderDisplays();
-                broadcastParameterChange();
+                updateCameraSettings(); // Direct API call, no session required
             });
 
             // White Balance Blue slider  
             document.getElementById('wb-b-slider').addEventListener('input', function() {
-                if (!appState.isMaster) return;
-                
                 updateSliderDisplays();
-                broadcastParameterChange();
+                updateCameraSettings(); // Direct API call, no session required
             });
             
             // Keyboard shortcuts
@@ -1123,10 +1195,6 @@
                 if (e.key === ' ') {
                     e.preventDefault();
                     toggleStream();
-                } else if (e.key === 'c') {
-                    connectCamera();
-                } else if (e.key === 'r' && !appState.isMaster) {
-                    requestControl();
                 }
             });
         });

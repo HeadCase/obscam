@@ -232,6 +232,167 @@ async def force_master(request: Request):
         raise HTTPException(status_code=500, detail=f"Force master failed: {e}")
 
 
+@fastapi_app.get("/api/latest-frame")
+async def get_latest_frame():
+    """Get the latest cached frame (stateless, no session required)."""
+    try:
+        if not camera.is_initialized:
+            raise HTTPException(status_code=400, detail="Camera not connected")
+
+        frame_bytes = camera.get_latest_frame()
+
+        if frame_bytes:
+            return Response(
+                content=frame_bytes,
+                media_type="image/jpeg",
+                headers={
+                    "Cache-Control": "no-cache, no-store, must-revalidate",
+                    "Pragma": "no-cache",
+                    "Expires": "0",
+                },
+            )
+        else:
+            raise HTTPException(status_code=503, detail="No frame available")
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Frame retrieval failed: {e}")
+
+
+@fastapi_app.post("/api/update-settings")
+async def update_settings(request: Request):
+    """Update camera settings (stateless, no session required)."""
+    try:
+        if not camera.is_initialized:
+            raise HTTPException(status_code=400, detail="Camera not connected")
+
+        data = await request.json()
+
+        # Validate and sanitize settings
+        valid_settings = {}
+        if "exposure_ms" in data:
+            exposure_ms = float(data["exposure_ms"])
+            if 0.1 <= exposure_ms <= 30000:  # 0.1ms to 30s range
+                valid_settings["exposure_ms"] = exposure_ms
+            else:
+                raise HTTPException(
+                    status_code=400, detail="Exposure must be between 0.1ms and 30s"
+                )
+
+        if "gain" in data:
+            gain = int(data["gain"])
+            if 0 <= gain <= 1000:  # Typical ZWO gain range
+                valid_settings["gain"] = gain
+            else:
+                raise HTTPException(
+                    status_code=400, detail="Gain must be between 0 and 1000"
+                )
+
+        if "wb_r" in data:
+            wb_r = int(data["wb_r"])
+            if 50 <= wb_r <= 150:  # White balance range
+                valid_settings["wb_r"] = wb_r
+            else:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Red white balance must be between 50 and 150",
+                )
+
+        if "wb_b" in data:
+            wb_b = int(data["wb_b"])
+            if 50 <= wb_b <= 150:  # White balance range
+                valid_settings["wb_b"] = wb_b
+            else:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Blue white balance must be between 50 and 150",
+                )
+
+        if not valid_settings:
+            raise HTTPException(status_code=400, detail="No valid settings provided")
+
+        success = camera.update_settings(**valid_settings)
+
+        if success:
+            current_settings = camera.get_current_settings()
+            return {
+                "status": "success",
+                "message": "Settings updated",
+                "current_settings": current_settings,
+                "timestamp": time.time(),
+            }
+        else:
+            raise HTTPException(
+                status_code=500, detail="Failed to update camera settings"
+            )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Settings update failed: {e}")
+
+
+@fastapi_app.get("/api/frame-info")
+async def get_frame_info():
+    """Get information about the latest frame and background capture status."""
+    try:
+        if not camera.is_initialized:
+            raise HTTPException(status_code=400, detail="Camera not connected")
+
+        frame_info = camera.get_frame_info()
+        current_settings = camera.get_current_settings()
+
+        return {
+            **frame_info,
+            "current_settings": current_settings,
+            "timestamp": time.time(),
+        }
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Frame info failed: {e}")
+
+
+@fastapi_app.post("/api/start-background")
+async def start_background_capture():
+    """Start background capture thread."""
+    try:
+        if not camera.is_initialized:
+            raise HTTPException(status_code=400, detail="Camera not connected")
+
+        success = camera.start_background_capture()
+
+        if success:
+            return {
+                "status": "success",
+                "message": "Background capture started",
+                "timestamp": time.time(),
+            }
+        else:
+            raise HTTPException(
+                status_code=500, detail="Failed to start background capture"
+            )
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Background start failed: {e}")
+
+
+@fastapi_app.post("/api/stop-background")
+async def stop_background_capture():
+    """Stop background capture thread."""
+    try:
+        camera.stop_background_capture()
+
+        return {
+            "status": "success",
+            "message": "Background capture stopped",
+            "timestamp": time.time(),
+        }
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Background stop failed: {e}")
+
+
 @fastapi_app.websocket("/ws/{client_ip}")
 async def websocket_endpoint(websocket: WebSocket, client_ip: str):
     """WebSocket endpoint for real-time client communication."""
@@ -353,6 +514,17 @@ def start_web_servers():
     print("Initializing camera...")
     if camera.connect():
         print("Camera connected successfully!")
+
+        # Start background capture for stateless frame delivery
+        print("Starting background capture...")
+        if camera.start_background_capture():
+            print("Background capture started - stateless frame access now available!")
+            print("New endpoints:")
+            print("  - Stateless frame: http://localhost:8000/api/latest-frame")
+            print("  - Update settings: POST http://localhost:8000/api/update-settings")
+            print("  - Frame info: http://localhost:8000/api/frame-info")
+        else:
+            print("Warning: Background capture failed to start")
     else:
         print("Warning: Failed to connect to camera. Use /api/connect to retry.")
 
