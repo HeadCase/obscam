@@ -135,13 +135,13 @@ To use robust logging in production:
    uv run obscam
 
 4. **Access logs:**
-   - Main logs: ~/obscam-logs/obscam.log
-   - Error logs: ~/obscam-logs/obscam-error.log  
-   - Debug logs: ~/obscam-logs/obscam-debug.log (debug mode only)
+   - Main logs: logs/obscam.log
+   - Error logs: logs/obscam-error.log  
+   - Debug logs: logs/obscam-debug.log (debug mode only)
 
 5. **Monitor logs remotely:**
-   - SSH: ssh pi@your-observatory "tail -f ~/obscam-logs/obscam.log"
-   - SCP: scp pi@your-observatory:~/obscam-logs/*.log ./local-logs/
+   - SSH: ssh pi@your-observatory "tail -f logs/obscam.log"
+   - SCP: scp pi@your-observatory:logs/*.log ./local-logs/
 
 6. **Log rotation:**
    - Logs automatically rotate at 10MB

@@ -10,7 +10,7 @@ def setup_logging(debug_mode: bool = False, log_dir_str: str | None = None) -> N
 
     Args:
         debug_mode: Enable verbose debug logging
-        log_dir_str: Custom log directory (defaults to ~/obscam-logs)
+        log_dir_str: Custom log directory (defaults to logs/)
     """
     # Remove default handler
     logger.remove()
@@ -19,7 +19,7 @@ def setup_logging(debug_mode: bool = False, log_dir_str: str | None = None) -> N
     if log_dir_str is None:
         # Default to home directory for easy access via SSH
         home_dir = Path.home()
-        log_dir = home_dir / "obscam-logs"
+        log_dir = home_dir / "logs"
     else:
         log_dir = Path(log_dir_str)
 
