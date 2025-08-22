@@ -164,48 +164,7 @@
             background: linear-gradient(135deg, #7aa2f7 0%, #7dcfff 100%);
         }
 
-        /* Master/Observer Status - Compact */
 
-
-        .master-indicator {
-            display: flex;
-            align-items: center;
-            gap: 4px;
-            padding: 3px 8px;
-            border-radius: 12px;
-            font-weight: 600;
-            font-size: 0.7rem;
-            white-space: nowrap;
-        }
-
-        .master-indicator.controlling {
-            background: linear-gradient(135deg, #7aa2f7 0%, #9ece6a 100%);
-            color: #1a1b26;
-        }
-
-        .master-indicator.observing {
-            background: rgba(65, 72, 104, 0.5);
-            color: #c0caf5;
-            border: 1px solid #414868;
-        }
-
-        .control-request-btn {
-            background: linear-gradient(135deg, #e0af68 0%, #ff9e64 100%);
-            color: #1a1b26;
-            border: none;
-            padding: 3px 8px;
-            border-radius: 10px;
-            cursor: pointer;
-            font-size: 0.65rem;
-            font-weight: 600;
-            transition: all 0.3s ease;
-            white-space: nowrap;
-        }
-
-        .control-request-btn:hover {
-            transform: translateY(-1px);
-            box-shadow: 0 4px 12px rgba(224, 175, 104, 0.4);
-        }
 
         /* Connection Status - Compact */
         .connection-status {
@@ -261,11 +220,11 @@
         }
         
         .camera-image {
-            /* MAXIMIZED BROWSER WINDOW - Minimal header overhead */
-            width: 100vw;
-            height: calc(100vh - 90px); /* Only header + bottom bar */
-            max-width: 100vw;
-            max-height: calc(100vh - 90px);
+            /* Container-relative sizing - proper flex behavior */
+            width: 100%;
+            height: 100%;
+            max-width: 100%;
+            max-height: 100%;
             object-fit: contain;
             border-radius: 0;
             box-shadow: none;
@@ -379,8 +338,9 @@
             }
             
             .camera-image {
-                height: calc(100vh - 120px); /* Account for stacked mobile header */
-                max-height: calc(100vh - 120px);
+                /* Mobile keeps container-relative sizing */
+                height: 100%;
+                max-height: 100%;
             }
             
             .bottom-controls {
@@ -392,8 +352,9 @@
         /* Extra large displays */
         @media (min-width: 1920px) {
             .camera-image {
-                height: calc(100vh - 80px);
-                max-height: calc(100vh - 80px);
+                /* Large displays also use container-relative sizing */
+                height: 100%;
+                max-height: 100%;
             }
         }
         
@@ -478,13 +439,6 @@
                 </div>
             </div>
             
-            <!-- Master/Observer Status -->
-
-                <button class="control-request-btn" id="control-request-btn" onclick="requestControl()" style="display: none;">
-                    Request
-                </button>
-            </div>
-            
             <!-- Connection Status -->
             <div class="connection-status">
                 <div class="status-indicator" id="connection-indicator"></div>
@@ -507,18 +461,13 @@
             <button class="control-btn active" id="stream-btn" onclick="toggleStream()">
                 Stream
             </button>
-            <button class="control-btn" id="bg-start-btn" onclick="startBackgroundCapture()" title="Start background capture thread">
-                Start BG
-            </button>
-            <button class="control-btn" id="bg-stop-btn" onclick="stopBackgroundCapture()" title="Stop background capture thread">
-                Stop BG
-            </button>
+
             <div class="fps-display" id="fps-display">-- FPS</div>
             <div class="status-info">
                 <span>Cam: <span id="camera-status">Init</span></span>
                 <span>Last: <span id="last-update">--</span></span>
 
-                <span>Sessions: <span id="session-count" class="accent-green">-</span></span>
+
             </div>
         </div>
     </div>
@@ -619,18 +568,13 @@
             wb_r: 75,      // Start at 75 (index 3 in red scale) - reduce magenta
             wb_b: 120,     // Start at 120 (index 7 in blue scale) - reduce magenta
             isConnected: false,
-            isMaster: false,
-            sessionId: null,
             streamInterval: null,
             frameCount: 0,
             lastFrameTime: Date.now(),
-            fps: 0,
-            websocket: null,
-            sessionInfo: {}
+            fps: 0
         };
         
         const API_BASE = `http://${window.location.hostname}:8000`;
-        const WS_BASE = `ws://${window.location.hostname}:8000`;
 
         // Initialize all sliders with detents
         function initializeSliders() {
@@ -739,156 +683,8 @@
                 }
             }, 1000);
             
-            // Initialize WebSocket for multi-client coordination (optional)
-            initializeWebSocket();
+
         }
-
-        // WebSocket Connection Management
-        function initializeWebSocket() {
-            const clientIP = 'browser-' + Math.random().toString(36).substr(2, 9);
-            const forceMaster = new URLSearchParams(window.location.search).get('force_master') === 'true';
-            const wsUrl = `${WS_BASE}/ws/${clientIP}${forceMaster ? '?force_master=true' : ''}`;
-            
-            appState.websocket = new WebSocket(wsUrl);
-            
-            appState.websocket.onopen = function(event) {
-                console.log('WebSocket connected');
-                startHeartbeat();
-            };
-            
-            appState.websocket.onmessage = function(event) {
-                const data = JSON.parse(event.data);
-                handleWebSocketMessage(data);
-            };
-            
-            appState.websocket.onclose = function(event) {
-                console.log('WebSocket disconnected');
-                setTimeout(initializeWebSocket, 5000);
-            };
-            
-            appState.websocket.onerror = function(error) {
-                console.error('WebSocket error:', error);
-            };
-        }
-
-        function handleWebSocketMessage(data) {
-            switch (data.type) {
-                case 'session_created':
-                    appState.sessionId = data.session_id;
-                    appState.isMaster = data.is_master;
-                    updateMasterObserverUI(data.session_info);
-                    
-                    setTimeout(() => {
-                        if (appState.isConnected) {
-                            startStreaming();
-                        }
-                    }, 1000);
-                    break;
-                    
-                case 'session_update':
-                    updateSessionCount(data.session_info);
-                    break;
-                    
-                case 'parameter_update':
-                    // Sync settings from other clients (no master restriction)
-                    syncSettingsFromServer(data.parameters);
-                    break;
-                    
-                case 'heartbeat_ack':
-                    break;
-            }
-        }
-
-        function startHeartbeat() {
-            setInterval(() => {
-                if (appState.websocket && appState.websocket.readyState === WebSocket.OPEN) {
-                    appState.websocket.send(JSON.stringify({
-                        type: 'heartbeat'
-                    }));
-                }
-            }, 25000);
-        }
-
-        function updateSessionCount(sessionInfo) {
-            appState.sessionInfo = sessionInfo;
-            document.getElementById('session-count').textContent = sessionInfo.total_sessions || 0;
-        }
-
-        function syncSettingsFromServer(parameters) {
-            if (parameters.exposure_ms !== undefined) {
-                // Find closest index for the exposure value
-                let closestIndex = 0;
-                let closestDiff = Math.abs(EXPOSURE_SCALE[0].value - parameters.exposure_ms);
-                
-                for (let i = 1; i < EXPOSURE_SCALE.length; i++) {
-                    const diff = Math.abs(EXPOSURE_SCALE[i].value - parameters.exposure_ms);
-                    if (diff < closestDiff) {
-                        closestDiff = diff;
-                        closestIndex = i;
-                    }
-                }
-                
-                document.getElementById('exposure-slider').value = closestIndex;
-                appState.exposure = parameters.exposure_ms;
-                document.getElementById('exposure-value').textContent = formatExposureValue(parameters.exposure_ms);
-            }
-            
-            if (parameters.gain !== undefined) {
-                // Find closest index for the gain value
-                let closestIndex = 0;
-                let closestDiff = Math.abs(GAIN_SCALE[0].value - parameters.gain);
-                
-                for (let i = 1; i < GAIN_SCALE.length; i++) {
-                    const diff = Math.abs(GAIN_SCALE[i].value - parameters.gain);
-                    if (diff < closestDiff) {
-                        closestDiff = diff;
-                        closestIndex = i;
-                    }
-                }
-                
-                document.getElementById('gain-slider').value = closestIndex;
-                appState.gain = parameters.gain;
-                document.getElementById('gain-value').textContent = parameters.gain;
-            }
-
-            if (parameters.wb_r !== undefined) {
-                // Find closest index for red WB value
-                let closestIndex = 0;
-                let closestDiff = Math.abs(WB_RED_SCALE[0].value - parameters.wb_r);
-                
-                for (let i = 1; i < WB_RED_SCALE.length; i++) {
-                    const diff = Math.abs(WB_RED_SCALE[i].value - parameters.wb_r);
-                    if (diff < closestDiff) {
-                        closestDiff = diff;
-                        closestIndex = i;
-                    }
-                }
-                
-                document.getElementById('wb-r-slider').value = closestIndex;
-                appState.wb_r = parameters.wb_r;
-                document.getElementById('wb-r-value').textContent = parameters.wb_r;
-            }
-
-            if (parameters.wb_b !== undefined) {
-                // Find closest index for blue WB value
-                let closestIndex = 0;
-                let closestDiff = Math.abs(WB_BLUE_SCALE[0].value - parameters.wb_b);
-                
-                for (let i = 1; i < WB_BLUE_SCALE.length; i++) {
-                    const diff = Math.abs(WB_BLUE_SCALE[i].value - parameters.wb_b);
-                    if (diff < closestDiff) {
-                        closestDiff = diff;
-                        closestIndex = i;
-                    }
-                }
-                
-                document.getElementById('wb-b-slider').value = closestIndex;
-                appState.wb_b = parameters.wb_b;
-                document.getElementById('wb-b-value').textContent = parameters.wb_b;
-            }
-        }
-
-
 
         async function updateCameraSettings() {
             try {
@@ -908,30 +704,12 @@
                 if (response.ok) {
                     const data = await response.json();
                     console.log('Settings updated successfully:', data.current_settings);
-                    
-                    // Broadcast via WebSocket for UI synchronization (if connected)
-                    broadcastParameterChange();
                 } else {
                     console.error('Settings update failed:', response.status);
                 }
                 
             } catch (error) {
                 console.error('Settings update error:', error);
-            }
-        }
-
-        function broadcastParameterChange() {
-            // Still use WebSocket for UI synchronization between clients
-            if (appState.websocket && appState.websocket.readyState === WebSocket.OPEN) {
-                appState.websocket.send(JSON.stringify({
-                    type: 'parameter_change',
-                    parameters: {
-                        exposure_ms: appState.exposure,
-                        gain: appState.gain,
-                        wb_r: appState.wb_r,
-                        wb_b: appState.wb_b
-                    }
-                }));
             }
         }
         
@@ -1107,15 +885,8 @@
             if (!appState.streaming) return;
             
             try {
-                // Primary: Use stateless latest-frame endpoint
+                // Use stateless latest-frame endpoint
                 let response = await fetch(`${API_BASE}/api/latest-frame`, { cache: 'no-cache' });
-                
-                // Fallback: Try session-based capture if available
-                if (!response.ok && appState.sessionId) {
-                    console.log('Stateless frame failed, trying session-based fallback...');
-                    let captureUrl = `${API_BASE}/api/capture-fast?exp=${appState.exposure}&gain=${appState.gain}&wb_r=${appState.wb_r}&wb_b=${appState.wb_b}&session_id=${appState.sessionId}`;
-                    response = await fetch(captureUrl, { cache: 'no-cache' });
-                }
                 
                 if (response.ok) {
                     const blob = await response.blob();
@@ -1130,10 +901,10 @@
                     updateConnectionStatus(true, 'Streaming');
                     
                     const now = new Date();
-                    document.getElementById('last-update').textContent = now.toLocaleTimeString().slice(0, -3);
+                    document.getElementById('last-update').textContent = now.toLocaleTimeString();
                     
                 } else {
-                    console.error('All capture methods failed:', response.status, response.statusText);
+                    console.error('Frame capture failed:', response.status, response.statusText);
                     updateConnectionStatus(false, 'Frame error');
                 }
                 
