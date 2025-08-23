@@ -466,8 +466,7 @@
             <div class="status-info">
                 <span>Cam: <span id="camera-status">Init</span></span>
                 <span>Last: <span id="last-update">--</span></span>
-
-
+                <span>Age: <span id="frame-age">--</span></span>
             </div>
         </div>
     </div>
@@ -571,7 +570,11 @@
             streamInterval: null,
             frameCount: 0,
             lastFrameTime: Date.now(),
-            fps: 0
+            fps: 0,
+            // Frame timestamp tracking for honest "Last" updates
+            lastKnownFrameTimestamp: null,
+            currentFrameAge: 0,
+            lastDisplayUpdate: Date.now()
         };
         
         const API_BASE = `http://${window.location.hostname}:8000`;
@@ -846,7 +849,7 @@
         }
         
         function startStreaming() {
-            if (appState.streaming || !appState.isConnected) return;
+            if (appState.streaming) return;
             
             appState.streaming = true;
             appState.frameCount = 0;
@@ -889,6 +892,19 @@
                 let response = await fetch(`${API_BASE}/api/latest-frame`, { cache: 'no-cache' });
                 
                 if (response.ok) {
+                    // Extract frame metadata from response headers
+                    const frameTimestamp = response.headers.get('X-Frame-Timestamp');
+                    const frameAgeSeconds = parseFloat(response.headers.get('X-Frame-Age-Seconds')) || 0;
+                    
+                    // Update frame age in app state (always)
+                    appState.currentFrameAge = frameAgeSeconds;
+                    
+                    // Determine if we should update the image display
+                    const isFirstFrame = appState.lastKnownFrameTimestamp === null;
+                    const isNewFrame = frameTimestamp !== appState.lastKnownFrameTimestamp;
+                    const shouldUpdateImage = isFirstFrame || isNewFrame;
+                    
+                    // Always update the image display and process the blob
                     const blob = await response.blob();
                     const imageUrl = URL.createObjectURL(blob);
                     
@@ -900,8 +916,25 @@
                     updateFpsCounter();
                     updateConnectionStatus(true, 'Streaming');
                     
-                    const now = new Date();
-                    document.getElementById('last-update').textContent = now.toLocaleTimeString();
+                    // HONEST "Last" update - only for genuinely new frames (not first frame)
+                    if (isNewFrame && !isFirstFrame) {
+                        const now = new Date();
+                        document.getElementById('last-update').textContent = now.toLocaleTimeString();
+                        console.log(`New frame received (age: ${frameAgeSeconds.toFixed(1)}s) - Last updated`);
+                    } else if (isFirstFrame) {
+                        const now = new Date();
+                        document.getElementById('last-update').textContent = now.toLocaleTimeString();
+                        console.log(`First frame loaded (age: ${frameAgeSeconds.toFixed(1)}s) - Last initialized`);
+                    } else {
+                        console.log(`Same frame (age: ${frameAgeSeconds.toFixed(1)}s) - Last not updated`);
+                    }
+                    
+                    // Update frame timestamp tracking
+                    appState.lastKnownFrameTimestamp = frameTimestamp;
+                    appState.lastDisplayUpdate = Date.now();
+                    
+                    // Always update frame age display
+                    updateFrameAgeDisplay();
                     
                 } else {
                     console.error('Frame capture failed:', response.status, response.statusText);
@@ -918,6 +951,40 @@
                 const pollingInterval = getPollingInterval(appState.exposure);
                 console.log(`Next poll in ${pollingInterval}ms (exposure: ${appState.exposure}ms)`);
                 appState.streamInterval = setTimeout(continuousCapture, pollingInterval);
+            }
+        }
+        
+        function updateFrameAgeDisplay() {
+            const frameAgeElement = document.getElementById('frame-age');
+            
+            if (appState.currentFrameAge <= 0) {
+                frameAgeElement.textContent = '--';
+                frameAgeElement.className = '';
+                return;
+            }
+            
+            // Format frame age appropriately
+            let ageText;
+            if (appState.currentFrameAge < 1) {
+                ageText = `${(appState.currentFrameAge * 1000).toFixed(0)}ms`;
+            } else if (appState.currentFrameAge < 60) {
+                ageText = `${appState.currentFrameAge.toFixed(1)}s`;
+            } else {
+                const minutes = Math.floor(appState.currentFrameAge / 60);
+                const seconds = Math.floor(appState.currentFrameAge % 60);
+                ageText = `${minutes}m${seconds}s`;
+            }
+            
+            frameAgeElement.textContent = ageText;
+            
+            // Add visual warnings for stale frames
+            const maxAcceptableAge = (appState.exposure / 1000) * 2; // 2x exposure time
+            if (appState.currentFrameAge > maxAcceptableAge) {
+                frameAgeElement.className = 'accent-red'; // Stale frame warning
+            } else if (appState.currentFrameAge > (appState.exposure / 1000)) {
+                frameAgeElement.className = 'accent-yellow'; // Aging frame
+            } else {
+                frameAgeElement.className = 'accent-green'; // Fresh frame
             }
         }
         
@@ -979,6 +1046,18 @@
                 checkStatus();
             }
         }, 30000);
+        
+        // Continuous frame age updates (every 1 second)
+        setInterval(() => {
+            if (appState.streaming && appState.lastKnownFrameTimestamp) {
+                // Calculate current frame age based on when it was captured
+                const frameTimestamp = parseFloat(appState.lastKnownFrameTimestamp);
+                if (frameTimestamp > 0) {
+                    appState.currentFrameAge = Date.now() / 1000 - frameTimestamp;
+                    updateFrameAgeDisplay();
+                }
+            }
+        }, 1000);
     </script>
 </body>
 </html>

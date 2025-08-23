@@ -85,8 +85,16 @@ async def get_latest_frame():
             raise HTTPException(status_code=400, detail="Camera not connected")
 
         frame_bytes = camera.get_latest_frame()
+        frame_info = camera.get_frame_info()
 
         if frame_bytes:
+            # Calculate frame age for honest timestamp reporting
+            current_time = time.time()
+            frame_timestamp = frame_info.get("timestamp", 0)
+            frame_age_seconds = (
+                current_time - frame_timestamp if frame_timestamp > 0 else 0
+            )
+
             return Response(
                 content=frame_bytes,
                 media_type="image/jpeg",
@@ -94,6 +102,8 @@ async def get_latest_frame():
                     "Cache-Control": "no-cache, no-store, must-revalidate",
                     "Pragma": "no-cache",
                     "Expires": "0",
+                    "X-Frame-Timestamp": str(frame_timestamp),
+                    "X-Frame-Age-Seconds": str(round(frame_age_seconds, 2)),
                 },
             )
         else:
