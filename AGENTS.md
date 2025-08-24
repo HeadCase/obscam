@@ -1,12 +1,14 @@
 # AGENTS.md - Coding Guidelines for obscam
 
 ## Build/Test Commands
+
 - **Install dependencies**: `uv add` or `uv sync`
-- **Run main application**: `uv run obscam` 
-- **Run python code with development environment using**: uv run 
+- **Run main application**: `uv run obscam`
+- **Run python code with development environment using**: uv run
 - **No test framework configured** - check with maintainer for test setup
 
 ## Code Style & Conventions
+
 - **Python version**: >=3.11 (specified in pyproject.toml)
 - **Type hints**: Use modern Python type annotations (e.g., `dict[str, int]`, `list[str]`)
 - **Imports**: Group stdlib, third-party, local imports with blank lines between groups
@@ -15,13 +17,15 @@
 - **Classes**: CamelCase class names, use type annotations for attributes
 
 ## Dependencies
+
 - Core: FastAPI, Flask
 - Dev: ipython for development/debugging
 - Build system: uv_build
 
 ## General Guidelines
+
 - This application's purpose to provide monitoring (CCTV-style) for my remote
-  astrophotography observatory 
+  astrophotography observatory
 - I access my observatory and all its functions remotely via Wireguard
 - The camera used for monitoring is pointed at my telescope, with a view of the
   observatory roof which rolls on and off at my instruction
@@ -31,12 +35,12 @@
   roof is closed
 
 ## Pi-Specific Design Principles
+
 1. REUSE over CREATE - Use existing Flask/FastAPI threads
 2. MEMORY over DISK - Keep state in RAM, not databases
 3. CLIENT over SERVER - Push complexity to desktop browsers
 4. SIMPLE over FEATURE-RICH - Observatory needs reliability, not features
 5. GRACEFUL DEGRADATION - Lower quality beats service failure
-
 
 <!-- ## Architecture Notes -->
 <!-- - Camera control via ZWO ASI SDK bindings -->
