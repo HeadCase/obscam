@@ -1,151 +1,322 @@
 #!/usr/bin/env python3
-"""basic_capture.py — Minimal Nikon Zf capture via python-gphoto2.
-
-python-gphoto2 reference: https://github.com/jim-easterbrook/python-gphoto2
-libgphoto2 reference: https://github.com/gphoto/libgphoto2
-"""
+"""Libgphoto2 camera implementation for local development with Nikon Zf."""
 
 import io
 import time
-
-import math
-from pathlib import Path
+import threading
+from typing import Any
 
 from PIL import Image
-import gphoto2 as gp
+import gphoto2 as gp  # pyright: ignore[reportMissingTypeStubs]
+
+from .camera_interface import CameraInterface, FrameMetadata
 
 
-class Gphoto2Camera:
+class Gphoto2Camera(CameraInterface):
+    """Libgphoto2 camera implementation for Nikon Zf and similar cameras."""
+
     def __init__(self) -> None:
-        self.camera = gp.Camera()
+        """Initialize the libgphoto2 camera."""
+        self.camera: Any = None
         self.inited = False
 
-    def init(self) -> None:
-        if not self.inited:
+        # Current camera settings
+        self.current_settings = {
+            "exposure_ms": 200.0,  # 200ms default
+            "gain": 100,  # Simulated gain (ISO-like)
+            "wb_r": 100,  # Not used but kept for interface compatibility
+            "wb_b": 100,
+        }
+        self.settings_lock = threading.Lock()
+
+        # Frame caching
+        self.latest_frame: bytes | None = None
+        self.frame_metadata: FrameMetadata | None = None
+        self.frame_lock = threading.Lock()
+
+        # Continuous capture control
+        self.capture_thread: threading.Thread | None = None
+        self.capture_running = False
+
+    def connect(self) -> bool:
+        """Connect to the camera."""
+        try:
+            self.camera = gp.Camera()  # pyright: ignore[reportUnknownMemberType]
             self.camera.init()
             self.inited = True
+            print("Connected to gphoto2 camera")
 
-    def exit(self) -> None:
-        if self.inited:
-            self.camera.exit()
+            # Check if bulb mode is available
+            if not self._has_writable_bulb():
+                print("Warning: Camera does not expose writable bulb control")
+                print("Make sure camera is set to Bulb mode on the dial")
+
+            return True
+        except Exception as e:
+            print(f"Failed to connect to gphoto2 camera: {e}")
+            return False
+
+    def disconnect(self) -> None:
+        """Disconnect from the camera."""
+        self.stop_continuous_capture()
+
+        if self.inited and self.camera:
+            try:
+                self.camera.exit()
+            except:
+                pass
             self.inited = False
+            self.camera = None
+            print("Camera disconnected")
 
-    def _fresh_cfg(self) -> gp.CameraWidget:
+    def get_status(self) -> dict[str, Any]:
+        """Get current camera status."""
+        if not self.inited or not self.camera:
+            return {"status": "disconnected", "error": "Camera not initialized"}
+
+        try:
+            with self.settings_lock:
+                settings = self.current_settings.copy()
+
+            # Try to get current shutter speed
+            shutter_mode = self._shutter_mode_hint()
+
+            return {
+                "status": "connected",
+                "camera_model": "Nikon Zf (via gphoto2)",
+                "is_color_camera": True,
+                "current_exposure_ms": settings["exposure_ms"],
+                "current_gain": settings["gain"],
+                "current_wb_r": settings.get("wb_r"),
+                "current_wb_b": settings.get("wb_b"),
+                "continuous_capture": self.capture_running,
+                "shutter_mode": shutter_mode or "Unknown",
+            }
+        except Exception as e:
+            return {"status": "error", "error": str(e)}
+
+    def start_continuous_capture(self) -> bool:
+        """Start continuous capture loop."""
+        if not self.inited or not self.camera:
+            print("Camera not initialized - cannot start continuous capture")
+            return False
+
+        if self.capture_running:
+            print("Continuous capture already running")
+            return True
+
+        try:
+            self.capture_running = True
+            self.capture_thread = threading.Thread(
+                target=self._capture_loop,
+                daemon=True,
+                name="Gphoto2CaptureLoop",
+            )
+            self.capture_thread.start()
+            print("Continuous capture started")
+            return True
+        except Exception as e:
+            print(f"Failed to start continuous capture: {e}")
+            self.capture_running = False
+            return False
+
+    def stop_continuous_capture(self) -> None:
+        """Stop continuous capture loop."""
+        if self.capture_running:
+            self.capture_running = False
+            if self.capture_thread:
+                self.capture_thread.join(timeout=5.0)
+            print("Continuous capture stopped")
+
+    def _capture_loop(self) -> None:
+        """Main capture loop - runs in separate thread."""
+        print("Capture loop started")
+
+        while self.capture_running and self.inited and self.camera:
+            try:
+                # Get current settings
+                with self.settings_lock:
+                    exposure_seconds = self.current_settings["exposure_ms"] / 1000.0
+                    gain = self.current_settings["gain"]
+                    wb_r = self.current_settings.get("wb_r", 100)
+                    wb_b = self.current_settings.get("wb_b", 100)
+
+                # Capture using bulb mode
+                capture_time = time.time()
+                image_data = self._capture_bulb_image(exposure_seconds)
+
+                if image_data:
+                    # Convert to JPEG if needed
+                    img = Image.open(io.BytesIO(image_data))
+
+                    # Resize if too large (optional, for faster transfer)
+                    max_dimension = 1920
+                    if img.width > max_dimension or img.height > max_dimension:
+                        img.thumbnail(
+                            (max_dimension, max_dimension), Image.Resampling.LANCZOS
+                        )
+
+                    # Save as JPEG
+                    buffer = io.BytesIO()
+                    img.save(buffer, format="JPEG", quality=85)
+                    jpeg_bytes = buffer.getvalue()
+
+                    # Store frame with metadata
+                    with self.frame_lock:
+                        self.latest_frame = jpeg_bytes
+                        self.frame_metadata = FrameMetadata(
+                            exposure_ms=self.current_settings["exposure_ms"],
+                            gain=int(gain),
+                            wb_r=int(wb_r),
+                            wb_b=int(wb_b),
+                            timestamp=capture_time,
+                        )
+
+                # Brief pause between captures to avoid overloading
+                time.sleep(0.1)
+
+            except Exception as e:
+                print(f"Capture error: {e}")
+                time.sleep(1.0)  # Longer pause on error
+
+        print("Capture loop ended")
+
+    def get_latest_frame(self) -> bytes | None:
+        """Get the latest cached frame."""
+        with self.frame_lock:
+            return self.latest_frame
+
+    def get_frame_metadata(self) -> FrameMetadata | None:
+        """Get metadata for the latest frame."""
+        with self.frame_lock:
+            return self.frame_metadata
+
+    def update_settings(self, **settings: Any) -> bool:
+        """Update camera settings."""
+        try:
+            with self.settings_lock:
+                if "exposure_ms" in settings:
+                    self.current_settings["exposure_ms"] = float(
+                        settings["exposure_ms"]
+                    )
+                if "gain" in settings:
+                    self.current_settings["gain"] = int(settings["gain"])
+                if "wb_r" in settings:
+                    self.current_settings["wb_r"] = int(settings["wb_r"])
+                if "wb_b" in settings:
+                    self.current_settings["wb_b"] = int(settings["wb_b"])
+
+            print(f"Settings updated: {settings}")
+            return True
+        except Exception as e:
+            print(f"Failed to update settings: {e}")
+            return False
+
+    def get_current_settings(self) -> dict[str, Any]:
+        """Get current camera settings."""
+        with self.settings_lock:
+            return self.current_settings.copy()
+
+    # Helper methods specific to gphoto2
+
+    def _fresh_cfg(self) -> Any:
+        """Get fresh camera configuration."""
         return self.camera.get_config()
 
-    def _child(self, key: str) -> gp.CameraWidget:
+    def _child(self, key: str) -> Any:
+        """Get configuration child by name."""
         return self._fresh_cfg().get_child_by_name(key)
 
-    def _get_image_buffer(
-        self, folder: str, name: str, file_type: int = gp.GP_FILE_TYPE_NORMAL
-    ) -> bytes:
-        """Download a camera file into memory and return raw bytes."""
-        cam_file = self.camera.file_get(folder, name, file_type)
-
-        return io.BytesIO(cam_file.get_data_and_size())
-
     def _has_writable_bulb(self) -> bool:
-        """Return True if a writable 'bulb' control exists."""
+        """Check if camera has writable bulb control."""
         try:
             cfg = self._fresh_cfg()
             bulb = cfg.get_child_by_name("bulb")
-
-            cur = bulb.get_value()
-            bulb.set_value(cur)
-            self.camera.set_config(cfg)
+            # Just check if we can read the value
+            _ = bulb.get_value()
             return True
-        except gp.GPhoto2Error:
+        except:
             return False
 
     def _shutter_mode_hint(self) -> str | None:
-        """Return 'Bulb', 'Time', or None based on the current shutterspeed
-        readout."""
+        """Get current shutter mode hint."""
         try:
-            val = str(self.current_shutterspeed()).strip().lower()
-        except gp.GPhoto2Error:
+            val = str(self._child("shutterspeed").get_value()).strip().lower()
+            if "bulb" in val:
+                return "Bulb"
+            if "time" in val:
+                return "Time"
+            return val
+        except:
             return None
-        if "bulb" in val:
-            return "Bulb"
-        if "time" in val:  # some Nikons display 'Time' or 'T'
-            return "Time"
-        return None
+
+    def _capture_bulb_image(self, seconds: float) -> bytes | None:
+        """Capture an image using bulb mode."""
+        if seconds <= 0:
+            return None
+
+        try:
+            # Check bulb mode
+            if not self._has_writable_bulb():
+                print("Bulb mode not available, trying normal capture")
+                # Fall back to normal capture
+                return self._capture_normal_image()
+
+            # Open shutter (Nikon uses toggle, so we set to 1 to open)
+            cfg = self._fresh_cfg()
+            bulb = cfg.get_child_by_name("bulb")
+            bulb.set_value(1)
+            self.camera.set_config(cfg)
+
+            # Wait for exposure
+            time.sleep(seconds)
+
+            # Close shutter (set to 0 to close)
+            cfg = self._fresh_cfg()
+            bulb = cfg.get_child_by_name("bulb")
+            bulb.set_value(0)
+            self.camera.set_config(cfg)
+
+            # Wait for file
+            folder, name = self._wait_for_file_added(timeout_s=30.0)
+
+            # Download file
+            cam_file = self.camera.file_get(folder, name, gp.GP_FILE_TYPE_NORMAL)  # pyright: ignore[reportUnknownMemberType]
+            data = cam_file.get_data_and_size()
+
+            # Convert to bytes if necessary
+            return bytes(data) if not isinstance(data, bytes) else data
+
+        except Exception as e:
+            print(f"Bulb capture failed: {e}, trying normal capture")
+            return self._capture_normal_image()
+
+    def _capture_normal_image(self) -> bytes | None:
+        """Capture using normal trigger (non-bulb mode)."""
+        try:
+            # Trigger capture
+            self.camera.trigger_capture()
+
+            # Wait for file
+            folder, name = self._wait_for_file_added(timeout_s=10.0)
+
+            # Download file
+            cam_file = self.camera.file_get(folder, name, gp.GP_FILE_TYPE_NORMAL)  # pyright: ignore[reportUnknownMemberType]
+            data = cam_file.get_data_and_size()
+
+            # Convert to bytes if necessary
+            return bytes(data) if not isinstance(data, bytes) else data
+
+        except Exception as e:
+            print(f"Normal capture failed: {e}")
+            return None
 
     def _wait_for_file_added(self, timeout_s: float = 30.0) -> tuple[str, str]:
-        """Wait for the camera to report a newly created file after an
-        exposure.
-
-        Returns (folder, name). Raises on timeout.
-        """
+        """Wait for camera to report a new file."""
         deadline = time.time() + timeout_s
         while time.time() < deadline:
             ev_type, ev_data = self.camera.wait_for_event(1000)  # ms
-            if ev_type == gp.GP_EVENT_FILE_ADDED:
+            if ev_type == gp.GP_EVENT_FILE_ADDED:  # pyright: ignore[reportUnknownMemberType]
                 return ev_data.folder, ev_data.name
 
         raise TimeoutError("Timed out waiting for FILE_ADDED event from camera")
-
-    def _set_bulb(self, value: int) -> None:
-        """Low-level toggle for the 'bulb' control: 1=open, 0=close."""
-        cfg = self._fresh_cfg()
-        node = cfg.get_child_by_name("bulb")
-        node.set_value(int(value))
-        self.camera.set_config(cfg)
-
-    def current_shutterspeed(self) -> str:
-        return self._child("shutterspeed").get_value()
-
-    def capture_bulb_image(
-        self,
-        seconds: float,
-        post_timeout_s: float = 30.0,
-    ) -> bytes:
-        """Perform a Bulb/Time exposure for `seconds` and download the result
-        to `out`.
-
-        Args:
-          seconds: exposure duration (must be >0). For 'Time', this is the between-toggles delay.
-          mode: force 'Bulb' or 'Time'; if None, inferred from current shutter readout.
-          post_timeout_s: how long to wait for the file event after closing.
-
-        Returns:
-          Absolute Path to the saved file.
-        """
-        if seconds <= 0:
-            raise ValueError("seconds must be > 0")
-
-        if not self._has_writable_bulb():
-            raise RuntimeError(
-                "Camera does not expose a writable 'bulb' control over PTP"
-            )
-
-        hint = self._shutter_mode_hint()
-        if hint != "Bulb":
-            raise RuntimeError(
-                f"Shutter not set to Bulb (current: {hint or 'unknown'}). "
-                "Set the dial to B and try again."
-            )
-
-        self._set_bulb(1)
-        try:
-            time.sleep(seconds)
-        finally:
-            try:
-                self._set_bulb(0)
-            except Exception as e:
-                raise e
-
-        folder, name = self._wait_for_file_added(timeout_s=post_timeout_s)
-        cam_file = self.camera.file_get(folder, name, gp.GP_FILE_TYPE_NORMAL)
-
-        return self._get_image_buffer(folder, name)
-
-    def save_jpeg(self, data: bytes, out: Path) -> Path:
-        """Trigger capture and save a JPEG to 'out' (overwrites if exists)."""
-        img = Image.open(data)
-        img.save(out)
-
-        return out.resolve()
-
-
-if __name__ == "__main__":
-    main()

@@ -1,29 +1,22 @@
 import os
 import sys
 from pathlib import Path
+
 from loguru import logger
+from obscam.constants import PROJECT_ROOT
 
 
-def setup_logging(debug_mode: bool = False, log_dir_str: str | None = None) -> None:
-    """
-    Configure loguru for ObsCam with Pi-optimized settings.
+def setup_logging(
+    debug_mode: bool = False, log_dir: Path = PROJECT_ROOT / "logs"
+) -> None:
+    """Configure loguru for ObsCam with Pi-optimized settings.
 
     Args:
         debug_mode: Enable verbose debug logging
         log_dir_str: Custom log directory (defaults to logs/)
     """
-    # Remove default handler
     logger.remove()
 
-    # Determine log directory
-    if log_dir_str is None:
-        # Default to home directory for easy access via SSH
-        home_dir = Path.home()
-        log_dir = home_dir / "logs"
-    else:
-        log_dir = Path(log_dir_str)
-
-    # Create log directory if it doesn't exist
     log_dir.mkdir(exist_ok=True)
 
     # Console logging with colors (INFO level for production)
@@ -79,8 +72,7 @@ def setup_logging(debug_mode: bool = False, log_dir_str: str | None = None) -> N
 
 
 def get_logger(name: str) -> "logger":
-    """
-    Get a logger instance with structured context.
+    """Get a logger instance with structured context.
 
     Args:
         name: Module name (e.g., 'camera', 'session_manager', 'web')
@@ -92,8 +84,7 @@ def get_logger(name: str) -> "logger":
 
 
 def log_performance(func_name: str, duration_ms: float, **kwargs) -> None:
-    """
-    Log performance metrics for critical operations.
+    """Log performance metrics for critical operations.
 
     Args:
         func_name: Name of the function being measured
@@ -109,8 +100,7 @@ def log_performance(func_name: str, duration_ms: float, **kwargs) -> None:
 
 
 def log_camera_event(event_type: str, **kwargs) -> None:
-    """
-    Log camera-specific events with structured data.
+    """Log camera-specific events with structured data.
 
     Args:
         event_type: Type of event ('connection', 'capture', 'usb_recovery', etc.)
@@ -120,8 +110,7 @@ def log_camera_event(event_type: str, **kwargs) -> None:
 
 
 def log_session_event(event_type: str, session_id: str, **kwargs) -> None:
-    """
-    Log session management events.
+    """Log session management events.
 
     Args:
         event_type: Type of event ('created', 'expired', 'master_transfer', etc.)
@@ -137,8 +126,7 @@ def log_session_event(event_type: str, session_id: str, **kwargs) -> None:
 
 
 def log_websocket_event(event_type: str, **kwargs) -> None:
-    """
-    Log WebSocket events for connection debugging.
+    """Log WebSocket events for connection debugging.
 
     Args:
         event_type: Type of event ('connect', 'disconnect', 'error', 'broadcast')

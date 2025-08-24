@@ -7,7 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
 from flask import Flask, render_template
 
-from .camera import get_camera
+from .camera_factory import get_camera
 
 
 # Flask app for serving web pages
@@ -81,16 +81,19 @@ async def connect_camera():
 async def get_latest_frame():
     """Get the latest cached frame (stateless, no session required)."""
     try:
-        if not camera.is_initialized:
+        status = camera.get_status()
+        if status.get("status") != "connected":
             raise HTTPException(status_code=400, detail="Camera not connected")
 
         frame_bytes = camera.get_latest_frame()
-        frame_info = camera.get_frame_info()
+        frame_metadata = camera.get_frame_metadata()
 
         if frame_bytes:
             # Calculate frame age for honest timestamp reporting
             current_time = time.time()
-            frame_timestamp = frame_info.get("timestamp", 0)
+            frame_timestamp = (
+                frame_metadata.get("timestamp", 0) if frame_metadata else 0
+            )
             frame_age_seconds = (
                 current_time - frame_timestamp if frame_timestamp > 0 else 0
             )
@@ -119,7 +122,8 @@ async def get_latest_frame():
 async def update_settings(request: Request):
     """Update camera settings (stateless, no session required)."""
     try:
-        if not camera.is_initialized:
+        status = camera.get_status()
+        if status.get("status") != "connected":
             raise HTTPException(status_code=400, detail="Camera not connected")
 
         data = await request.json()
@@ -190,16 +194,18 @@ async def update_settings(request: Request):
 
 @fastapi_app.get("/api/frame-info")
 async def get_frame_info():
-    """Get information about the latest frame and background capture status."""
+    """Get information about the latest frame and continuous capture status."""
     try:
-        if not camera.is_initialized:
+        status = camera.get_status()
+        if status.get("status") != "connected":
             raise HTTPException(status_code=400, detail="Camera not connected")
 
-        frame_info = camera.get_frame_info()
+        frame_metadata = camera.get_frame_metadata()
         current_settings = camera.get_current_settings()
 
         return {
-            **frame_info,
+            "has_frame": frame_metadata is not None,
+            "frame_metadata": frame_metadata,
             "current_settings": current_settings,
             "timestamp": time.time(),
         }
@@ -209,48 +215,53 @@ async def get_frame_info():
 
 
 @fastapi_app.post("/api/start-background")
-async def start_background_capture():
-    """Start background capture thread."""
+async def start_continuous_capture():
+    """Start continuous capture thread."""
     try:
-        if not camera.is_initialized:
+        status = camera.get_status()
+        if status.get("status") != "connected":
             raise HTTPException(status_code=400, detail="Camera not connected")
 
-        success = camera.start_background_capture()
+        success = camera.start_continuous_capture()
 
         if success:
             return {
                 "status": "success",
-                "message": "Background capture started",
+                "message": "Continuous capture started",
                 "timestamp": time.time(),
             }
         else:
             raise HTTPException(
-                status_code=500, detail="Failed to start background capture"
+                status_code=500, detail="Failed to start continuous capture"
             )
 
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Background start failed: {e}")
+        raise HTTPException(
+            status_code=500, detail=f"Continuous capture start failed: {e}"
+        )
 
 
 @fastapi_app.post("/api/stop-background")
-async def stop_background_capture():
-    """Stop background capture thread."""
+async def stop_continuous_capture():
+    """Stop continuous capture thread."""
     try:
-        camera.stop_background_capture()
+        camera.stop_continuous_capture()
 
         return {
             "status": "success",
-            "message": "Background capture stopped",
+            "message": "Continuous capture stopped",
             "timestamp": time.time(),
         }
 
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Background stop failed: {e}")
+        raise HTTPException(
+            status_code=500, detail=f"Continuous capture stop failed: {e}"
+        )
 
 
-def run_flask():
+def run_flask(port: int = 5000):
     """Run Flask app in a separate thread."""
-    flask_app.run(host="0.0.0.0", port=5000, debug=False, use_reloader=False)
+    flask_app.run(host="0.0.0.0", port=port, debug=False, use_reloader=False)
 
 
 def run_fastapi():
@@ -258,28 +269,30 @@ def run_fastapi():
     uvicorn.run(fastapi_app, host="0.0.0.0", port=8000, log_level="info")
 
 
-def start_web_servers():
+def start_web_servers(flask_port=5000, fastapi_port=8000):
     """Start both Flask and FastAPI servers."""
     # Connect to camera on startup
     print("Initializing camera...")
     if camera.connect():
         print("Camera connected successfully!")
 
-        # Start background capture for stateless frame delivery
-        print("Starting background capture...")
-        if camera.start_background_capture():
-            print("Background capture started - stateless frame access now available!")
+        # Start continuous capture for stateless frame delivery
+        print("Starting continuous capture...")
+        if camera.start_continuous_capture():
+            print("Continuous capture started - stateless frame access now available!")
             print("New endpoints:")
             print("  - Stateless frame: http://localhost:8000/api/latest-frame")
             print("  - Update settings: POST http://localhost:8000/api/update-settings")
             print("  - Frame info: http://localhost:8000/api/frame-info")
         else:
-            print("Warning: Background capture failed to start")
+            print("Warning: Continuous capture failed to start")
     else:
         print("Warning: Failed to connect to camera. Use /api/connect to retry.")
 
     # Start Flask in a separate thread
-    flask_thread = threading.Thread(target=run_flask, daemon=True)
+    flask_thread = threading.Thread(
+        target=run_flask, kwargs={"port": flask_port}, daemon=True
+    )
     flask_thread.start()
 
     # Start FastAPI in the main thread

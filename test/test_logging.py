@@ -4,6 +4,8 @@
 import tempfile
 from pathlib import Path
 
+from obscam.constants import PROJECT_ROOT
+
 
 def test_logging_configuration():
     """Test the logging configuration and output."""
@@ -12,7 +14,7 @@ def test_logging_configuration():
 
     # Create a temporary directory for logs
     with tempfile.TemporaryDirectory() as temp_dir:
-        temp_log_dir = Path(temp_dir) / "test_logs"
+        temp_log_dir = PROJECT_ROOT / "test_logs"
 
         try:
             # Import and setup logging with custom directory
@@ -24,7 +26,7 @@ def test_logging_configuration():
                 log_websocket_event,
             )
 
-            setup_logging(debug_mode=True, log_dir_str=str(temp_log_dir))
+            setup_logging(debug_mode=True, log_dir=temp_log_dir)
 
             print("✓ Logging setup successful")
             print(f"  Log directory: {temp_log_dir}")
