@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Camera backend service - owns continuous capture entirely."""
+"""Backend service coordinator for camera system."""
 
 import time
 from pathlib import Path
@@ -78,6 +78,23 @@ class CameraBackendService:
                 log_camera_event("settings_applied", settings=cached_settings)
             else:
                 logger.warning("Failed to apply some cached settings")
+
+        # Load cached frame into buffer for immediate display
+        cached_frame = self.frame_cache.load_cached_frame()
+        if cached_frame:
+            # Create minimal metadata for cached frame
+            cached_settings = self.camera.get_current_settings()
+            cached_metadata = {
+                **cached_settings,
+                "timestamp": time.time(),
+                "capture_duration_ms": 0.0,  # Unknown for cached frame
+                "cached": True,  # Mark as cached frame
+            }
+            self.frame_buffer.update_frame(cached_frame, cached_metadata)
+            logger.info(
+                "Cached frame loaded into buffer for immediate display",
+                frame_size=len(cached_frame),
+            )
 
         # Start continuous capture loop
         if not self.capture_loop.start():
@@ -259,15 +276,18 @@ class CameraBackendService:
     def shutdown_gracefully(self) -> None:
         """Graceful shutdown with final settings save."""
         if self._started:
-            logger.info("Performing graceful shutdown")
+            logger.info("Performing graceful shutdown of backend service")
 
             # Save current settings synchronously before shutdown
             try:
                 current_settings = self.camera.get_current_settings()
                 self.settings_manager.save_settings_sync(current_settings)
+                logger.info("Settings saved successfully during shutdown")
             except Exception as e:
                 logger.error("Failed to save settings during shutdown", error=str(e))
 
             # Stop the backend
             self.stop_backend()
-            logger.info("Graceful shutdown completed")
+            logger.info("Backend service graceful shutdown completed")
+        else:
+            logger.info("Backend service already stopped")

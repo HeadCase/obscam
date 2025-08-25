@@ -85,7 +85,7 @@
         .camera-feed {
             width: 100vw;
             height: calc(100vh - 120px); /* Account for header+footer */
-            object-fit: cover; /* Fill viewport, may crop */
+            object-fit: contain; /* Preserve aspect ratio, show full image */
         }
     </style>
 </head>
@@ -108,7 +108,8 @@
                            x-model="controls.exposure.index"
                            :min="0" 
                            :max="controls.exposure.scale.length - 1"
-                           @input="debounceSettingsUpdate()">
+                           @input="updateControlValues()"
+                           @change="updateCameraSettings()">
                 </div>
                 
                 <!-- Gain Control -->
@@ -122,7 +123,8 @@
                            x-model="controls.gain.index"
                            :min="0" 
                            :max="controls.gain.scale.length - 1"
-                           @input="debounceSettingsUpdate()">
+                           @input="updateControlValues()"
+                           @change="updateCameraSettings()">
                 </div>
                 
                 <!-- White Balance Red -->
@@ -136,7 +138,8 @@
                            x-model="controls.wb_r.index"
                            :min="0" 
                            :max="controls.wb_r.scale.length - 1"
-                           @input="debounceSettingsUpdate()">
+                           @input="updateControlValues()"
+                           @change="updateCameraSettings()">
                 </div>
                 
                 <!-- White Balance Blue -->
@@ -150,7 +153,8 @@
                            x-model="controls.wb_b.index"
                            :min="0" 
                            :max="controls.wb_b.scale.length - 1"
-                           @input="debounceSettingsUpdate()">
+                           @input="updateControlValues()"
+                           @change="updateCameraSettings()">
                 </div>
             </div>
             
@@ -229,7 +233,6 @@
                 
                 // Internal state
                 eventSource: null,
-                settingsUpdateTimeout: null,
                 
                 init() {
                     console.log('ObsCam initializing...');
@@ -378,15 +381,7 @@
                     return ms + 'ms';
                 },
                 
-                debounceSettingsUpdate() {
-                    this.updateControlValues();
-                    
-                    // Debounce settings API calls
-                    clearTimeout(this.settingsUpdateTimeout);
-                    this.settingsUpdateTimeout = setTimeout(() => {
-                        this.updateCameraSettings();
-                    }, 250);
-                },
+
                 
                 async updateCameraSettings() {
                     try {

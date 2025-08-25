@@ -9,7 +9,7 @@ from typing import Any
 from PIL import Image
 import gphoto2 as gp  # pyright: ignore[reportMissingTypeStubs]
 
-from obscam.camera.camera_interface import CameraInterface, FrameMetadata
+from obscam.camera.camera_interface import CameraInterface
 
 
 class Gphoto2Camera(CameraInterface):
@@ -21,11 +21,12 @@ class Gphoto2Camera(CameraInterface):
         self.inited = False
 
         # Current camera settings
-        self.current_settings: FrameMetadata = {
+        self.current_settings: dict[str, Any] = {
             "exposure_ms": 200.0,
             "gain": 100,
             "wb_r": 100,
             "wb_b": 100,
+            "image_format": "color",  # Default to color for DSLR
             "timestamp": time.time(),
         }
         self.settings_lock = threading.Lock()
@@ -77,6 +78,7 @@ class Gphoto2Camera(CameraInterface):
                 "is_color_camera": True,
                 "current_exposure_ms": settings["exposure_ms"],
                 "current_gain": settings["gain"],
+                "image_format": settings.get("image_format", "color"),
                 "shutter_mode": shutter_mode or "Unknown",
             }
         except Exception as e:
@@ -131,6 +133,11 @@ class Gphoto2Camera(CameraInterface):
                     self.current_settings["wb_r"] = int(settings["wb_r"])
                 if "wb_b" in settings:
                     self.current_settings["wb_b"] = int(settings["wb_b"])
+                if "image_format" in settings:
+                    # Note: libgphoto2 always outputs color, this is for metadata only
+                    format_value = str(settings["image_format"]).lower()
+                    if format_value in ["mono", "color"]:
+                        self.current_settings["image_format"] = format_value
 
             # Apply settings to camera hardware via gphoto2
             cfg = self._fresh_cfg()
@@ -222,6 +229,12 @@ class Gphoto2Camera(CameraInterface):
                 "max": 150,
                 "type": "int",
             },  # White balance (metadata only)
+            "image_format": {
+                "options": ["color"],
+                "type": "enum",
+                "default": "color",
+                "notes": "DSLR always outputs color JPEG",
+            },
             "camera_type": "Nikon DSLR",
             "notes": "White balance values stored for metadata; use camera menu for actual WB presets",
         }

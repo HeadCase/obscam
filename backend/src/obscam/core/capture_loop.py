@@ -52,8 +52,9 @@ class ContinuousCaptureLoop:
         return True
 
     def stop(self) -> None:
-        """Stop the continuous capture loop."""
+        """Stop the continuous capture loop gracefully."""
         if self.running:
+            logger.info("Stopping capture loop...")
             self.running = False
             # Signal worker thread to stop
             try:
@@ -63,6 +64,10 @@ class ContinuousCaptureLoop:
 
             if self.capture_thread:
                 self.capture_thread.join(timeout=2.0)
+                if self.capture_thread.is_alive():
+                    logger.warning("Capture thread did not stop cleanly within timeout")
+                else:
+                    logger.info("Capture thread stopped successfully")
 
             log_camera_event("capture_loop_stopped")
 
@@ -135,9 +140,10 @@ class ContinuousCaptureLoop:
                 frame_bytes = self.camera.capture_frame()
                 capture_duration = (time.time() - start_time) * 1000  # ms
 
+                # Get current settings for adaptive sleep calculation
+                settings = self.camera.get_current_settings()
+
                 if frame_bytes:
-                    # Get current settings for metadata
-                    settings = self.camera.get_current_settings()
                     metadata = {
                         **settings,
                         "timestamp": time.time(),
@@ -181,8 +187,16 @@ class ContinuousCaptureLoop:
                     error_count = 0
                     total_capture_time = 0.0
 
-                # Brief pause between captures
-                time.sleep(0.1)
+                # Adaptive sleep based on exposure time with 100ms minimum for MJPEG stability
+                if settings:
+                    current_exposure_ms = settings.get("exposure_ms", 200)
+                    sleep_time = self._calculate_adaptive_sleep(
+                        capture_duration, current_exposure_ms
+                    )
+                    time.sleep(sleep_time)
+                else:
+                    # Fallback to shorter fixed sleep if no settings available
+                    time.sleep(0.05)
 
             except Exception as e:
                 error_count += 1
@@ -202,3 +216,44 @@ class ContinuousCaptureLoop:
                     time.sleep(1.0)
 
         logger.info("Capture loop thread ended", final_frame_count=frame_count)
+
+    def _calculate_adaptive_sleep(
+        self, capture_duration_ms: float, exposure_ms: float
+    ) -> float:
+        """Calculate adaptive sleep time based on exposure and capture performance.
+
+        Implements 100ms minimum exposure floor for MJPEG stability while allowing
+        optimal performance for longer exposures.
+        """
+        # 100ms minimum exposure for stable MJPEG performance (10 FPS max)
+        min_exposure_ms = 100.0
+
+        if exposure_ms < min_exposure_ms:
+            # Fast exposures are limited to practical MJPEG frame rate
+            target_interval_ms = min_exposure_ms
+        else:
+            # Normal/long exposures with minimal overhead (10% buffer minimum)
+            target_interval_ms = max(exposure_ms * 1.1, 50.0)
+
+        # Calculate required sleep time
+        sleep_ms = max(10.0, target_interval_ms - capture_duration_ms)
+
+        # Convert to seconds and log occasionally for debugging
+        sleep_seconds = sleep_ms / 1000.0
+
+        # Debug log every 50 frames to track adaptive behavior
+        if hasattr(self, "_sleep_debug_counter"):
+            self._sleep_debug_counter += 1
+        else:
+            self._sleep_debug_counter = 1
+
+        if self._sleep_debug_counter % 50 == 0:
+            logger.debug(
+                "Adaptive sleep calculation",
+                exposure_ms=exposure_ms,
+                capture_ms=round(capture_duration_ms, 1),
+                sleep_ms=round(sleep_ms, 1),
+                target_fps=round(1000.0 / target_interval_ms, 1),
+            )
+
+        return sleep_seconds

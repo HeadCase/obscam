@@ -3,6 +3,7 @@
 import time
 import asyncio
 import json
+import signal
 from collections import deque
 import uvicorn
 from fastapi import FastAPI, Request, HTTPException
@@ -32,14 +33,31 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Initialize backend service
-backend = get_backend_service()
+# Backend service - will be initialized in start_server after logging is configured
+from typing import Optional
+from obscam.core.backend_service import CameraBackendService
+
+backend: Optional[CameraBackendService] = None
+
 
 # Global state for MJPEG streaming and SSE
 new_frame_event = asyncio.Event()
 settings_version = 0
 settings_applied_event = asyncio.Event()
 frame_times = deque(maxlen=120)
+
+# Shutdown event for graceful termination
+shutdown_event = asyncio.Event()
+
+
+@app.on_event("shutdown")
+async def shutdown():
+    """Cleanup on application shutdown."""
+    logger.info("FastAPI shutdown event triggered")
+    shutdown_event.set()
+    # Give a moment for streaming connections to close
+    await asyncio.sleep(0.5)
+    logger.info("FastAPI shutdown cleanup completed")
 
 
 # Wire frame notification callback
@@ -51,8 +69,7 @@ def _on_new_frame():
     frame_times.append(time.time())
 
 
-# Connect frame buffer callback
-backend.frame_buffer.on_new_frame = _on_new_frame
+# Frame buffer callback will be connected in start_server after backend is initialized
 
 
 # Template routes (replacing Flask)
@@ -197,6 +214,16 @@ async def update_settings(request: Request):
                     detail="Blue white balance must be between 50 and 150",
                 )
 
+        if "image_format" in data:
+            image_format = str(data["image_format"]).lower()
+            if image_format in ["mono", "color"]:
+                valid_settings["image_format"] = image_format
+            else:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Image format must be 'mono' or 'color'",
+                )
+
         if not valid_settings:
             raise HTTPException(status_code=400, detail="No valid settings provided")
 
@@ -251,12 +278,14 @@ async def mjpeg_stream():
     boundary = "frame"
 
     async def generate_stream():
-        while True:
+        while not shutdown_event.is_set():
             try:
                 # Wait for new frame (or timeout for heartbeat)
-                await asyncio.wait_for(new_frame_event.wait(), timeout=2.0)
+                await asyncio.wait_for(new_frame_event.wait(), timeout=1.0)
             except asyncio.TimeoutError:
-                # Send heartbeat to keep connection alive
+                # Check for shutdown during timeout
+                if shutdown_event.is_set():
+                    break
                 continue
 
             # Get latest frame
@@ -276,6 +305,8 @@ async def mjpeg_stream():
             )
 
             yield frame_data
+
+        logger.debug("MJPEG stream ending due to shutdown")
 
     return StreamingResponse(
         generate_stream(),
@@ -315,15 +346,18 @@ async def telemetry_sse():
 
         yield f"event: snapshot\ndata: {json.dumps(initial_payload)}\n\n"
 
-        while True:
+        while not shutdown_event.is_set():
             try:
-                # Wait for new frame or settings change
+                # Wait for new frame or settings change with shorter timeout
                 tasks = [
                     asyncio.create_task(
-                        asyncio.wait_for(new_frame_event.wait(), timeout=5.0)
+                        asyncio.wait_for(new_frame_event.wait(), timeout=2.0)
                     ),
                     asyncio.create_task(
-                        asyncio.wait_for(settings_applied_event.wait(), timeout=5.0)
+                        asyncio.wait_for(settings_applied_event.wait(), timeout=2.0)
+                    ),
+                    asyncio.create_task(
+                        asyncio.wait_for(shutdown_event.wait(), timeout=2.0)
                     ),
                 ]
 
@@ -335,7 +369,14 @@ async def telemetry_sse():
                 for task in pending:
                     task.cancel()
 
+                # Check if shutdown was triggered
+                if shutdown_event.is_set():
+                    break
+
             except asyncio.TimeoutError:
+                # Check for shutdown during timeout
+                if shutdown_event.is_set():
+                    break
                 # Send periodic heartbeat
                 status = backend.get_status()
                 yield f"event: heartbeat\ndata: {json.dumps({'status': status.get('backend_service', 'unknown')})}\n\n"
@@ -356,6 +397,8 @@ async def telemetry_sse():
             }
 
             yield f"event: frame\ndata: {json.dumps(payload)}\n\n"
+
+        logger.debug("SSE telemetry stream ending due to shutdown")
 
     return StreamingResponse(
         generate_telemetry(),
@@ -426,6 +469,11 @@ async def update_settings_v2(request: Request):
             if 50 <= wb_b <= 150:
                 valid_settings["wb_b"] = wb_b
 
+        if "image_format" in data:
+            image_format = str(data["image_format"]).lower()
+            if image_format in ["mono", "color"]:
+                valid_settings["image_format"] = image_format
+
         if not valid_settings:
             raise HTTPException(status_code=400, detail="No valid settings provided")
 
@@ -457,12 +505,53 @@ async def update_settings_v2(request: Request):
 
 
 def run_server(port: int = 8000):
-    """Run the FastAPI server."""
-    uvicorn.run(app, host="0.0.0.0", port=port, log_level="info")
+    """Run the FastAPI server with proper shutdown handling."""
+    # Simple uvicorn configuration
+    config = uvicorn.Config(
+        app,
+        host="0.0.0.0",
+        port=port,
+        log_level="info",
+        timeout_keep_alive=2,  # Shorter keepalive for faster shutdown
+    )
+    server = uvicorn.Server(config)
+
+    # Override signal handlers to set shutdown event
+    original_sigint = signal.getsignal(signal.SIGINT)
+    original_sigterm = signal.getsignal(signal.SIGTERM)
+
+    def handle_signal(signum, frame):
+        """Handle shutdown signal."""
+        logger.info(f"Received signal {signum}, setting shutdown flag...")
+        shutdown_event.set()
+        # Call original handler
+        if signum == signal.SIGINT and callable(original_sigint):
+            original_sigint(signum, frame)
+        elif signum == signal.SIGTERM and callable(original_sigterm):
+            original_sigterm(signum, frame)
+
+    signal.signal(signal.SIGINT, handle_signal)
+    signal.signal(signal.SIGTERM, handle_signal)
+
+    try:
+        server.run()
+    except KeyboardInterrupt:
+        logger.info("Server interrupted by user")
+    finally:
+        # Ensure shutdown event is set
+        shutdown_event.set()
 
 
 def start_server():
-    """Start the web server with backend service."""
+    """Start the web server with backend service and graceful shutdown."""
+    global backend
+
+    # Initialize backend AFTER logging is configured
+    if backend is None:
+        backend = get_backend_service()
+        # Connect frame buffer callback
+        backend.frame_buffer.on_new_frame = _on_new_frame
+
     logger.info("Starting backend service...")
     if backend.start_backend():
         logger.info("Backend service started successfully!")
@@ -478,6 +567,7 @@ def start_server():
 
     # Start the server
     logger.info("Starting web server on port 8000...")
+    logger.info("Press Ctrl+C to shut down gracefully")
 
     try:
         run_server()
@@ -485,6 +575,7 @@ def start_server():
         # Graceful shutdown
         logger.info("Shutting down backend service...")
         backend.shutdown_gracefully()
+        logger.info("Shutdown complete. Goodbye!")
 
 
 if __name__ == "__main__":

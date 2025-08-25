@@ -144,6 +144,16 @@ async def update_settings(request: Request):
                     detail="Blue white balance must be between 50 and 150",
                 )
 
+        if "image_format" in data:
+            image_format = str(data["image_format"]).lower()
+            if image_format in ["mono", "color"]:
+                valid_settings["image_format"] = image_format
+            else:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Image format must be 'mono' or 'color'",
+                )
+
         if not valid_settings:
             raise HTTPException(status_code=400, detail="No valid settings provided")
 

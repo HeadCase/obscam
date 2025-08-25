@@ -15,7 +15,12 @@ def setup_logging(
         debug_mode: Enable verbose debug logging
         log_dir_str: Custom log directory (defaults to logs/)
     """
-    logger.remove()
+    # Aggressively clear all existing handlers
+    try:
+        logger.stop()
+        logger.remove()
+    except:
+        pass  # In case logger wasn't started yet
 
     log_dir.mkdir(exist_ok=True)
 
@@ -71,7 +76,7 @@ def setup_logging(
     )
 
 
-def get_logger(name: str) -> "logger":
+def get_logger(name: str):
     """Get a logger instance with structured context.
 
     Args:
@@ -138,6 +143,5 @@ def log_websocket_event(event_type: str, **kwargs) -> None:
 # Environment-based debug mode detection
 DEBUG_MODE = os.getenv("OBSCAM_DEBUG", "false").lower() == "true"
 
-# Initialize logging when module is imported
-if not logger._core.handlers:  # Avoid double initialization
-    setup_logging(debug_mode=DEBUG_MODE)
+# DO NOT initialize logging at import time - let main() handle it
+# This allows proper control of debug mode from the entry point

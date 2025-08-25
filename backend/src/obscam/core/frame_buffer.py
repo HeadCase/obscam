@@ -2,7 +2,7 @@
 """Thread-safe frame buffer using queue for latest image storage."""
 
 import queue
-from typing import Any
+from typing import Any, Callable
 
 from obscam.common.logging_config import get_logger
 
@@ -18,7 +18,7 @@ class LatestFrameBuffer:
             maxsize=1
         )
         # Callback for new frame notifications (for MJPEG/SSE)
-        self.on_new_frame = None
+        self.on_new_frame: Callable[[], None] = None
         logger.debug("Frame buffer initialized with queue-based storage")
 
     def update_frame(self, frame_bytes: bytes, metadata: dict[str, Any]) -> None:

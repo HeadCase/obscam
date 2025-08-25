@@ -27,6 +27,7 @@ class ZwoAsiCamera(CameraInterface):
             "gain": 250,  # More reasonable default gain
             "wb_r": 75,
             "wb_b": 120,
+            "image_format": "mono",  # Default to mono for performance (options: "mono", "color")
         }
         self.settings_lock = threading.Lock()
 
@@ -164,6 +165,7 @@ class ZwoAsiCamera(CameraInterface):
                 "is_color_camera": self.camera_info.get("IsColorCam", False)
                 if self.camera_info
                 else False,
+                "image_format": settings.get("image_format", "mono"),
                 "current_exposure_ms": settings["exposure_ms"],
                 "current_gain": settings["gain"],
                 "current_wb_r": settings.get("wb_r"),
@@ -185,6 +187,7 @@ class ZwoAsiCamera(CameraInterface):
                 gain = int(self.current_settings["gain"])
                 wb_r = int(self.current_settings.get("wb_r", 75))
                 wb_b = int(self.current_settings.get("wb_b", 120))
+                image_format = str(self.current_settings.get("image_format", "mono"))
 
             # Determine capture mode based on exposure time
             use_video_mode = exposure_ms <= self.video_mode_threshold_ms
@@ -194,14 +197,20 @@ class ZwoAsiCamera(CameraInterface):
             self.camera.set_control_value(asi.ASI_EXPOSURE, exposure_us)
             self.camera.set_control_value(asi.ASI_GAIN, gain)
 
-            # Set image format and white balance for color cameras
-            is_color = self.camera_info and self.camera_info.get("IsColorCam", False)
-            if is_color:
+            # Determine image type based on user preference and camera capability
+            is_color_camera = self.camera_info and self.camera_info.get(
+                "IsColorCam", False
+            )
+            use_color = image_format == "color" and is_color_camera
+
+            if use_color:
+                # Color mode - set white balance and RGB format
                 self.camera.set_control_value(asi.ASI_WB_R, wb_r)
                 self.camera.set_control_value(asi.ASI_WB_B, wb_b)
                 self.camera.set_image_type(asi.ASI_IMG_RGB24)
             else:
-                self.camera.set_image_type(asi.ASI_IMG_RAW8)
+                # Mono mode (default) - use Y8 for proper luminance data
+                self.camera.set_image_type(asi.ASI_IMG_Y8)
 
             # Capture frame using appropriate mode
             if use_video_mode:
@@ -212,8 +221,8 @@ class ZwoAsiCamera(CameraInterface):
             if img_data is None or len(img_data) == 0:
                 return None
 
-            # Convert numpy array to PIL Image
-            if is_color and self.camera_info:
+            # Convert numpy array to PIL Image based on actual format used
+            if use_color and self.camera_info:
                 width = int(self.camera_info["MaxWidth"])
                 height = int(self.camera_info["MaxHeight"])
                 if len(img_data.shape) == 1:
@@ -223,6 +232,7 @@ class ZwoAsiCamera(CameraInterface):
                     img_array = img_data
                 pil_image = Image.fromarray(img_array, mode="RGB")
             else:
+                # Mono mode
                 if len(img_data.shape) == 1 and self.camera_info:
                     # Flatten array needs reshaping
                     width = int(self.camera_info["MaxWidth"])
@@ -298,6 +308,10 @@ class ZwoAsiCamera(CameraInterface):
                     self.current_settings["wb_r"] = int(settings["wb_r"])
                 if "wb_b" in settings:
                     self.current_settings["wb_b"] = int(settings["wb_b"])
+                if "image_format" in settings:
+                    format_value = str(settings["image_format"]).lower()
+                    if format_value in ["mono", "color"]:
+                        self.current_settings["image_format"] = format_value
 
             print(f"Settings updated: {settings}")
             return True
@@ -320,6 +334,11 @@ class ZwoAsiCamera(CameraInterface):
                 "gain": {"min": 0, "max": 600, "type": "int"},
                 "wb_r": {"min": 50, "max": 150, "type": "int"},
                 "wb_b": {"min": 50, "max": 150, "type": "int"},
+                "image_format": {
+                    "options": ["mono", "color"],
+                    "type": "enum",
+                    "default": "mono",
+                },
                 "camera_type": "ZWO ASI (disconnected)",
             }
 
@@ -350,6 +369,18 @@ class ZwoAsiCamera(CameraInterface):
             if self.camera_info and self.camera_info.get("IsColorCam", False):
                 capabilities["wb_r"] = {"min": 50, "max": 150, "type": "int"}
                 capabilities["wb_b"] = {"min": 50, "max": 150, "type": "int"}
+                capabilities["image_format"] = {
+                    "options": ["mono", "color"],
+                    "type": "enum",
+                    "default": "mono",
+                }
+            else:
+                # Mono-only camera
+                capabilities["image_format"] = {
+                    "options": ["mono"],
+                    "type": "enum",
+                    "default": "mono",
+                }
 
             return capabilities
 
@@ -361,5 +392,10 @@ class ZwoAsiCamera(CameraInterface):
                 "gain": {"min": 0, "max": 600, "type": "int"},
                 "wb_r": {"min": 50, "max": 150, "type": "int"},
                 "wb_b": {"min": 50, "max": 150, "type": "int"},
+                "image_format": {
+                    "options": ["mono", "color"],
+                    "type": "enum",
+                    "default": "mono",
+                },
                 "camera_type": "ZWO ASI (error)",
             }
