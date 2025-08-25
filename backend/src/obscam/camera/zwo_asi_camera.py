@@ -245,3 +245,56 @@ class ZwoAsiCamera(CameraInterface):
         """Get current camera settings."""
         with self.settings_lock:
             return self.current_settings.copy()
+
+    def get_control_capabilities(self) -> dict[str, Any]:
+        """Get ASI camera control capabilities."""
+        if not self.is_initialized or not self.camera:
+            # Return generic ASI662MC capabilities when disconnected
+            return {
+                "exposure_ms": {"min": 0.032, "max": 30000, "type": "float"},
+                "gain": {"min": 0, "max": 600, "type": "int"},
+                "wb_r": {"min": 50, "max": 150, "type": "int"},
+                "wb_b": {"min": 50, "max": 150, "type": "int"},
+                "camera_type": "ZWO ASI (disconnected)",
+            }
+
+        try:
+            # Get actual control capabilities from connected camera
+            control_caps = self.camera.get_controls()
+
+            capabilities = {"camera_type": "ZWO ASI"}
+
+            # Map ASI control types to our interface
+            if "Exposure" in control_caps:
+                exp_ctrl = control_caps["Exposure"]
+                capabilities["exposure_ms"] = {
+                    "min": exp_ctrl["MinValue"] / 1000.0,  # Convert from microseconds
+                    "max": exp_ctrl["MaxValue"] / 1000.0,
+                    "type": "float",
+                }
+
+            if "Gain" in control_caps:
+                gain_ctrl = control_caps["Gain"]
+                capabilities["gain"] = {
+                    "min": gain_ctrl["MinValue"],
+                    "max": gain_ctrl["MaxValue"],
+                    "type": "int",
+                }
+
+            # White balance limits (camera specific)
+            if self.camera_info and self.camera_info.get("IsColorCam", False):
+                capabilities["wb_r"] = {"min": 50, "max": 150, "type": "int"}
+                capabilities["wb_b"] = {"min": 50, "max": 150, "type": "int"}
+
+            return capabilities
+
+        except Exception as e:
+            print(f"Warning: Could not get control capabilities: {e}")
+            # Return ASI662MC defaults
+            return {
+                "exposure_ms": {"min": 0.032, "max": 30000, "type": "float"},
+                "gain": {"min": 0, "max": 600, "type": "int"},
+                "wb_r": {"min": 50, "max": 150, "type": "int"},
+                "wb_b": {"min": 50, "max": 150, "type": "int"},
+                "camera_type": "ZWO ASI (error)",
+            }

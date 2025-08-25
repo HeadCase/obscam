@@ -4,97 +4,38 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>ObsCam - Observatory Monitor</title>
+    <script src="https://unpkg.com/htmx.org@1.9.12"></script>
+    <script src="https://unpkg.com/alpinejs" defer></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    colors: {
+                        // Tokyo Night color palette for observatory theme
+                        'tokyo-night': {
+                            bg: '#1a1b26',
+                            surface: '#24283b', 
+                            overlay: '#414868',
+                            muted: '#565f89',
+                            subtle: '#9aa5ce',
+                            text: '#c0caf5',
+                            blue: '#7aa2f7',
+                            purple: '#bb9af7',
+                            green: '#9ece6a',
+                            orange: '#ff9e64',
+                            red: '#f7768e',
+                            yellow: '#e0af68',
+                            cyan: '#7dcfff'
+                        }
+                    }
+                }
+            }
+        }
+    </script>
     <style>
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }
-        
-        body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'SF Pro Text', sans-serif;
-            /* Tokyo Night Dark Theme - Observatory Appropriate */
-            background: linear-gradient(135deg, #16161e 0%, #1a1a29 50%, #24243e 100%);
-            color: #c0caf5;
-            min-height: 100vh;
-            overflow-x: hidden;
-        }
-        
-        .app-container {
-            display: flex;
-            flex-direction: column;
-            min-height: 100vh;
-        }
-        
-        /* CONSOLIDATED Header Bar - All Controls in One Compact Row */
-        .header {
-            background: rgba(26, 27, 38, 0.95);
-            backdrop-filter: blur(10px);
-            padding: 8px 20px;
-            border-bottom: 1px solid #414868;
-            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
-            display: grid;
-            grid-template-columns: auto 1fr auto auto;
-            gap: 20px;
-            align-items: center;
-        }
-        
-        .header h1 {
-            font-size: 1.1rem;
-            font-weight: 600;
-            color: #7aa2f7;
-            white-space: nowrap;
-        }
-
-        /* Consolidated Controls Section - Exposure & Gain in Header */
-        .header-controls {
-            display: flex;
-            justify-content: center;
-            gap: 25px;
-            align-items: center;
-            min-width: 0;
-        }
-        
-        .control-group {
-            display: flex;
-            flex-direction: column;
-            gap: 3px;
-            min-width: 180px;  /* LARGER sliders for precision */
-        }
-
-        .control-group.disabled {
-            opacity: 0.5;
-            pointer-events: none;
-        }
-        
-        .control-label {
-            font-size: 0.7rem;
-            color: #9aa5ce;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            white-space: nowrap;
-        }
-        
-        .control-value {
-            font-family: 'SF Mono', 'Monaco', 'Menlo', monospace;
-            font-weight: bold;
-            color: #7aa2f7;
-            font-size: 0.8rem;
-        }
-        
-        /* Advanced Logarithmic Sliders with Detents */
-        .control-slider {
-            width: 100%;
-            height: 5px;
-            border-radius: 3px;
-            background: rgba(65, 72, 104, 0.5);
-            outline: none;
-            -webkit-appearance: none;
-            border: 1px solid #414868;
-            position: relative;
-        }
-        
+        /* Custom slider styling */
         .control-slider::-webkit-slider-thumb {
             -webkit-appearance: none;
             width: 14px;
@@ -117,947 +58,444 @@
             box-shadow: 0 2px 4px rgba(0,0,0,0.3);
         }
 
-        /* Slider with Detent Indicators */
-        .slider-container {
-            position: relative;
-        }
-
-        .slider-detents {
-            position: absolute;
-            top: 50%;
-            left: 0;
-            right: 0;
-            height: 1px;
-            pointer-events: none;
-            transform: translateY(-50%);
-        }
-
-        .detent {
-            position: absolute;
-            width: 1px;
-            height: 8px;
-            background: #565f89;
-            top: -3px;
-        }
-
-        .detent.major {
-            height: 12px;
-            background: #7aa2f7;
-            width: 2px;
-            top: -5px;
-        }
-
-        /* WHITE BALANCE SLIDER STYLING - Color coded */
-        .control-slider.wb-red::-webkit-slider-thumb {
-            background: linear-gradient(135deg, #f7768e 0%, #ff9e64 100%); /* Red tint */
-        }
-
-        .control-slider.wb-blue::-webkit-slider-thumb {
-            background: linear-gradient(135deg, #7aa2f7 0%, #7dcfff 100%); /* Blue tint */
-        }
-
-        .control-slider.wb-red::-moz-range-thumb {
+        /* WB color-coded thumbs */
+        .wb-red::-webkit-slider-thumb {
             background: linear-gradient(135deg, #f7768e 0%, #ff9e64 100%);
         }
-
-        .control-slider.wb-blue::-moz-range-thumb {
+        .wb-blue::-webkit-slider-thumb {
+            background: linear-gradient(135deg, #7aa2f7 0%, #7dcfff 100%);
+        }
+        .wb-red::-moz-range-thumb {
+            background: linear-gradient(135deg, #f7768e 0%, #ff9e64 100%);
+        }
+        .wb-blue::-moz-range-thumb {
             background: linear-gradient(135deg, #7aa2f7 0%, #7dcfff 100%);
         }
 
-
-
-        /* Connection Status - Compact */
-        .connection-status {
-            display: flex;
-            align-items: center;
-            gap: 4px;
-            padding: 3px 8px;
-            border-radius: 12px;
-            background: rgba(65, 72, 104, 0.3);
-            font-size: 0.7rem;
-            border: 1px solid #414868;
-            white-space: nowrap;
-        }
-        
-        .status-indicator {
-            width: 5px;
-            height: 5px;
-            border-radius: 50%;
-            background: #9ece6a;
-            animation: pulse 2s infinite;
-        }
-        
+        /* Status indicator pulse */
         @keyframes pulse {
             0%, 100% { opacity: 1; }
             50% { opacity: 0.5; }
         }
-        
-        .status-indicator.error {
-            background: #f7768e;
+        .status-pulse {
+            animation: pulse 2s infinite;
         }
 
-        /* Main Feed Container - MAXIMIZED SCREEN */
-        .feed-container {
-            flex: 1;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            padding: 0;
-            margin: 0;
-            position: relative;
-            overflow: hidden;
+        /* Viewport filling image */
+        .camera-feed {
+            width: 100vw;
+            height: calc(100vh - 120px); /* Account for header+footer */
+            object-fit: cover; /* Fill viewport, may crop */
         }
-        
-        .image-wrapper {
-            width: 100%;
-            height: 100%;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            position: relative;
-            margin: 0;
-            padding: 0;
-        }
-        
-        .camera-image {
-            /* Container-relative sizing - proper flex behavior */
-            width: 100%;
-            height: 100%;
-            max-width: 100%;
-            max-height: 100%;
-            object-fit: contain;
-            border-radius: 0;
-            box-shadow: none;
-            transition: opacity 0.2s ease;
-            display: block;
-        }
-        
-        .placeholder {
-            width: 80%;
-            max-width: 800px;
-            aspect-ratio: 16/9;
-            background: rgba(65, 72, 104, 0.2);
-            border: 2px dashed #414868;
-            border-radius: 12px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-size: 1.2rem;
-            color: #9aa5ce;
-        }
-        
-        /* Bottom Status Bar - Minimal */
-        .bottom-controls {
-            background: rgba(26, 27, 38, 0.95);
-            backdrop-filter: blur(10px);
-            padding: 6px 20px;
-            border-top: 1px solid #414868;
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            gap: 15px;
-            flex-wrap: wrap;
-        }
-        
-        .control-btn {
-            background: rgba(65, 72, 104, 0.3);
-            color: #c0caf5;
-            border: 1px solid #414868;
-            padding: 6px 15px;
-            border-radius: 15px;
-            cursor: pointer;
-            font-size: 0.75rem;
-            font-weight: 500;
-            transition: all 0.3s ease;
-            min-width: 80px;
-        }
-        
-        .control-btn:hover {
-            background: rgba(65, 72, 104, 0.5);
-            transform: translateY(-1px);
-            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
-        }
-        
-        .control-btn.active {
-            background: linear-gradient(135deg, #7aa2f7 0%, #bb9af7 100%);
-            color: #1a1b26;
-            border-color: #7aa2f7;
-            box-shadow: 0 0 15px rgba(122, 162, 247, 0.4);
-        }
-        
-        .fps-display {
-            font-size: 0.7rem;
-            color: #9aa5ce;
-            text-align: center;
-            font-family: 'SF Mono', 'Monaco', 'Menlo', monospace;
-        }
-        
-        /* Status Info */
-        .status-info {
-            display: flex;
-            gap: 15px;
-            align-items: center;
-            font-size: 0.7rem;
-            color: #9aa5ce;
-        }
-        
-        .status-info span {
-            white-space: nowrap;
-        }
-        
-        /* Responsive Design */
-        @media (max-width: 768px) {
-            .header {
-                padding: 6px 15px;
-                grid-template-columns: 1fr;
-                gap: 8px;
-                text-align: center;
-            }
-            
-            .header h1 {
-                font-size: 1rem;
-                grid-row: 1;
-            }
-
-            .header-controls {
-                grid-row: 2;
-                gap: 10px;
-                flex-wrap: wrap;
-                justify-content: center;
-            }
-            
-
-
-            .connection-status {
-                grid-row: 3;
-                justify-self: center;
-            }
-            
-            .control-group {
-                min-width: 140px;  /* Smaller on mobile but still usable */
-            }
-            
-            .camera-image {
-                /* Mobile keeps container-relative sizing */
-                height: 100%;
-                max-height: 100%;
-            }
-            
-            .bottom-controls {
-                padding: 6px 15px;
-                gap: 10px;
-            }
-        }
-        
-        /* Extra large displays */
-        @media (min-width: 1920px) {
-            .camera-image {
-                /* Large displays also use container-relative sizing */
-                height: 100%;
-                max-height: 100%;
-            }
-        }
-        
-        /* Loading states */
-        .loading {
-            opacity: 0.7;
-            animation: loading-pulse 1.5s infinite;
-        }
-        
-        @keyframes loading-pulse {
-            0%, 100% { opacity: 0.7; }
-            50% { opacity: 0.4; }
-        }
-
-        /* Tokyo Night Accents */
-        .accent-blue { color: #7aa2f7; }
-        .accent-green { color: #9ece6a; }
-        .accent-purple { color: #bb9af7; }
-        .accent-orange { color: #ff9e64; }
-        .accent-yellow { color: #e0af68; }
-        .accent-red { color: #f7768e; }
     </style>
 </head>
-<body>
-    <div class="app-container">
-        <!-- CONSOLIDATED Header Bar - Everything in One Row -->
-        <header class="header">
-            <h1>🔭 ObsCam</h1>
+<body class="bg-tokyo-night-bg text-tokyo-night-text min-h-screen" x-data="obsCam()">
+    <!-- Header with Controls -->
+    <header class="bg-tokyo-night-surface/95 backdrop-blur-sm border-b border-tokyo-night-overlay p-4">
+        <div class="flex flex-col lg:flex-row items-center justify-between gap-4">
+            <h1 class="text-xl font-semibold text-tokyo-night-blue">🔭 ObsCam</h1>
             
-            <!-- EXPANDED Controls Section - Exposure, Gain, White Balance -->
-            <div class="header-controls">
-                <!-- Ultra-granular Exposure Control (30 detents) -->
-                <div class="control-group" id="exposure-control-group">
-                    <label class="control-label">
+            <!-- Dynamic Controls -->
+            <div class="flex flex-wrap items-center justify-center gap-6" x-show="controlsReady">
+                <!-- Exposure Control -->
+                <div class="flex flex-col gap-1 min-w-[180px]">
+                    <label class="flex justify-between items-center text-xs text-tokyo-night-subtle">
                         Exposure
-                        <span class="control-value" id="exposure-value">200ms</span>
+                        <span class="font-mono text-tokyo-night-blue" x-text="formatExposure(controls.exposure.value)">--</span>
                     </label>
-                    <div class="slider-container">
-                        <input type="range" class="control-slider" id="exposure-slider" 
-                               min="0" max="29" value="17" step="1">
-                        <div class="slider-detents" id="exposure-detents"></div>
-                    </div>
+                    <input type="range" 
+                           class="control-slider w-full h-2 bg-tokyo-night-overlay rounded-md outline-none"
+                           x-model="controls.exposure.index"
+                           :min="0" 
+                           :max="controls.exposure.scale.length - 1"
+                           @input="debounceSettingsUpdate()">
                 </div>
                 
-                <!-- Fine-grained Gain Control (20 detents) -->
-                <div class="control-group" id="gain-control-group">
-                    <label class="control-label">
+                <!-- Gain Control -->
+                <div class="flex flex-col gap-1 min-w-[180px]">
+                    <label class="flex justify-between items-center text-xs text-tokyo-night-subtle">
                         Gain
-                        <span class="control-value" id="gain-value">250</span>
+                        <span class="font-mono text-tokyo-night-blue" x-text="controls.gain.value">--</span>
                     </label>
-                    <div class="slider-container">
-                        <input type="range" class="control-slider" id="gain-slider" 
-                               min="0" max="19" value="8" step="1">
-                        <div class="slider-detents" id="gain-detents"></div>
-                    </div>
+                    <input type="range" 
+                           class="control-slider w-full h-2 bg-tokyo-night-overlay rounded-md outline-none"
+                           x-model="controls.gain.index"
+                           :min="0" 
+                           :max="controls.gain.scale.length - 1"
+                           @input="debounceSettingsUpdate()">
                 </div>
-
-                <!-- WHITE BALANCE RED - Reduce Magenta Cast -->
-                <div class="control-group" id="wb-r-control-group">
-                    <label class="control-label">
+                
+                <!-- White Balance Red -->
+                <div class="flex flex-col gap-1 min-w-[140px]">
+                    <label class="flex justify-between items-center text-xs text-tokyo-night-subtle">
                         🔴 WB Red
-                        <span class="control-value" id="wb-r-value">75</span>
+                        <span class="font-mono text-tokyo-night-red" x-text="controls.wb_r.value">--</span>
                     </label>
-                    <div class="slider-container">
-                        <input type="range" class="control-slider wb-red" id="wb-r-slider" 
-                               min="0" max="10" value="3" step="1">
-                        <div class="slider-detents" id="wb-r-detents"></div>
-                    </div>
+                    <input type="range" 
+                           class="control-slider wb-red w-full h-2 bg-tokyo-night-overlay rounded-md outline-none"
+                           x-model="controls.wb_r.index"
+                           :min="0" 
+                           :max="controls.wb_r.scale.length - 1"
+                           @input="debounceSettingsUpdate()">
                 </div>
-
-                <!-- WHITE BALANCE BLUE - Reduce Magenta Cast -->  
-                <div class="control-group" id="wb-b-control-group">
-                    <label class="control-label">
+                
+                <!-- White Balance Blue -->
+                <div class="flex flex-col gap-1 min-w-[140px]">
+                    <label class="flex justify-between items-center text-xs text-tokyo-night-subtle">
                         🔵 WB Blue
-                        <span class="control-value" id="wb-b-value">120</span>
+                        <span class="font-mono text-tokyo-night-cyan" x-text="controls.wb_b.value">--</span>
                     </label>
-                    <div class="slider-container">
-                        <input type="range" class="control-slider wb-blue" id="wb-b-slider" 
-                               min="0" max="10" value="7" step="1">
-                        <div class="slider-detents" id="wb-b-detents"></div>
-                    </div>
+                    <input type="range" 
+                           class="control-slider wb-blue w-full h-2 bg-tokyo-night-overlay rounded-md outline-none"
+                           x-model="controls.wb_b.index"
+                           :min="0" 
+                           :max="controls.wb_b.scale.length - 1"
+                           @input="debounceSettingsUpdate()">
                 </div>
             </div>
             
             <!-- Connection Status -->
-            <div class="connection-status">
-                <div class="status-indicator" id="connection-indicator"></div>
-                <span id="connection-text">Connecting...</span>
-            </div>
-        </header>
-        
-        <!-- Main Camera Feed - MAXIMIZED SCREEN -->
-        <main class="feed-container">
-            <div class="image-wrapper">
-                <div class="placeholder" id="camera-image">
-                    📸 Starting camera feed...
-                </div>
-            </div>
-        </main>
-        
-        <!-- Minimal Bottom Status Bar -->
-        <div class="bottom-controls">
-
-            <button class="control-btn active" id="stream-btn" onclick="toggleStream()">
-                Stream
-            </button>
-
-            <div class="fps-display" id="fps-display">-- FPS</div>
-            <div class="status-info">
-                <span>Cam: <span id="camera-status">Init</span></span>
-                <span>Last: <span id="last-update">--</span></span>
-                <span>Age: <span id="frame-age">--</span></span>
+            <div class="flex items-center gap-2 px-3 py-1 bg-tokyo-night-overlay/30 rounded-full border border-tokyo-night-overlay">
+                <div class="w-2 h-2 rounded-full bg-tokyo-night-green status-pulse" 
+                     :class="connected ? 'bg-tokyo-night-green' : 'bg-tokyo-night-red'"></div>
+                <span class="text-xs" x-text="connectionStatus">Connecting...</span>
             </div>
         </div>
-    </div>
+    </header>
+    
+    <!-- Main Camera Feed - Full Viewport -->
+    <main class="relative overflow-hidden">
+        <!-- MJPEG Stream -->
+        <img x-show="streaming" 
+             x-ref="mjpegStream" 
+             :src="streamUrl" 
+             class="camera-feed block"
+             @error="handleStreamError()"
+             @load="handleStreamLoad()">
+        
+        <!-- Loading Placeholder -->
+        <div x-show="!streaming" 
+             class="camera-feed flex items-center justify-center bg-tokyo-night-surface/20 border-2 border-dashed border-tokyo-night-overlay">
+            <div class="text-center">
+                <div class="text-6xl mb-4">📸</div>
+                <div class="text-tokyo-night-subtle">Starting camera feed...</div>
+            </div>
+        </div>
+    </main>
+    
+    <!-- Footer Status Bar -->
+    <footer class="bg-tokyo-night-surface/95 backdrop-blur-sm border-t border-tokyo-night-overlay p-3">
+        <div class="flex items-center justify-center gap-6 text-xs">
+            <button @click="toggleStream()" 
+                    class="px-4 py-2 rounded-lg transition-all duration-300"
+                    :class="streaming ? 'bg-tokyo-night-blue text-tokyo-night-bg' : 'bg-tokyo-night-overlay text-tokyo-night-text hover:bg-tokyo-night-overlay/80'">
+                <span x-text="streaming ? 'Streaming' : 'Start Stream'">Stream</span>
+            </button>
+            
+            <div class="flex items-center gap-4 text-tokyo-night-subtle">
+                <span>FPS: <span class="text-tokyo-night-green font-mono" x-text="telemetry.fps || '--'">--</span></span>
+                <span>Last: <span class="text-tokyo-night-blue" x-text="telemetry.lastUpdate || '--'">--</span></span>
+                <span>Age: <span class="text-tokyo-night-yellow" x-text="telemetry.frameAge || '--'">--</span></span>
+                <span>Camera: <span class="text-tokyo-night-purple" x-text="telemetry.cameraStatus || 'Init'">Init</span></span>
+            </div>
+        </div>
+    </footer>
 
     <script>
-        // EXPANDED Ultra-granular exposure scale (30 detents: 0.1ms to 30s)
-        const EXPOSURE_SCALE = [
-            {value: 0.1, label: '0.1ms'},
-            {value: 0.2, label: '0.2ms'},
-            {value: 0.5, label: '0.5ms'},
-            {value: 1, label: '1ms'},
-            {value: 1.5, label: '1.5ms'},
-            {value: 2, label: '2ms'},
-            {value: 3, label: '3ms'},
-            {value: 5, label: '5ms'},
-            {value: 8, label: '8ms'},
-            {value: 10, label: '10ms'},
-            {value: 15, label: '15ms'},
-            {value: 20, label: '20ms'},
-            {value: 30, label: '30ms'},
-            {value: 50, label: '50ms'},
-            {value: 75, label: '75ms'},
-            {value: 100, label: '100ms'},
-            {value: 150, label: '150ms'},
-            {value: 200, label: '200ms', major: true}, // User requested
-            {value: 300, label: '300ms'},
-            {value: 500, label: '500ms', major: true}, // User requested
-            {value: 750, label: '750ms'},
-            {value: 800, label: '800ms', major: true}, // User requested  
-            {value: 1000, label: '1s'},
-            {value: 1500, label: '1.5s'},
-            {value: 2000, label: '2s'},
-            {value: 3000, label: '3s'},
-            {value: 5000, label: '5s'},
-            {value: 10000, label: '10s'},
-            {value: 20000, label: '20s'},
-            {value: 30000, label: '30s'}
-        ];
-
-        // EXPANDED Fine-grained gain scale (20 detents: 0 to 1000)
-        const GAIN_SCALE = [
-            {value: 0, label: '0'},
-            {value: 25, label: '25'},
-            {value: 50, label: '50'},
-            {value: 75, label: '75'},
-            {value: 100, label: '100'},
-            {value: 125, label: '125'},
-            {value: 150, label: '150'},
-            {value: 200, label: '200'},
-            {value: 250, label: '250', major: true}, // Observatory standard
-            {value: 300, label: '300'},
-            {value: 350, label: '350'},
-            {value: 400, label: '400'},
-            {value: 450, label: '450'},
-            {value: 500, label: '500', major: true},
-            {value: 550, label: '550'},
-            {value: 600, label: '600'},
-            {value: 650, label: '650'},
-            {value: 700, label: '700'},
-            {value: 800, label: '800', major: true},
-            {value: 1000, label: '1000'}
-        ];
-
-        // White Balance scales for color correction (magenta cast fix)
-        const WB_RED_SCALE = [
-            {value: 50, label: '50'},
-            {value: 60, label: '60'},
-            {value: 70, label: '70'},
-            {value: 75, label: '75', major: true}, // Reduced to fix magenta
-            {value: 80, label: '80'},
-            {value: 90, label: '90'},
-            {value: 100, label: '100'},
-            {value: 110, label: '110'},
-            {value: 120, label: '120'},
-            {value: 130, label: '130'},
-            {value: 150, label: '150'}
-        ];
-
-        const WB_BLUE_SCALE = [
-            {value: 50, label: '50'},
-            {value: 60, label: '60'},
-            {value: 70, label: '70'},
-            {value: 80, label: '80'},
-            {value: 90, label: '90'},
-            {value: 100, label: '100'},
-            {value: 110, label: '110'},
-            {value: 120, label: '120', major: true}, // Increased to fix magenta
-            {value: 130, label: '130'},
-            {value: 140, label: '140'},
-            {value: 150, label: '150'}
-        ];
-
-        // Application State
-        let appState = {
-            streaming: false,
-            exposure: 200, // Start at 200ms (index 17 in new scale)
-            gain: 250,     // Start at 250 (index 8 in new scale)
-            wb_r: 75,      // Start at 75 (index 3 in red scale) - reduce magenta
-            wb_b: 120,     // Start at 120 (index 7 in blue scale) - reduce magenta
-            isConnected: false,
-            streamInterval: null,
-            frameCount: 0,
-            lastFrameTime: Date.now(),
-            fps: 0,
-            // Frame timestamp tracking for honest "Last" updates
-            lastKnownFrameTimestamp: null,
-            currentFrameAge: 0,
-            lastDisplayUpdate: Date.now()
-        };
-        
-        const API_BASE = `http://${window.location.hostname}:8000`;
-
-        // Initialize all sliders with detents
-        function initializeSliders() {
-            createDetents('exposure-detents', EXPOSURE_SCALE);
-            createDetents('gain-detents', GAIN_SCALE);
-            createDetents('wb-r-detents', WB_RED_SCALE);
-            createDetents('wb-b-detents', WB_BLUE_SCALE);
-            
-            // Set initial values with new expanded scales
-            document.getElementById('exposure-slider').value = 17; // 200ms default (new index)
-            document.getElementById('gain-slider').value = 8;      // 250 default (new index)
-            document.getElementById('wb-r-slider').value = 3;      // 75 default (reduce magenta)
-            document.getElementById('wb-b-slider').value = 7;      // 120 default (reduce magenta)
-            
-            updateSliderDisplays();
-        }
-
-        function createDetents(containerId, scale) {
-            const container = document.getElementById(containerId);
-            container.innerHTML = '';
-            
-            scale.forEach((point, index) => {
-                const detent = document.createElement('div');
-                detent.className = `detent ${point.major ? 'major' : ''}`;
-                detent.style.left = `${(index / (scale.length - 1)) * 100}%`;
-                detent.title = point.label;
-                container.appendChild(detent);
-            });
-        }
-
-        function exposureIndexToValue(index) {
-            return EXPOSURE_SCALE[Math.min(Math.max(index, 0), EXPOSURE_SCALE.length - 1)].value;
-        }
-
-        function gainIndexToValue(index) {
-            return GAIN_SCALE[Math.min(Math.max(index, 0), GAIN_SCALE.length - 1)].value;
-        }
-
-        function wbRedIndexToValue(index) {
-            return WB_RED_SCALE[Math.min(Math.max(index, 0), WB_RED_SCALE.length - 1)].value;
-        }
-
-        function wbBlueIndexToValue(index) {
-            return WB_BLUE_SCALE[Math.min(Math.max(index, 0), WB_BLUE_SCALE.length - 1)].value;
-        }
-
-        function formatExposureValue(ms) {
-            if (ms >= 1000) {
-                return (ms / 1000).toFixed(ms % 1000 === 0 ? 0 : 1) + 's';
-            }
-            return ms + 'ms';
-        }
-
-        // Application State  
-        function updateSliderDisplays() {
-            const exposureIndex = parseInt(document.getElementById('exposure-slider').value);
-            const gainIndex = parseInt(document.getElementById('gain-slider').value);
-            const wbRedIndex = parseInt(document.getElementById('wb-r-slider').value);
-            const wbBlueIndex = parseInt(document.getElementById('wb-b-slider').value);
-            
-            appState.exposure = exposureIndexToValue(exposureIndex);
-            appState.gain = gainIndexToValue(gainIndex);
-            appState.wb_r = wbRedIndexToValue(wbRedIndex);
-            appState.wb_b = wbBlueIndexToValue(wbBlueIndex);
-            
-            document.getElementById('exposure-value').textContent = formatExposureValue(appState.exposure);
-            document.getElementById('gain-value').textContent = appState.gain.toString();
-            document.getElementById('wb-r-value').textContent = appState.wb_r.toString();
-            document.getElementById('wb-b-value').textContent = appState.wb_b.toString();
-        }
-
-        // Initialize application
-        // Fetch current settings from server and sync UI on load
-        async function syncSettingsOnLoad() {
-            try {
-                const response = await fetch(`${API_BASE}/api/frame-info`, { cache: 'no-cache' });
+        function obsCam() {
+            return {
+                // Connection state
+                connected: false,
+                streaming: false,
+                connectionStatus: 'Connecting...',
+                streamUrl: '/stream.mjpg',
                 
-                if (response.ok) {
-                    const data = await response.json();
-                    if (data.current_settings) {
-                        console.log('Syncing settings from server:', data.current_settings);
-                        syncSettingsFromServer(data.current_settings);
+                // Controls state
+                controlsReady: false,
+                controls: {
+                    exposure: { value: 200, index: 0, scale: [] },
+                    gain: { value: 250, index: 0, scale: [] },
+                    wb_r: { value: 75, index: 0, scale: [] },
+                    wb_b: { value: 120, index: 0, scale: [] }
+                },
+                
+                // Telemetry
+                telemetry: {
+                    fps: null,
+                    lastUpdate: '--',
+                    frameAge: '--',
+                    cameraStatus: 'Init'
+                },
+                
+                // Internal state
+                eventSource: null,
+                settingsUpdateTimeout: null,
+                
+                init() {
+                    console.log('ObsCam initializing...');
+                    this.bootstrap();
+                },
+                
+                async bootstrap() {
+                    try {
+                        const response = await fetch('/api/bootstrap', { cache: 'no-store' });
+                        const data = await response.json();
+                        
+                        if (response.ok) {
+                            this.buildControlScales(data.capabilities);
+                            this.syncSettingsFromServer(data.current_settings);
+                            this.connected = true;
+                            this.connectionStatus = 'Connected';
+                            this.controlsReady = true;
+                            
+                            // Start SSE telemetry
+                            this.startTelemetry();
+                            
+                            // Auto-start streaming
+                            setTimeout(() => this.startStream(), 500);
+                        } else {
+                            throw new Error(data.detail || 'Bootstrap failed');
+                        }
+                    } catch (error) {
+                        console.error('Bootstrap failed:', error);
+                        this.connectionStatus = 'Bootstrap Error';
+                        this.connected = false;
                     }
-                } else {
-                    console.log('Could not fetch current settings from server');
-                }
+                },
                 
-            } catch (error) {
-                console.error('Settings sync error:', error);
-            }
-        }
-
-        async function initializeApp() {
-            initializeSliders();
-            
-            // Auto-start background capture (no Connect button needed)
-            await startBackgroundCapture();
-            
-            // Fetch and sync current settings from server
-            await syncSettingsOnLoad();
-            
-            // Auto-start streaming (if background capture is active)
-            setTimeout(() => {
-                if (!appState.streaming) {
-                    startStreaming();
-                }
-            }, 1000);
-            
-
-        }
-
-        async function updateCameraSettings() {
-            try {
-                const response = await fetch(`${API_BASE}/api/update-settings`, {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                    },
-                    body: JSON.stringify({
-                        exposure_ms: appState.exposure,
-                        gain: appState.gain,
-                        wb_r: appState.wb_r,
-                        wb_b: appState.wb_b
-                    })
-                });
+                buildControlScales(capabilities) {
+                    console.log('Building control scales from capabilities:', capabilities);
+                    
+                    // Build exposure scale from capabilities
+                    const expCap = capabilities.exposure_ms;
+                    this.controls.exposure.scale = this.buildExposureScale(expCap.min, expCap.max);
+                    
+                    // Build gain scale from capabilities
+                    const gainCap = capabilities.gain;
+                    this.controls.gain.scale = this.buildGainScale(gainCap.min, gainCap.max);
+                    
+                    // Build white balance scales
+                    const wbCap = capabilities.wb_r;
+                    this.controls.wb_r.scale = this.buildWBScale(wbCap.min, wbCap.max);
+                    this.controls.wb_b.scale = this.buildWBScale(wbCap.min, wbCap.max);
+                },
                 
-                if (response.ok) {
-                    const data = await response.json();
-                    console.log('Settings updated successfully:', data.current_settings);
-                } else {
-                    console.error('Settings update failed:', response.status);
-                }
+                buildExposureScale(min, max) {
+                    // Smart exposure scale - more points in observatory-relevant range
+                    const scale = [];
+                    const targets = [0.1, 0.2, 0.5, 1, 2, 5, 10, 20, 50, 100, 150, 200, 300, 500, 800, 1000, 2000, 5000, 10000, 30000];
+                    
+                    for (let target of targets) {
+                        if (target >= min && target <= max) {
+                            scale.push(target);
+                        }
+                    }
+                    
+                    // Ensure we have min and max
+                    if (scale[0] !== min) scale.unshift(min);
+                    if (scale[scale.length - 1] !== max) scale.push(max);
+                    
+                    return scale;
+                },
                 
-            } catch (error) {
-                console.error('Settings update error:', error);
-            }
-        }
-        
-        // Connection management
-        function updateConnectionStatus(connected, message = '') {
-            const indicator = document.getElementById('connection-indicator');
-            const text = document.getElementById('connection-text');
-            const statusValue = document.getElementById('camera-status');
-            
-            appState.isConnected = connected;
-            
-            if (connected) {
-                indicator.classList.remove('error');
-                text.textContent = message || 'Connected';
-                statusValue.textContent = 'OK';
-            } else {
-                indicator.classList.add('error');
-                text.textContent = message || 'Error';
-                statusValue.textContent = 'Error';
-            }
-        }
-        
-        async function checkStatus() {
-            try {
-                // Check both camera status and frame info
-                const [statusResponse, frameResponse] = await Promise.all([
-                    fetch(`${API_BASE}/api/status`),
-                    fetch(`${API_BASE}/api/frame-info`).catch(() => null)
-                ]);
-                
-                const statusData = await statusResponse.json();
-                const frameData = frameResponse ? await frameResponse.json() : null;
-                
-                if (statusData.status === 'connected') {
-                    if (frameData && frameData.background_running) {
-                        updateConnectionStatus(true, 'Background Active');
+                buildGainScale(min, max) {
+                    // Camera-specific gain scale
+                    const scale = [];
+                    
+                    if (max <= 600) {
+                        // ASI662MC scale (0-600)
+                        const targets = [0, 25, 50, 100, 150, 200, 250, 300, 350, 400, 450, 500, 550, 600];
+                        for (let target of targets) {
+                            if (target >= min && target <= max) {
+                                scale.push(target);
+                            }
+                        }
                     } else {
-                        updateConnectionStatus(true, 'Connected');
+                        // Nikon Zf ISO scale (100-51200)  
+                        const targets = [100, 125, 160, 200, 250, 320, 400, 500, 640, 800, 1000, 1250, 1600, 2000, 2500, 3200, 4000, 5000, 6400, 8000, 10000, 12800, 16000, 20000, 25600, 32000, 40000, 51200];
+                        for (let target of targets) {
+                            if (target >= min && target <= max) {
+                                scale.push(target);
+                            }
+                        }
                     }
-                } else {
-                    updateConnectionStatus(false, statusData.message || 'Error');
-                }
-                
-                // Update frame info in status bar
-                if (frameData) {
-                    document.getElementById('camera-status').textContent = 
-                        frameData.background_running ? 'BG Active' : 'Manual';
-                }
-                
-            } catch (error) {
-                updateConnectionStatus(false, 'API Error');
-                console.error('Status check failed:', error);
-            }
-        }
-
-        async function connectCamera() {
-            try {
-                document.getElementById('connect-btn').classList.add('loading');
-                updateConnectionStatus(false, 'Connecting...');
-                
-                const response = await fetch(`${API_BASE}/api/connect`);
-                const data = await response.json();
-                
-                if (data.status === 'connected') {
-                    updateConnectionStatus(true, 'Connected');
                     
-                    // Try to start background capture automatically
-                    setTimeout(async () => {
-                        await startBackgroundCapture();
-                        setTimeout(startStreaming, 500);
-                    }, 100);
-                } else {
-                    updateConnectionStatus(false, data.message || 'Failed');
-                }
+                    return scale;
+                },
                 
-            } catch (error) {
-                updateConnectionStatus(false, 'Error');
-                console.error('Connection failed:', error);
-            } finally {
-                document.getElementById('connect-btn').classList.remove('loading');
-            }
-        }
-
-        async function startBackgroundCapture() {
-            try {
-                const response = await fetch(`${API_BASE}/api/start-background`, { method: 'POST' });
-                const data = await response.json();
+                buildWBScale(min, max) {
+                    // Simple linear scale for white balance
+                    const scale = [];
+                    const step = Math.max(5, Math.round((max - min) / 10));
+                    
+                    for (let i = min; i <= max; i += step) {
+                        scale.push(i);
+                    }
+                    
+                    if (scale[scale.length - 1] !== max) scale.push(max);
+                    return scale;
+                },
                 
-                if (data.status === 'success') {
-                    console.log('Background capture started');
-                    updateConnectionStatus(true, 'Background Active');
-                    document.getElementById('camera-status').textContent = 'BG Active';
-                    return true;
-                } else {
-                    console.error('Failed to start background capture');
-                    return false;
-                }
-            } catch (error) {
-                console.error('Background capture start error:', error);
-                return false;
-            }
-        }
-
-        async function stopBackgroundCapture() {
-            try {
-                const response = await fetch(`${API_BASE}/api/stop-background`, { method: 'POST' });
-                const data = await response.json();
+                syncSettingsFromServer(settings) {
+                    console.log('Syncing settings from server:', settings);
+                    
+                    // Map server values to slider indices
+                    this.controls.exposure.index = this.findClosestIndex(settings.exposure_ms, this.controls.exposure.scale);
+                    this.controls.gain.index = this.findClosestIndex(settings.gain, this.controls.gain.scale);
+                    this.controls.wb_r.index = this.findClosestIndex(settings.wb_r || 75, this.controls.wb_r.scale);
+                    this.controls.wb_b.index = this.findClosestIndex(settings.wb_b || 120, this.controls.wb_b.scale);
+                    
+                    this.updateControlValues();
+                },
                 
-                if (data.status === 'success') {
-                    console.log('Background capture stopped');
-                    updateConnectionStatus(true, 'Manual');
-                    document.getElementById('camera-status').textContent = 'Manual';
-                } else {
-                    console.error('Failed to stop background capture');
-                }
-            } catch (error) {
-                console.error('Background capture stop error:', error);
-            }
-        }
-        
-        // Streaming control
-        function toggleStream() {
-            const btn = document.getElementById('stream-btn');
-            
-            if (appState.streaming) {
-                stopStreaming();
-                btn.textContent = 'Start';
-                btn.classList.remove('active');
-            } else {
-                startStreaming();
-                btn.textContent = 'Stream';
-                btn.classList.add('active');
-            }
-        }
-        
-        function startStreaming() {
-            if (appState.streaming) return;
-            
-            appState.streaming = true;
-            appState.frameCount = 0;
-            appState.lastFrameTime = Date.now();
-            
-            const btn = document.getElementById('stream-btn');
-            btn.textContent = 'Stream';
-            btn.classList.add('active');
-            
-            console.log('Starting continuous capture stream...');
-            continuousCapture();
-        }
-        
-        function stopStreaming() {
-            appState.streaming = false;
-            
-            if (appState.streamInterval) {
-                clearTimeout(appState.streamInterval);
-                appState.streamInterval = null;
-            }
-            
-            console.log('Stopped capture stream');
-            document.getElementById('fps-display').textContent = '-- FPS';
-        }
-        
-        // Calculate intelligent polling interval based on exposure time
-        function getPollingInterval(exposureMs) {
-            if (exposureMs < 100) return 50;        // Fast: 50ms polling for <100ms exposures  
-            if (exposureMs < 1000) return 100;      // Medium: 100ms polling for <1s exposures
-            if (exposureMs < 5000) return 500;      // Slow: 500ms polling for <5s exposures  
-            return Math.min(exposureMs * 0.8, 10000); // Long: 80% of exposure time, max 10s
-        }
-
-        // Stateless frame polling loop with dynamic intervals - No session dependency!
-        async function continuousCapture() {
-            if (!appState.streaming) return;
-            
-            try {
-                // Use stateless latest-frame endpoint
-                let response = await fetch(`${API_BASE}/api/latest-frame`, { cache: 'no-cache' });
+                findClosestIndex(target, scale) {
+                    let closestIndex = 0;
+                    let minDiff = Math.abs(scale[0] - target);
+                    
+                    for (let i = 1; i < scale.length; i++) {
+                        const diff = Math.abs(scale[i] - target);
+                        if (diff < minDiff) {
+                            minDiff = diff;
+                            closestIndex = i;
+                        }
+                    }
+                    
+                    return closestIndex;
+                },
                 
-                if (response.ok) {
-                    // Extract frame metadata from response headers
-                    const frameTimestamp = response.headers.get('X-Frame-Timestamp');
-                    const frameAgeSeconds = parseFloat(response.headers.get('X-Frame-Age-Seconds')) || 0;
+                updateControlValues() {
+                    // Update displayed values from indices
+                    this.controls.exposure.value = this.controls.exposure.scale[this.controls.exposure.index];
+                    this.controls.gain.value = this.controls.gain.scale[this.controls.gain.index];
+                    this.controls.wb_r.value = this.controls.wb_r.scale[this.controls.wb_r.index];
+                    this.controls.wb_b.value = this.controls.wb_b.scale[this.controls.wb_b.index];
+                },
+                
+                formatExposure(ms) {
+                    if (ms >= 1000) {
+                        return (ms / 1000).toFixed(ms % 1000 === 0 ? 0 : 1) + 's';
+                    }
+                    return ms + 'ms';
+                },
+                
+                debounceSettingsUpdate() {
+                    this.updateControlValues();
                     
-                    // Update frame age in app state (always)
-                    appState.currentFrameAge = frameAgeSeconds;
+                    // Debounce settings API calls
+                    clearTimeout(this.settingsUpdateTimeout);
+                    this.settingsUpdateTimeout = setTimeout(() => {
+                        this.updateCameraSettings();
+                    }, 250);
+                },
+                
+                async updateCameraSettings() {
+                    try {
+                        const payload = {
+                            exposure_ms: this.controls.exposure.value,
+                            gain: this.controls.gain.value,
+                            wb_r: this.controls.wb_r.value,
+                            wb_b: this.controls.wb_b.value
+                        };
+                        
+                        const response = await fetch('/api/settings', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify(payload)
+                        });
+                        
+                        if (response.ok) {
+                            const data = await response.json();
+                            console.log('Settings updated successfully:', data.current_settings);
+                        } else {
+                            console.error('Settings update failed:', response.status);
+                        }
+                    } catch (error) {
+                        console.error('Settings update error:', error);
+                    }
+                },
+                
+                startTelemetry() {
+                    if (this.eventSource) {
+                        this.eventSource.close();
+                    }
                     
-                    // Determine if we should update the image display
-                    const isFirstFrame = appState.lastKnownFrameTimestamp === null;
-                    const isNewFrame = frameTimestamp !== appState.lastKnownFrameTimestamp;
-                    const shouldUpdateImage = isFirstFrame || isNewFrame;
+                    this.eventSource = new EventSource('/api/telemetry');
                     
-                    // Always update the image display and process the blob
-                    const blob = await response.blob();
-                    const imageUrl = URL.createObjectURL(blob);
+                    this.eventSource.addEventListener('snapshot', (event) => {
+                        const data = JSON.parse(event.data);
+                        this.updateTelemetry(data);
+                    });
                     
-                    const imgContainer = document.getElementById('camera-image');
-                    imgContainer.innerHTML = `<img src="${imageUrl}" alt="Camera Feed" class="camera-image">`;
+                    this.eventSource.addEventListener('frame', (event) => {
+                        const data = JSON.parse(event.data);
+                        this.updateTelemetry(data);
+                        this.telemetry.lastUpdate = new Date().toLocaleTimeString();
+                    });
                     
-                    setTimeout(() => URL.revokeObjectURL(imageUrl), 1000);
+                    this.eventSource.addEventListener('heartbeat', (event) => {
+                        console.log('Telemetry heartbeat');
+                    });
                     
-                    updateFpsCounter();
-                    updateConnectionStatus(true, 'Streaming');
+                    this.eventSource.onerror = (error) => {
+                        console.error('SSE error:', error);
+                        this.connectionStatus = 'Telemetry Error';
+                    };
+                },
+                
+                updateTelemetry(data) {
+                    this.telemetry.fps = data.fps;
+                    this.telemetry.cameraStatus = data.has_frame ? 'Active' : 'Idle';
                     
-                    // HONEST "Last" update - only for genuinely new frames (not first frame)
-                    if (isNewFrame && !isFirstFrame) {
-                        const now = new Date();
-                        document.getElementById('last-update').textContent = now.toLocaleTimeString();
-                        console.log(`New frame received (age: ${frameAgeSeconds.toFixed(1)}s) - Last updated`);
-                    } else if (isFirstFrame) {
-                        const now = new Date();
-                        document.getElementById('last-update').textContent = now.toLocaleTimeString();
-                        console.log(`First frame loaded (age: ${frameAgeSeconds.toFixed(1)}s) - Last initialized`);
+                    // Calculate frame age
+                    if (data.timestamp) {
+                        const age = Date.now() / 1000 - data.timestamp;
+                        if (age < 1) {
+                            this.telemetry.frameAge = Math.round(age * 1000) + 'ms';
+                        } else if (age < 60) {
+                            this.telemetry.frameAge = age.toFixed(1) + 's';
+                        } else {
+                            const mins = Math.floor(age / 60);
+                            const secs = Math.floor(age % 60);
+                            this.telemetry.frameAge = `${mins}m${secs}s`;
+                        }
+                    }
+                },
+                
+                startStream() {
+                    console.log('Starting MJPEG stream...');
+                    this.streaming = true;
+                    this.connectionStatus = 'Streaming';
+                },
+                
+                toggleStream() {
+                    if (this.streaming) {
+                        this.streaming = false;
+                        this.connectionStatus = 'Paused';
                     } else {
-                        console.log(`Same frame (age: ${frameAgeSeconds.toFixed(1)}s) - Last not updated`);
+                        this.startStream();
                     }
-                    
-                    // Update frame timestamp tracking
-                    appState.lastKnownFrameTimestamp = frameTimestamp;
-                    appState.lastDisplayUpdate = Date.now();
-                    
-                    // Always update frame age display
-                    updateFrameAgeDisplay();
-                    
-                } else {
-                    console.error('Frame capture failed:', response.status, response.statusText);
-                    updateConnectionStatus(false, 'Frame error');
-                }
+                },
                 
-            } catch (error) {
-                console.error('Capture error:', error);
-                updateConnectionStatus(false, 'Network error');
-            }
-            
-            if (appState.streaming) {
-                // Dynamic polling interval based on exposure time
-                const pollingInterval = getPollingInterval(appState.exposure);
-                console.log(`Next poll in ${pollingInterval}ms (exposure: ${appState.exposure}ms)`);
-                appState.streamInterval = setTimeout(continuousCapture, pollingInterval);
-            }
-        }
-        
-        function updateFrameAgeDisplay() {
-            const frameAgeElement = document.getElementById('frame-age');
-            
-            if (appState.currentFrameAge <= 0) {
-                frameAgeElement.textContent = '--';
-                frameAgeElement.className = '';
-                return;
-            }
-            
-            // Format frame age appropriately
-            let ageText;
-            if (appState.currentFrameAge < 1) {
-                ageText = `${(appState.currentFrameAge * 1000).toFixed(0)}ms`;
-            } else if (appState.currentFrameAge < 60) {
-                ageText = `${appState.currentFrameAge.toFixed(1)}s`;
-            } else {
-                const minutes = Math.floor(appState.currentFrameAge / 60);
-                const seconds = Math.floor(appState.currentFrameAge % 60);
-                ageText = `${minutes}m${seconds}s`;
-            }
-            
-            frameAgeElement.textContent = ageText;
-            
-            // Add visual warnings for stale frames
-            const maxAcceptableAge = (appState.exposure / 1000) * 2; // 2x exposure time
-            if (appState.currentFrameAge > maxAcceptableAge) {
-                frameAgeElement.className = 'accent-red'; // Stale frame warning
-            } else if (appState.currentFrameAge > (appState.exposure / 1000)) {
-                frameAgeElement.className = 'accent-yellow'; // Aging frame
-            } else {
-                frameAgeElement.className = 'accent-green'; // Fresh frame
-            }
-        }
-        
-        function updateFpsCounter() {
-            appState.frameCount++;
-            const now = Date.now();
-            const elapsed = now - appState.lastFrameTime;
-            
-            if (appState.frameCount % 10 === 0 || elapsed > 2000) {
-                appState.fps = (appState.frameCount * 1000) / elapsed;
-                document.getElementById('fps-display').textContent = `${appState.fps.toFixed(1)} FPS`;
+                handleStreamError() {
+                    console.error('MJPEG stream error');
+                    this.connectionStatus = 'Stream Error';
+                    // Retry after delay
+                    setTimeout(() => {
+                        if (this.streaming) {
+                            this.$refs.mjpegStream.src = this.streamUrl + '?t=' + Date.now();
+                        }
+                    }, 2000);
+                },
                 
-                appState.frameCount = 0;
-                appState.lastFrameTime = now;
+                handleStreamLoad() {
+                    console.log('MJPEG stream loaded successfully');
+                    if (this.streaming) {
+                        this.connectionStatus = 'Live';
+                        this.connected = true;
+                    }
+                }
             }
         }
-        
-        // Settings update handlers - Now stateless!
-        document.addEventListener('DOMContentLoaded', function() {
-            // Exposure slider
-            document.getElementById('exposure-slider').addEventListener('input', function() {
-                updateSliderDisplays();
-                updateCameraSettings(); // Direct API call, no session required
-            });
-            
-            // Gain slider  
-            document.getElementById('gain-slider').addEventListener('input', function() {
-                updateSliderDisplays();
-                updateCameraSettings(); // Direct API call, no session required
-            });
-
-            // White Balance Red slider
-            document.getElementById('wb-r-slider').addEventListener('input', function() {
-                updateSliderDisplays();
-                updateCameraSettings(); // Direct API call, no session required
-            });
-
-            // White Balance Blue slider  
-            document.getElementById('wb-b-slider').addEventListener('input', function() {
-                updateSliderDisplays();
-                updateCameraSettings(); // Direct API call, no session required
-            });
-            
-            // Keyboard shortcuts
-            document.addEventListener('keydown', function(e) {
-                if (e.key === ' ') {
-                    e.preventDefault();
-                    toggleStream();
-                }
-            });
-        });
-
-        // Start the application
-        initializeApp();
-        
-        // Periodic status check
-        setInterval(() => {
-            if (!appState.streaming) {
-                checkStatus();
-            }
-        }, 30000);
-        
-        // Continuous frame age updates (every 1 second)
-        setInterval(() => {
-            if (appState.streaming && appState.lastKnownFrameTimestamp) {
-                // Calculate current frame age based on when it was captured
-                const frameTimestamp = parseFloat(appState.lastKnownFrameTimestamp);
-                if (frameTimestamp > 0) {
-                    appState.currentFrameAge = Date.now() / 1000 - frameTimestamp;
-                    updateFrameAgeDisplay();
-                }
-            }
-        }, 1000);
     </script>
 </body>
 </html>

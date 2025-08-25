@@ -17,6 +17,8 @@ class LatestFrameBuffer:
         self._frame_queue: queue.Queue[tuple[bytes, dict[str, Any]]] = queue.Queue(
             maxsize=1
         )
+        # Callback for new frame notifications (for MJPEG/SSE)
+        self.on_new_frame = None
         logger.debug("Frame buffer initialized with queue-based storage")
 
     def update_frame(self, frame_bytes: bytes, metadata: dict[str, Any]) -> None:
@@ -46,6 +48,13 @@ class LatestFrameBuffer:
                     self._frame_queue.put_nowait((frame_bytes, metadata))
                 except queue.Full:
                     logger.warning("Failed to update frame due to queue contention")
+
+        # Notify listeners about new frame (for MJPEG/SSE)
+        if self.on_new_frame:
+            try:
+                self.on_new_frame()
+            except Exception as e:
+                logger.error("Error in new frame callback", error=str(e))
 
     def get_latest_frame(self) -> bytes | None:
         """Get the latest frame bytes without removing from queue."""

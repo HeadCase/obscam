@@ -203,6 +203,29 @@ class Gphoto2Camera(CameraInterface):
         with self.settings_lock:
             return dict(self.current_settings)
 
+    def get_control_capabilities(self) -> dict[str, Any]:
+        """Get Nikon camera control capabilities via gphoto2."""
+        return {
+            "exposure_ms": {
+                "min": 0.1,
+                "max": 30000,
+                "type": "float",
+            },  # Bulb mode supports wide range
+            "gain": {"min": 100, "max": 51200, "type": "int"},  # Nikon Zf ISO range
+            "wb_r": {
+                "min": 50,
+                "max": 150,
+                "type": "int",
+            },  # White balance (metadata only)
+            "wb_b": {
+                "min": 50,
+                "max": 150,
+                "type": "int",
+            },  # White balance (metadata only)
+            "camera_type": "Nikon DSLR",
+            "notes": "White balance values stored for metadata; use camera menu for actual WB presets",
+        }
+
     # Helper methods specific to gphoto2
 
     def _fresh_cfg(self) -> Any:

@@ -64,3 +64,11 @@ class CameraInterface(Protocol):
             Dictionary of current camera settings
         """
         ...
+
+    def get_control_capabilities(self) -> dict[str, Any]:
+        """Get camera control capabilities and ranges.
+
+        Returns:
+            Dictionary containing control limits for exposure, gain, white balance, etc.
+        """
+        ...

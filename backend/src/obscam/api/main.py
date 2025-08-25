@@ -1,12 +1,14 @@
 """Main FastAPI application entry point."""
 
 import time
+import asyncio
+import json
+from collections import deque
 import uvicorn
 from fastapi import FastAPI, Request, HTTPException
-from fastapi.responses import Response
+from fastapi.responses import Response, StreamingResponse
 from fastapi.templating import Jinja2Templates
 from fastapi.middleware.cors import CORSMiddleware
-from pathlib import Path
 
 from obscam.core.camera_factory import get_backend_service
 from obscam.common.logging_config import get_logger
@@ -33,12 +35,31 @@ app.add_middleware(
 # Initialize backend service
 backend = get_backend_service()
 
+# Global state for MJPEG streaming and SSE
+new_frame_event = asyncio.Event()
+settings_version = 0
+settings_applied_event = asyncio.Event()
+frame_times = deque(maxlen=120)
+
+
+# Wire frame notification callback
+def _on_new_frame():
+    """Called when a new frame is available."""
+    global frame_times
+    new_frame_event.set()
+    new_frame_event.clear()  # Clear for next wait
+    frame_times.append(time.time())
+
+
+# Connect frame buffer callback
+backend.frame_buffer.on_new_frame = _on_new_frame
+
 
 # Template routes (replacing Flask)
 @app.get("/")
 async def index(request: Request):
     """Main page displaying the camera feed."""
-    return templates.TemplateResponse("index.html", {"request": request})
+    return templates.TemplateResponse("index_new.html", {"request": request})
 
 
 # API routes
@@ -222,6 +243,217 @@ async def get_frame_info():
     except Exception as e:
         logger.error("Frame info failed", error=str(e))
         raise HTTPException(status_code=500, detail=f"Frame info failed: {e}")
+
+
+@app.get("/stream.mjpg")
+async def mjpeg_stream():
+    """MJPEG video stream for efficient frame delivery."""
+    boundary = "frame"
+
+    async def generate_stream():
+        while True:
+            try:
+                # Wait for new frame (or timeout for heartbeat)
+                await asyncio.wait_for(new_frame_event.wait(), timeout=2.0)
+            except asyncio.TimeoutError:
+                # Send heartbeat to keep connection alive
+                continue
+
+            # Get latest frame
+            frame_bytes = backend.get_latest_frame()
+            if not frame_bytes:
+                continue
+
+            # Send MJPEG frame
+            frame_data = (
+                (
+                    f"--{boundary}\r\n"
+                    "Content-Type: image/jpeg\r\n"
+                    f"Content-Length: {len(frame_bytes)}\r\n\r\n"
+                ).encode("ascii")
+                + frame_bytes
+                + b"\r\n"
+            )
+
+            yield frame_data
+
+    return StreamingResponse(
+        generate_stream(),
+        media_type=f"multipart/x-mixed-replace; boundary={boundary}",
+        headers={"Cache-Control": "no-store, max-age=0"},
+    )
+
+
+def _estimate_fps(window_s: float = 5.0) -> float | None:
+    """Estimate FPS from recent frame times."""
+    if len(frame_times) < 2:
+        return None
+    now = time.time()
+    recent = [t for t in frame_times if now - t <= window_s]
+    if len(recent) < 2:
+        return None
+    return round((len(recent) - 1) / (recent[-1] - recent[0]), 1)
+
+
+@app.get("/api/telemetry")
+async def telemetry_sse():
+    """Server-Sent Events stream for telemetry data."""
+
+    async def generate_telemetry():
+        # Send initial snapshot
+        metadata = backend.get_frame_metadata() or {}
+        settings = backend.get_current_settings() or {}
+        fps = _estimate_fps()
+
+        initial_payload = {
+            "timestamp": metadata.get("timestamp"),
+            "capture_ms": metadata.get("capture_duration_ms"),
+            "has_frame": backend.frame_buffer.has_frame(),
+            "fps": fps,
+            "settings": settings,
+        }
+
+        yield f"event: snapshot\ndata: {json.dumps(initial_payload)}\n\n"
+
+        while True:
+            try:
+                # Wait for new frame or settings change
+                tasks = [
+                    asyncio.create_task(
+                        asyncio.wait_for(new_frame_event.wait(), timeout=5.0)
+                    ),
+                    asyncio.create_task(
+                        asyncio.wait_for(settings_applied_event.wait(), timeout=5.0)
+                    ),
+                ]
+
+                done, pending = await asyncio.wait(
+                    tasks, return_when=asyncio.FIRST_COMPLETED
+                )
+
+                # Cancel pending tasks
+                for task in pending:
+                    task.cancel()
+
+            except asyncio.TimeoutError:
+                # Send periodic heartbeat
+                status = backend.get_status()
+                yield f"event: heartbeat\ndata: {json.dumps({'status': status.get('backend_service', 'unknown')})}\n\n"
+                continue
+
+            # Build telemetry payload
+            metadata = backend.get_frame_metadata() or {}
+            settings = backend.get_current_settings() or {}
+            fps = _estimate_fps()
+
+            payload = {
+                "timestamp": metadata.get("timestamp"),
+                "capture_ms": metadata.get("capture_duration_ms"),
+                "has_frame": backend.frame_buffer.has_frame(),
+                "fps": fps,
+                "settings": settings,
+                "settings_version": settings_version,
+            }
+
+            yield f"event: frame\ndata: {json.dumps(payload)}\n\n"
+
+    return StreamingResponse(
+        generate_telemetry(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "Connection": "keep-alive"},
+    )
+
+
+@app.get("/api/bootstrap")
+async def bootstrap():
+    """Bootstrap endpoint for initial page load - gets current settings and capabilities."""
+    try:
+        if not backend.is_started():
+            # Try to start backend automatically
+            if not backend.start_backend():
+                raise HTTPException(
+                    status_code=400, detail="Backend service not available"
+                )
+
+        current_settings = backend.get_current_settings()
+        status = backend.get_status()
+        capabilities = backend.camera.get_control_capabilities()
+
+        return {
+            "current_settings": current_settings,
+            "status": status,
+            "capabilities": capabilities,
+            "stream_url": "/stream.mjpg",
+            "telemetry_url": "/api/telemetry",
+            "timestamp": time.time(),
+        }
+
+    except Exception as e:
+        logger.error("Bootstrap failed", error=str(e))
+        raise HTTPException(status_code=500, detail=f"Bootstrap failed: {e}")
+
+
+@app.post("/api/settings")
+async def update_settings_v2(request: Request):
+    """Enhanced settings update with coalescing and version tracking."""
+    global settings_version
+
+    try:
+        if not backend.is_started():
+            raise HTTPException(status_code=400, detail="Backend service not started")
+
+        data = await request.json()
+
+        # Use the capture loop's coalescing for real-time updates
+        valid_settings = {}
+        if "exposure_ms" in data:
+            exposure_ms = float(data["exposure_ms"])
+            if 0.1 <= exposure_ms <= 30000:
+                valid_settings["exposure_ms"] = exposure_ms
+
+        if "gain" in data:
+            gain = int(data["gain"])
+            if 0 <= gain <= 51200:  # Support both camera types
+                valid_settings["gain"] = gain
+
+        if "wb_r" in data:
+            wb_r = int(data["wb_r"])
+            if 50 <= wb_r <= 150:
+                valid_settings["wb_r"] = wb_r
+
+        if "wb_b" in data:
+            wb_b = int(data["wb_b"])
+            if 50 <= wb_b <= 150:
+                valid_settings["wb_b"] = wb_b
+
+        if not valid_settings:
+            raise HTTPException(status_code=400, detail="No valid settings provided")
+
+        # Queue settings update for capture loop (coalescing)
+        backend.capture_loop.update_settings(valid_settings)
+
+        # Async persistence
+        backend.settings_manager.save_settings_async(
+            {**backend.get_current_settings(), **valid_settings}
+        )
+
+        # Notify SSE listeners
+        settings_version += 1
+        settings_applied_event.set()
+        settings_applied_event.clear()
+
+        return {
+            "status": "success",
+            "applied_version": settings_version,
+            "current_settings": backend.get_current_settings(),
+            "timestamp": time.time(),
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("Settings update failed", error=str(e))
+        raise HTTPException(status_code=500, detail=f"Settings update failed: {e}")
 
 
 def run_server(port: int = 8000):
