@@ -59,7 +59,7 @@ backend.frame_buffer.on_new_frame = _on_new_frame
 @app.get("/")
 async def index(request: Request):
     """Main page displaying the camera feed."""
-    return templates.TemplateResponse("index_new.html", {"request": request})
+    return templates.TemplateResponse("index.html", {"request": request})
 
 
 # API routes

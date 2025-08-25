@@ -6,7 +6,6 @@ import os
 import threading
 from typing import Any
 
-import numpy as np
 import zwoasi as asi  # pyright: ignore[reportMissingTypeStubs]
 from PIL import Image
 
@@ -25,11 +24,15 @@ class ZwoAsiCamera(CameraInterface):
         # Current camera settings
         self.current_settings = {
             "exposure_ms": 200.0,  # 200ms default
-            "gain": 600,
-            "wb_r": 70,
-            "wb_b": 70,
+            "gain": 250,  # More reasonable default gain
+            "wb_r": 75,
+            "wb_b": 120,
         }
         self.settings_lock = threading.Lock()
+
+        # Capture mode management
+        self.current_capture_mode = None  # None, "video", or "single"
+        self.video_mode_threshold_ms = 1000.0  # Switch to single mode above 1s
 
         # Initialize the SDK
         self._init_sdk(library_path)
@@ -113,12 +116,16 @@ class ZwoAsiCamera(CameraInterface):
 
             # Basic color camera settings
             if self.camera_info and self.camera_info.get("IsColorCam", False):
-                self.camera.set_control_value(asi.ASI_WB_B, 100)
-                self.camera.set_control_value(asi.ASI_WB_R, 80)
+                self.camera.set_control_value(asi.ASI_WB_B, 120)
+                self.camera.set_control_value(asi.ASI_WB_R, 75)
 
             self.camera.set_control_value(asi.ASI_GAMMA, 50)
             self.camera.set_control_value(asi.ASI_BRIGHTNESS, 50)
             self.camera.set_control_value(asi.ASI_FLIP, 0)
+            self.camera.set_control_value(asi.ASI_GAIN, 250)
+
+            # Reset capture mode
+            self.current_capture_mode = None
 
             print("Camera configured with minimal settings")
 
@@ -135,7 +142,9 @@ class ZwoAsiCamera(CameraInterface):
                 pass
 
             self.camera = None
+            self.camera_info = None
             self.is_initialized = False
+            self.current_capture_mode = None
             print("Camera disconnected")
 
     def get_status(self) -> dict[str, Any]:
@@ -144,8 +153,6 @@ class ZwoAsiCamera(CameraInterface):
             return {"status": "disconnected", "error": "Camera not initialized"}
 
         try:
-            current_values = self.camera.get_control_values()
-
             with self.settings_lock:
                 settings = self.current_settings.copy()
 
@@ -167,47 +174,62 @@ class ZwoAsiCamera(CameraInterface):
             return {"status": "error", "error": str(e)}
 
     def capture_frame(self) -> bytes | None:
-        """Capture a single frame from ZWO camera."""
+        """Capture a single frame using appropriate mode based on exposure time."""
         if not self.is_initialized or not self.camera:
             return None
 
         try:
             # Get current settings
             with self.settings_lock:
-                exposure_us = int(self.current_settings["exposure_ms"] * 1000)
+                exposure_ms = float(self.current_settings["exposure_ms"])
                 gain = int(self.current_settings["gain"])
                 wb_r = int(self.current_settings.get("wb_r", 75))
                 wb_b = int(self.current_settings.get("wb_b", 120))
 
+            # Determine capture mode based on exposure time
+            use_video_mode = exposure_ms <= self.video_mode_threshold_ms
+
             # Apply settings to camera
+            exposure_us = int(exposure_ms * 1000)
             self.camera.set_control_value(asi.ASI_EXPOSURE, exposure_us)
             self.camera.set_control_value(asi.ASI_GAIN, gain)
 
-            # Apply white balance for color cameras
-            if self.camera_info and self.camera_info.get("IsColorCam", False):
+            # Set image format and white balance for color cameras
+            is_color = self.camera_info and self.camera_info.get("IsColorCam", False)
+            if is_color:
                 self.camera.set_control_value(asi.ASI_WB_R, wb_r)
                 self.camera.set_control_value(asi.ASI_WB_B, wb_b)
                 self.camera.set_image_type(asi.ASI_IMG_RGB24)
-                width = self.camera_info["MaxWidth"]
-                height = self.camera_info["MaxHeight"]
             else:
                 self.camera.set_image_type(asi.ASI_IMG_RAW8)
-                width = self.camera_info["MaxWidth"] if self.camera_info else 1920
-                height = self.camera_info["MaxHeight"] if self.camera_info else 1080
 
-            # Capture frame
-            img_buffer = self.camera.capture_video_frame()
-
-            # Process image
-            if self.camera_info and self.camera_info.get("IsColorCam", False):
-                img_array = np.frombuffer(img_buffer, dtype=np.uint8).reshape(
-                    (height, width, 3)
-                )
-                pil_image = Image.fromarray(img_array)
+            # Capture frame using appropriate mode
+            if use_video_mode:
+                img_data = self._capture_video_frame()
             else:
-                img_array = np.frombuffer(img_buffer, dtype=np.uint8).reshape(
-                    (height, width)
-                )
+                img_data = self._capture_single_frame()
+
+            if img_data is None or len(img_data) == 0:
+                return None
+
+            # Convert numpy array to PIL Image
+            if is_color and self.camera_info:
+                width = int(self.camera_info["MaxWidth"])
+                height = int(self.camera_info["MaxHeight"])
+                if len(img_data.shape) == 1:
+                    # Flatten array needs reshaping
+                    img_array = img_data.reshape((height, width, 3))
+                else:
+                    img_array = img_data
+                pil_image = Image.fromarray(img_array, mode="RGB")
+            else:
+                if len(img_data.shape) == 1 and self.camera_info:
+                    # Flatten array needs reshaping
+                    width = int(self.camera_info["MaxWidth"])
+                    height = int(self.camera_info["MaxHeight"])
+                    img_array = img_data.reshape((height, width))
+                else:
+                    img_array = img_data
                 pil_image = Image.fromarray(img_array, mode="L")
 
             # Encode to JPEG
@@ -217,7 +239,50 @@ class ZwoAsiCamera(CameraInterface):
 
         except Exception as e:
             print(f"Frame capture failed: {e}")
+            import traceback
+
+            traceback.print_exc()
             return None
+
+    def _capture_video_frame(self):
+        """Capture frame using video mode."""
+        # Ensure video mode is active
+        if self.current_capture_mode != "video":
+            self._switch_to_video_mode()
+
+        # Capture video frame
+        return self.camera.capture_video_frame()
+
+    def _capture_single_frame(self):
+        """Capture frame using single exposure mode."""
+        # Ensure single mode is active (stop video if running)
+        if self.current_capture_mode == "video":
+            self._switch_to_single_mode()
+
+        # Capture single frame
+        return self.camera.capture()
+
+    def _switch_to_video_mode(self):
+        """Switch camera to video capture mode."""
+        try:
+            # Stop any single exposure
+            self.camera.stop_exposure()
+        except:
+            pass
+
+        # Start video mode
+        self.camera.start_video_capture()
+        self.current_capture_mode = "video"
+
+    def _switch_to_single_mode(self):
+        """Switch camera to single exposure mode."""
+        try:
+            # Stop video capture
+            self.camera.stop_video_capture()
+        except:
+            pass
+
+        self.current_capture_mode = "single"
 
     def update_settings(self, **settings: Any) -> bool:
         """Update camera settings."""

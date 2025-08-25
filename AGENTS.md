@@ -26,6 +26,10 @@
 - Dev: ipython for development/debugging
 - Build system: uv_build
 
+## ZWO SDKs
+- https://zwoastro.yuque.com/olyczd/sfwyw6/kpde2odaw3h4ekix
+- Python bindings: https://github.com/python-zwoasi/python-zwoasi
+- Example python usage: https://raw.githubusercontent.com/python-zwoasi/python-zwoasi/refs/heads/master/zwoasi/examples/zwoasi_demo.py
 ## General Guidelines
 
 - This application's purpose to provide monitoring (CCTV-style) for my remote
