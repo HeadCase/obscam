@@ -192,8 +192,9 @@ class Gphoto2Camera(CameraInterface):
             return self.frame_metadata
 
     def update_settings(self, **settings: Any) -> bool:
-        """Update camera settings."""
+        """Update camera settings and apply them to the hardware."""
         try:
+            # Update internal state first
             with self.settings_lock:
                 if "exposure_ms" in settings:
                     self.current_settings["exposure_ms"] = float(
@@ -206,10 +207,70 @@ class Gphoto2Camera(CameraInterface):
                 if "wb_b" in settings:
                     self.current_settings["wb_b"] = int(settings["wb_b"])
 
-            print(f"Settings updated: {settings}")
+            # Apply settings to camera hardware via gphoto2
+            cfg = self._fresh_cfg()
+
+            # Map gain to ISO (find closest available value)
+            if "gain" in settings:
+                try:
+                    iso_values = [
+                        100,
+                        125,
+                        160,
+                        200,
+                        250,
+                        320,
+                        400,
+                        500,
+                        640,
+                        800,
+                        1000,
+                        1250,
+                        1600,
+                        2000,
+                        2500,
+                        3200,
+                        4000,
+                        5000,
+                        6400,
+                        8000,
+                        10000,
+                        12800,
+                        16000,
+                        20000,
+                        25600,
+                        32000,
+                        40000,
+                        51200,
+                    ]
+
+                    requested_iso = int(settings["gain"])
+                    # Find closest available ISO value
+                    closest_iso = min(iso_values, key=lambda x: abs(x - requested_iso))
+
+                    iso_control = cfg.get_child_by_name("iso")
+                    iso_control.set_value(str(closest_iso))
+                    print(f"Mapped gain {requested_iso} to ISO {closest_iso}")
+                except Exception as e:
+                    print(f"Warning: Could not set ISO: {e}")
+
+            # White balance - map to preset modes (no fine R/B control available)
+            if "wb_r" in settings or "wb_b" in settings:
+                print("Note: Fine white balance R/B control not available on DSLR")
+                print(
+                    "Values stored for metadata only. Use camera menu for white balance presets."
+                )
+
+            # Exposure handled via bulb duration (existing implementation is correct)
+
+            # Apply the configuration to camera
+            self.camera.set_config(cfg)
+
+            print(f"Camera settings updated: {settings}")
             return True
+
         except Exception as e:
-            print(f"Failed to update settings: {e}")
+            print(f"Failed to update camera settings: {e}")
             return False
 
     def get_current_settings(self) -> dict[str, Any]:
@@ -256,60 +317,26 @@ class Gphoto2Camera(CameraInterface):
             return None
 
         try:
-            # Check bulb mode
-            if not self._has_writable_bulb():
-                print("Bulb mode not available, trying normal capture")
-                # Fall back to normal capture
-                return self._capture_normal_image()
-
             # Open shutter (Nikon uses toggle, so we set to 1 to open)
             cfg = self._fresh_cfg()
             bulb = cfg.get_child_by_name("bulb")
             bulb.set_value(1)
             self.camera.set_config(cfg)
 
-            # Wait for exposure
             time.sleep(seconds)
 
-            # Close shutter (set to 0 to close)
-            cfg = self._fresh_cfg()
-            bulb = cfg.get_child_by_name("bulb")
             bulb.set_value(0)
             self.camera.set_config(cfg)
 
-            # Wait for file
             folder, name = self._wait_for_file_added(timeout_s=30.0)
 
-            # Download file
             cam_file = self.camera.file_get(folder, name, gp.GP_FILE_TYPE_NORMAL)  # pyright: ignore[reportUnknownMemberType]
             data = cam_file.get_data_and_size()
 
-            # Convert to bytes if necessary
             return bytes(data) if not isinstance(data, bytes) else data
 
         except Exception as e:
             print(f"Bulb capture failed: {e}, trying normal capture")
-            return self._capture_normal_image()
-
-    def _capture_normal_image(self) -> bytes | None:
-        """Capture using normal trigger (non-bulb mode)."""
-        try:
-            # Trigger capture
-            self.camera.trigger_capture()
-
-            # Wait for file
-            folder, name = self._wait_for_file_added(timeout_s=10.0)
-
-            # Download file
-            cam_file = self.camera.file_get(folder, name, gp.GP_FILE_TYPE_NORMAL)  # pyright: ignore[reportUnknownMemberType]
-            data = cam_file.get_data_and_size()
-
-            # Convert to bytes if necessary
-            return bytes(data) if not isinstance(data, bytes) else data
-
-        except Exception as e:
-            print(f"Normal capture failed: {e}")
-            return None
 
     def _wait_for_file_added(self, timeout_s: float = 30.0) -> tuple[str, str]:
         """Wait for camera to report a new file."""

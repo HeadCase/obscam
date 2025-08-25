@@ -1,13 +1,25 @@
-#!/usr/bin/env python3
 """Camera factory for selecting the appropriate camera implementation."""
 
 import os
+from pathlib import Path
 
-from .camera_interface import CameraInterface
+from obscam.cached_camera import CachedCamera
+from obscam.camera_interface import CameraInterface
 
 
-# Global camera instance
 _camera_instance: CameraInterface | None = None
+
+
+def _get_cache_directory() -> Path:
+    """Get appropriate cache directory for the platform."""
+    if os.path.exists("/dev/shm"):
+        return Path("/dev/shm")
+    elif os.path.exists("/tmp"):
+        cache_dir = Path("/tmp/obscam")
+        cache_dir.mkdir(parents=True, exist_ok=True)
+        return cache_dir
+    else:
+        return Path("/tmp")
 
 
 def get_camera() -> CameraInterface:
@@ -29,12 +41,17 @@ def get_camera() -> CameraInterface:
             print("Using gphoto2 camera implementation (development mode)")
             from .libgphoto2_camera import Gphoto2Camera
 
-            _camera_instance = Gphoto2Camera()
+            base_camera = Gphoto2Camera()
         else:
             # Default to ZWO for production
             print("Using ZWO ASI camera implementation (production mode)")
             from .zwo_asi_camera import ZwoAsiCamera
 
-            _camera_instance = ZwoAsiCamera()
+            base_camera = ZwoAsiCamera()
+
+        cache_dir = _get_cache_directory()
+
+        _camera_instance = CachedCamera(base_camera, cache_dir)
+        print(f"Camera caching enabled in: {cache_dir}")
 
     return _camera_instance

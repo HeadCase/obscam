@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
 """ZWO ASI camera implementation for observatory monitoring."""
 
-import os
 import io
+import os
 import threading
 import time
 from typing import Any
 
+import numpy as np
 import zwoasi as asi  # pyright: ignore[reportMissingTypeStubs]
-import numpy as np  # pyright: ignore[reportMissingTypeStubs]
 from PIL import Image
 
 from .camera_interface import CameraInterface, FrameMetadata
@@ -26,9 +26,9 @@ class ZwoAsiCamera(CameraInterface):
         # Current camera settings
         self.current_settings = {
             "exposure_ms": 200.0,  # 200ms default
-            "gain": 250,
-            "wb_r": 75,
-            "wb_b": 120,
+            "gain": 600,
+            "wb_r": 70,
+            "wb_b": 70,
         }
         self.settings_lock = threading.Lock()
 
