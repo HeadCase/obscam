@@ -9,7 +9,7 @@ from typing import Any
 from PIL import Image
 import gphoto2 as gp  # pyright: ignore[reportMissingTypeStubs]
 
-from .camera_interface import CameraInterface, FrameMetadata
+from obscam.camera_interface import CameraInterface, FrameMetadata
 
 
 class Gphoto2Camera(CameraInterface):
@@ -21,27 +21,19 @@ class Gphoto2Camera(CameraInterface):
         self.inited = False
 
         # Current camera settings
-        self.current_settings = {
-            "exposure_ms": 200.0,  # 200ms default
-            "gain": 100,  # Simulated gain (ISO-like)
-            "wb_r": 100,  # Not used but kept for interface compatibility
+        self.current_settings: FrameMetadata = {
+            "exposure_ms": 200.0,
+            "gain": 100,
+            "wb_r": 100,
             "wb_b": 100,
+            "timestamp": time.time(),
         }
         self.settings_lock = threading.Lock()
-
-        # Frame caching
-        self.latest_frame: bytes | None = None
-        self.frame_metadata: FrameMetadata | None = None
-        self.frame_lock = threading.Lock()
-
-        # Continuous capture control
-        self.capture_thread: threading.Thread | None = None
-        self.capture_running = False
 
     def connect(self) -> bool:
         """Connect to the camera."""
         try:
-            self.camera = gp.Camera()  # pyright: ignore[reportUnknownMemberType]
+            self.camera = gp.Camera()  # pyright: ignore[reportUnknownMemberType, reportAttributeAccessIssue]
             self.camera.init()
             self.inited = True
             print("Connected to gphoto2 camera")
@@ -58,8 +50,6 @@ class Gphoto2Camera(CameraInterface):
 
     def disconnect(self) -> None:
         """Disconnect from the camera."""
-        self.stop_continuous_capture()
-
         if self.inited and self.camera:
             try:
                 self.camera.exit()
@@ -87,109 +77,44 @@ class Gphoto2Camera(CameraInterface):
                 "is_color_camera": True,
                 "current_exposure_ms": settings["exposure_ms"],
                 "current_gain": settings["gain"],
-                "current_wb_r": settings.get("wb_r"),
-                "current_wb_b": settings.get("wb_b"),
-                "continuous_capture": self.capture_running,
                 "shutter_mode": shutter_mode or "Unknown",
             }
         except Exception as e:
             return {"status": "error", "error": str(e)}
 
-    def start_continuous_capture(self) -> bool:
-        """Start continuous capture loop."""
+    def capture_frame(self) -> bytes | None:
+        """Capture a single frame using bulb mode."""
         if not self.inited or not self.camera:
-            print("Camera not initialized - cannot start continuous capture")
-            return False
-
-        if self.capture_running:
-            print("Continuous capture already running")
-            return True
+            return None
 
         try:
-            self.capture_running = True
-            self.capture_thread = threading.Thread(
-                target=self._capture_loop,
-                daemon=True,
-                name="Gphoto2CaptureLoop",
-            )
-            self.capture_thread.start()
-            print("Continuous capture started")
-            return True
+            with self.settings_lock:
+                exposure_seconds = self.current_settings["exposure_ms"] / 1000.0
+
+            # Capture using bulb mode
+            image_data = self._capture_bulb_image(exposure_seconds)
+
+            if image_data:
+                # Convert to JPEG if needed
+                img = Image.open(io.BytesIO(image_data))
+
+                # Resize if too large (optional, for faster transfer)
+                max_dimension = 1920
+                if img.width > max_dimension or img.height > max_dimension:
+                    img.thumbnail(
+                        (max_dimension, max_dimension), Image.Resampling.LANCZOS
+                    )
+
+                # Save as JPEG
+                buffer = io.BytesIO()
+                img.save(buffer, format="JPEG", quality=85)
+                return buffer.getvalue()
+
+            return None
+
         except Exception as e:
-            print(f"Failed to start continuous capture: {e}")
-            self.capture_running = False
-            return False
-
-    def stop_continuous_capture(self) -> None:
-        """Stop continuous capture loop."""
-        if self.capture_running:
-            self.capture_running = False
-            if self.capture_thread:
-                self.capture_thread.join(timeout=5.0)
-            print("Continuous capture stopped")
-
-    def _capture_loop(self) -> None:
-        """Main capture loop - runs in separate thread."""
-        print("Capture loop started")
-
-        while self.capture_running and self.inited and self.camera:
-            try:
-                # Get current settings
-                with self.settings_lock:
-                    exposure_seconds = self.current_settings["exposure_ms"] / 1000.0
-                    gain = self.current_settings["gain"]
-                    wb_r = self.current_settings.get("wb_r", 100)
-                    wb_b = self.current_settings.get("wb_b", 100)
-
-                # Capture using bulb mode
-                capture_time = time.time()
-                image_data = self._capture_bulb_image(exposure_seconds)
-
-                if image_data:
-                    # Convert to JPEG if needed
-                    img = Image.open(io.BytesIO(image_data))
-
-                    # Resize if too large (optional, for faster transfer)
-                    max_dimension = 1920
-                    if img.width > max_dimension or img.height > max_dimension:
-                        img.thumbnail(
-                            (max_dimension, max_dimension), Image.Resampling.LANCZOS
-                        )
-
-                    # Save as JPEG
-                    buffer = io.BytesIO()
-                    img.save(buffer, format="JPEG", quality=85)
-                    jpeg_bytes = buffer.getvalue()
-
-                    # Store frame with metadata
-                    with self.frame_lock:
-                        self.latest_frame = jpeg_bytes
-                        self.frame_metadata = FrameMetadata(
-                            exposure_ms=self.current_settings["exposure_ms"],
-                            gain=int(gain),
-                            wb_r=int(wb_r),
-                            wb_b=int(wb_b),
-                            timestamp=capture_time,
-                        )
-
-                # Brief pause between captures to avoid overloading
-                time.sleep(0.1)
-
-            except Exception as e:
-                print(f"Capture error: {e}")
-                time.sleep(1.0)  # Longer pause on error
-
-        print("Capture loop ended")
-
-    def get_latest_frame(self) -> bytes | None:
-        """Get the latest cached frame."""
-        with self.frame_lock:
-            return self.latest_frame
-
-    def get_frame_metadata(self) -> FrameMetadata | None:
-        """Get metadata for the latest frame."""
-        with self.frame_lock:
-            return self.frame_metadata
+            print(f"Single frame capture failed: {e}")
+            return None
 
     def update_settings(self, **settings: Any) -> bool:
         """Update camera settings and apply them to the hardware."""
@@ -273,7 +198,7 @@ class Gphoto2Camera(CameraInterface):
             print(f"Failed to update camera settings: {e}")
             return False
 
-    def get_current_settings(self) -> dict[str, Any]:
+    def get_current_settings(self) -> FrameMetadata:
         """Get current camera settings."""
         with self.settings_lock:
             return self.current_settings.copy()

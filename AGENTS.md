@@ -5,7 +5,9 @@
 - **Install dependencies**: `uv add` or `uv sync`
 - **Run main application**: `uv run obscam`
 - **Run python code with development environment using**: uv run
-- **No test framework configured** - check with maintainer for test setup
+- **Tests should be written with pytest**
+- _Use package name for imports_: `from obscam.foo import Foo`
+- _Use loguru for logging_
 
 ## Code Style & Conventions
 

@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""Camera interface protocol defining the contract for all camera implementations."""
+"""Camera interface protocol defining the contract for all camera
+implementations."""
 
 from typing import Any, Protocol, TypedDict
 
@@ -15,7 +16,7 @@ class FrameMetadata(TypedDict):
 
 
 class CameraInterface(Protocol):
-    """Protocol defining the interface all camera implementations must follow."""
+    """Protocol defining pure camera hardware control interface."""
 
     def connect(self) -> bool:
         """Connect to the camera hardware.
@@ -37,31 +38,11 @@ class CameraInterface(Protocol):
         """
         ...
 
-    def start_continuous_capture(self) -> bool:
-        """Start the continuous capture loop.
+    def capture_frame(self) -> bytes | None:
+        """Capture a single frame and return as JPEG bytes.
 
         Returns:
-            True if capture started successfully, False otherwise
-        """
-        ...
-
-    def stop_continuous_capture(self) -> None:
-        """Stop the continuous capture loop."""
-        ...
-
-    def get_latest_frame(self) -> bytes | None:
-        """Get the most recently captured frame as JPEG bytes.
-
-        Returns:
-            JPEG bytes of the latest frame, or None if no frame available
-        """
-        ...
-
-    def get_frame_metadata(self) -> FrameMetadata | None:
-        """Get metadata for the most recently captured frame.
-
-        Returns:
-            Metadata dictionary for the latest frame, or None if no frame available
+            JPEG bytes of captured frame, or None if capture failed
         """
         ...
 
@@ -76,7 +57,7 @@ class CameraInterface(Protocol):
         """
         ...
 
-    def get_current_settings(self) -> dict[str, Any]:
+    def get_current_settings(self) -> FrameMetadata:
         """Get the current camera settings.
 
         Returns:

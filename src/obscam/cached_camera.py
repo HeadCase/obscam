@@ -4,10 +4,11 @@
 import json
 import os
 import threading
+import time
 from pathlib import Path
 from typing import Any
 
-from obscam.camera_interface import CameraInterface, FrameMetadata
+from obscam.camera_interface import CameraInterface
 from obscam.constants import DEFAULT_CACHE_DIR
 
 
@@ -30,6 +31,13 @@ class CachedCamera:
         # Thread safety
         self.settings_lock: threading.Lock = threading.Lock()
         self.cache_lock: threading.Lock = threading.Lock()
+
+        # Continuous capture orchestration (moved from camera implementations)
+        self.capture_thread: threading.Thread | None = None
+        self.capture_running = False
+        self.latest_frame: bytes | None = None
+        self.frame_metadata: dict[str, Any] | None = None
+        self.frame_lock = threading.Lock()
 
         cache_dir.mkdir(parents=True, exist_ok=True)
 
@@ -99,40 +107,100 @@ class CachedCamera:
         return success
 
     def disconnect(self) -> None:
-        """Disconnect from camera."""
+        """Disconnect from camera and stop capture service."""
+        self.stop_continuous_capture()
         self.camera.disconnect()
 
+    def capture_frame(self) -> bytes | None:
+        """Delegate single frame capture to underlying camera."""
+        return self.camera.capture_frame()
+
     def get_status(self) -> dict[str, Any]:
-        """Get current camera status."""
-        return self.camera.get_status()
+        """Get current camera status including service layer status."""
+        status = self.camera.get_status()
+        status["continuous_capture"] = self.capture_running
+        return status
 
     def start_continuous_capture(self) -> bool:
-        """Start continuous capture."""
-        return self.camera.start_continuous_capture()
+        """Start continuous capture orchestration."""
+        if self.camera.get_status().get("status") != "connected":
+            print("Camera not connected - cannot start continuous capture")
+            return False
+
+        if self.capture_running:
+            print("Continuous capture already running")
+            return True
+
+        try:
+            self.capture_running = True
+            self.capture_thread = threading.Thread(
+                target=self._capture_loop,
+                daemon=True,
+                name="CachedCameraCaptureLoop",
+            )
+            self.capture_thread.start()
+            print("Continuous capture started")
+            return True
+        except Exception as e:
+            print(f"Failed to start continuous capture: {e}")
+            self.capture_running = False
+            return False
 
     def stop_continuous_capture(self) -> None:
-        """Stop continuous capture."""
-        self.camera.stop_continuous_capture()
+        """Stop continuous capture orchestration."""
+        if self.capture_running:
+            self.capture_running = False
+            if self.capture_thread:
+                self.capture_thread.join(timeout=2.0)
+            print("Continuous capture stopped")
+
+    def _capture_loop(self) -> None:
+        """Continuous capture loop orchestration."""
+        print("Capture loop started")
+
+        while self.capture_running:
+            try:
+                # Capture single frame from camera hardware
+                frame_bytes = self.camera.capture_frame()
+
+                if frame_bytes:
+                    capture_time = time.time()
+                    settings = self.camera.get_current_settings()
+
+                    # Update in-memory cache
+                    with self.frame_lock:
+                        self.latest_frame = frame_bytes
+                        self.frame_metadata = {**settings, "timestamp": capture_time}
+
+                    # Cache to disk
+                    self._cache_frame(frame_bytes)
+
+                # Brief pause between captures
+                time.sleep(0.1)
+
+            except Exception as e:
+                print(f"Capture loop error: {e}")
+                time.sleep(1.0)
+
+        print("Capture loop ended")
 
     def get_latest_frame(self) -> bytes | None:
-        """Get latest frame, with caching for new clients."""
-        # Try to get fresh frame from camera
-        frame_bytes = self.camera.get_latest_frame()
+        """Get latest frame from memory cache, with disk fallback."""
+        # Try memory cache first
+        with self.frame_lock:
+            if self.latest_frame:
+                return self.latest_frame
 
-        if frame_bytes:
-            # Cache the fresh frame
-            self._cache_frame(frame_bytes)
-            return frame_bytes
-        else:
-            # Fallback to cached frame for new clients during long exposures
-            cached_frame = self._load_cached_frame()
-            if cached_frame:
-                print("Serving cached frame (camera busy or no fresh frame)")
-            return cached_frame
+        # Fallback to cached frame from disk for new clients
+        cached_frame = self._load_cached_frame()
+        if cached_frame:
+            print("Serving cached frame from disk")
+        return cached_frame
 
-    def get_frame_metadata(self) -> FrameMetadata | None:
-        """Get frame metadata."""
-        return self.camera.get_frame_metadata()
+    def get_frame_metadata(self) -> dict[str, Any] | None:
+        """Get frame metadata from memory cache."""
+        with self.frame_lock:
+            return self.frame_metadata
 
     def update_settings(self, **settings: Any) -> bool:
         """Update camera settings and persist them."""

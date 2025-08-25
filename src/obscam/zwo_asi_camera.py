@@ -4,14 +4,13 @@
 import io
 import os
 import threading
-import time
 from typing import Any
 
 import numpy as np
 import zwoasi as asi  # pyright: ignore[reportMissingTypeStubs]
 from PIL import Image
 
-from .camera_interface import CameraInterface, FrameMetadata
+from .camera_interface import CameraInterface
 
 
 class ZwoAsiCamera(CameraInterface):
@@ -31,15 +30,6 @@ class ZwoAsiCamera(CameraInterface):
             "wb_b": 70,
         }
         self.settings_lock = threading.Lock()
-
-        # Frame caching
-        self.latest_frame: bytes | None = None
-        self.frame_metadata: FrameMetadata | None = None
-        self.frame_lock = threading.Lock()
-
-        # Continuous capture control
-        self.capture_thread: threading.Thread | None = None
-        self.capture_running = False
 
         # Initialize the SDK
         self._init_sdk(library_path)
@@ -137,8 +127,6 @@ class ZwoAsiCamera(CameraInterface):
 
     def disconnect(self) -> None:
         """Disconnect from the camera."""
-        self.stop_continuous_capture()
-
         if self.camera:
             try:
                 self.camera.stop_video_capture()
@@ -173,139 +161,63 @@ class ZwoAsiCamera(CameraInterface):
                 "current_gain": settings["gain"],
                 "current_wb_r": settings.get("wb_r"),
                 "current_wb_b": settings.get("wb_b"),
-                "continuous_capture": self.capture_running,
             }
 
         except Exception as e:
             return {"status": "error", "error": str(e)}
 
-    def start_continuous_capture(self) -> bool:
-        """Start continuous capture loop."""
+    def capture_frame(self) -> bytes | None:
+        """Capture a single frame from ZWO camera."""
         if not self.is_initialized or not self.camera:
-            print("Camera not initialized - cannot start continuous capture")
-            return False
-
-        if self.capture_running:
-            print("Continuous capture already running")
-            return True
+            return None
 
         try:
-            # Start video mode for continuous capture
-            self.camera.stop_exposure()
-            self.camera.start_video_capture()
+            # Get current settings
+            with self.settings_lock:
+                exposure_us = int(self.current_settings["exposure_ms"] * 1000)
+                gain = int(self.current_settings["gain"])
+                wb_r = int(self.current_settings.get("wb_r", 75))
+                wb_b = int(self.current_settings.get("wb_b", 120))
 
-            self.capture_running = True
-            self.capture_thread = threading.Thread(
-                target=self._capture_loop,
-                daemon=True,
-                name="ZwoAsiCaptureLoop",
-            )
-            self.capture_thread.start()
-            print("Continuous capture started")
-            return True
+            # Apply settings to camera
+            self.camera.set_control_value(asi.ASI_EXPOSURE, exposure_us)
+            self.camera.set_control_value(asi.ASI_GAIN, gain)
+
+            # Apply white balance for color cameras
+            if self.camera_info and self.camera_info.get("IsColorCam", False):
+                self.camera.set_control_value(asi.ASI_WB_R, wb_r)
+                self.camera.set_control_value(asi.ASI_WB_B, wb_b)
+                self.camera.set_image_type(asi.ASI_IMG_RGB24)
+                width = self.camera_info["MaxWidth"]
+                height = self.camera_info["MaxHeight"]
+            else:
+                self.camera.set_image_type(asi.ASI_IMG_RAW8)
+                width = self.camera_info["MaxWidth"] if self.camera_info else 1920
+                height = self.camera_info["MaxHeight"] if self.camera_info else 1080
+
+            # Capture frame
+            img_buffer = self.camera.capture_video_frame()
+
+            # Process image
+            if self.camera_info and self.camera_info.get("IsColorCam", False):
+                img_array = np.frombuffer(img_buffer, dtype=np.uint8).reshape(
+                    (height, width, 3)
+                )
+                pil_image = Image.fromarray(img_array)
+            else:
+                img_array = np.frombuffer(img_buffer, dtype=np.uint8).reshape(
+                    (height, width)
+                )
+                pil_image = Image.fromarray(img_array, mode="L")
+
+            # Encode to JPEG
+            buffer = io.BytesIO()
+            pil_image.save(buffer, format="JPEG", quality=85)
+            return buffer.getvalue()
 
         except Exception as e:
-            print(f"Failed to start continuous capture: {e}")
-            self.capture_running = False
-            return False
-
-    def stop_continuous_capture(self) -> None:
-        """Stop continuous capture loop."""
-        if self.capture_running:
-            self.capture_running = False
-            if self.capture_thread:
-                self.capture_thread.join(timeout=2.0)
-
-            try:
-                if self.camera:
-                    self.camera.stop_video_capture()
-            except:
-                pass
-
-            print("Continuous capture stopped")
-
-    def _capture_loop(self) -> None:
-        """Main capture loop - runs in separate thread."""
-        print("Capture loop started")
-
-        while self.capture_running and self.is_initialized and self.camera:
-            try:
-                # Get current settings
-                with self.settings_lock:
-                    exposure_us = int(self.current_settings["exposure_ms"] * 1000)
-                    gain = int(self.current_settings["gain"])
-                    wb_r = int(self.current_settings.get("wb_r", 75))
-                    wb_b = int(self.current_settings.get("wb_b", 120))
-
-                # Apply settings to camera
-                self.camera.set_control_value(asi.ASI_EXPOSURE, exposure_us)
-                self.camera.set_control_value(asi.ASI_GAIN, gain)
-
-                # Apply white balance for color cameras
-                if self.camera_info and self.camera_info.get("IsColorCam", False):
-                    self.camera.set_control_value(asi.ASI_WB_R, wb_r)
-                    self.camera.set_control_value(asi.ASI_WB_B, wb_b)
-                    self.camera.set_image_type(asi.ASI_IMG_RGB24)
-                    width = self.camera_info["MaxWidth"]
-                    height = self.camera_info["MaxHeight"]
-                else:
-                    self.camera.set_image_type(asi.ASI_IMG_RAW8)
-                    width = self.camera_info["MaxWidth"] if self.camera_info else 1920
-                    height = self.camera_info["MaxHeight"] if self.camera_info else 1080
-
-                # Capture frame
-                img_buffer = self.camera.capture_video_frame()
-                capture_time = time.time()
-
-                # Process image
-                if self.camera_info and self.camera_info.get("IsColorCam", False):
-                    img_array = np.frombuffer(img_buffer, dtype=np.uint8).reshape(
-                        (height, width, 3)
-                    )
-                    pil_image = Image.fromarray(img_array)
-                else:
-                    img_array = np.frombuffer(img_buffer, dtype=np.uint8).reshape(
-                        (height, width)
-                    )
-                    pil_image = Image.fromarray(img_array, mode="L")
-
-                # Encode to JPEG
-                buffer = io.BytesIO()
-                pil_image.save(buffer, format="JPEG", quality=85)
-                jpeg_bytes = buffer.getvalue()
-
-                # Store frame with metadata
-                with self.frame_lock:
-                    self.latest_frame = jpeg_bytes
-                    self.frame_metadata = FrameMetadata(
-                        exposure_ms=self.current_settings["exposure_ms"],
-                        gain=gain,
-                        wb_r=wb_r
-                        if self.camera_info
-                        and self.camera_info.get("IsColorCam", False)
-                        else None,
-                        wb_b=wb_b
-                        if self.camera_info
-                        and self.camera_info.get("IsColorCam", False)
-                        else None,
-                        timestamp=capture_time,
-                    )
-
-            except Exception as e:
-                print(f"Capture error: {e}")
-                time.sleep(0.1)  # Brief pause before retry
-
-        print("Capture loop ended")
-
-    def get_latest_frame(self) -> bytes | None:
-        """Get the latest cached frame."""
-        with self.frame_lock:
-            return self.latest_frame
-
-    def get_frame_metadata(self) -> FrameMetadata | None:
-        """Get metadata for the latest frame."""
-        with self.frame_lock:
-            return self.frame_metadata
+            print(f"Frame capture failed: {e}")
+            return None
 
     def update_settings(self, **settings: Any) -> bool:
         """Update camera settings."""

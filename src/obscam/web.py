@@ -7,8 +7,10 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
 from flask import Flask, render_template
 
-from .camera_factory import get_camera
+from obscam.camera_factory import get_backend_service
+from obscam.logging_config import get_logger
 
+logger = get_logger("web_server")
 
 # Flask app for serving web pages
 flask_app = Flask(__name__, template_folder="templates")
@@ -25,8 +27,8 @@ fastapi_app.add_middleware(
     allow_headers=["*"],
 )
 
-# Initialize camera
-camera = get_camera()
+# Initialize backend service
+backend = get_backend_service()
 
 
 @flask_app.route("/")
@@ -37,56 +39,58 @@ def index():
 
 @fastapi_app.get("/api/status")
 async def get_status():
-    """Get current camera status."""
+    """Get current backend and camera status."""
     try:
-        camera_status = camera.get_status()
+        backend_status = backend.get_status()
 
         return {
-            **camera_status,
+            **backend_status,
             "timestamp": time.time(),
         }
     except Exception as e:
+        logger.error("Failed to get backend status", error=str(e))
         return {
             "status": "error",
-            "message": f"Failed to get camera status: {e}",
+            "message": f"Failed to get backend status: {e}",
             "timestamp": time.time(),
         }
 
 
 @fastapi_app.get("/api/connect")
 async def connect_camera():
-    """Connect to the camera."""
+    """Start the backend service (connects camera and starts capture)."""
     try:
-        if camera.connect():
+        if backend.start_backend():
+            logger.info("Backend service started via API")
             return {
                 "status": "connected",
-                "message": "Camera connected successfully",
+                "message": "Backend service started successfully",
                 "timestamp": time.time(),
             }
         else:
             return {
                 "status": "error",
-                "message": "Failed to connect to camera",
+                "message": "Failed to start backend service",
                 "timestamp": time.time(),
             }
     except Exception as e:
+        logger.error("Backend startup error", error=str(e))
         return {
             "status": "error",
-            "message": f"Connection error: {e}",
+            "message": f"Backend startup error: {e}",
             "timestamp": time.time(),
         }
 
 
 @fastapi_app.get("/api/latest-frame")
 async def get_latest_frame():
-    """Get the latest cached frame (stateless, no session required)."""
+    """Get the latest frame from backend service."""
     try:
-        status = camera.get_status()
-        if status.get("status") != "connected":
-            raise HTTPException(status_code=400, detail="Camera not connected")
+        if not backend.is_started():
+            raise HTTPException(status_code=400, detail="Backend service not started")
 
-        frame_bytes = camera.get_latest_frame()
-        frame_metadata = camera.get_frame_metadata()
+        frame_bytes = backend.get_latest_frame()
+        frame_metadata = backend.get_frame_metadata()
 
         if frame_bytes:
             # Calculate frame age for honest timestamp reporting
@@ -115,6 +119,7 @@ async def get_latest_frame():
     except HTTPException:
         raise
     except Exception as e:
+        logger.error("Frame retrieval failed", error=str(e))
         raise HTTPException(status_code=500, detail=f"Frame retrieval failed: {e}")
 
 
@@ -122,9 +127,8 @@ async def get_latest_frame():
 async def update_settings(request: Request):
     """Update camera settings (stateless, no session required)."""
     try:
-        status = camera.get_status()
-        if status.get("status") != "connected":
-            raise HTTPException(status_code=400, detail="Camera not connected")
+        if not backend.is_started():
+            raise HTTPException(status_code=400, detail="Backend service not started")
 
         data = await request.json()
 
@@ -141,11 +145,11 @@ async def update_settings(request: Request):
 
         if "gain" in data:
             gain = int(data["gain"])
-            if 0 <= gain <= 1000:  # Typical ZWO gain range
+            if 0 <= gain <= 51200:  # Extended range for both ZWO and DSLR
                 valid_settings["gain"] = gain
             else:
                 raise HTTPException(
-                    status_code=400, detail="Gain must be between 0 and 1000"
+                    status_code=400, detail="Gain must be between 0 and 51200"
                 )
 
         if "wb_r" in data:
@@ -171,10 +175,10 @@ async def update_settings(request: Request):
         if not valid_settings:
             raise HTTPException(status_code=400, detail="No valid settings provided")
 
-        success = camera.update_settings(**valid_settings)
+        success = backend.update_settings(**valid_settings)
 
         if success:
-            current_settings = camera.get_current_settings()
+            current_settings = backend.get_current_settings()
             return {
                 "status": "success",
                 "message": "Settings updated",
@@ -194,35 +198,33 @@ async def update_settings(request: Request):
 
 @fastapi_app.get("/api/frame-info")
 async def get_frame_info():
-    """Get information about the latest frame and continuous capture status."""
+    """Get information about the latest frame and backend status."""
     try:
-        status = camera.get_status()
-        if status.get("status") != "connected":
-            raise HTTPException(status_code=400, detail="Camera not connected")
+        if not backend.is_started():
+            raise HTTPException(status_code=400, detail="Backend service not started")
 
-        frame_metadata = camera.get_frame_metadata()
-        current_settings = camera.get_current_settings()
+        frame_metadata = backend.get_frame_metadata()
+        current_settings = backend.get_current_settings()
+        status = backend.get_status()
 
         return {
             "has_frame": frame_metadata is not None,
             "frame_metadata": frame_metadata,
             "current_settings": current_settings,
+            "backend_status": status,
             "timestamp": time.time(),
         }
 
     except Exception as e:
+        logger.error("Frame info failed", error=str(e))
         raise HTTPException(status_code=500, detail=f"Frame info failed: {e}")
 
 
 @fastapi_app.post("/api/start-background")
 async def start_continuous_capture():
-    """Start continuous capture thread."""
+    """Start backend service (deprecated - use /api/connect instead)."""
     try:
-        status = camera.get_status()
-        if status.get("status") != "connected":
-            raise HTTPException(status_code=400, detail="Camera not connected")
-
-        success = camera.start_continuous_capture()
+        success = backend.start_backend()
 
         if success:
             return {
@@ -243,20 +245,19 @@ async def start_continuous_capture():
 
 @fastapi_app.post("/api/stop-background")
 async def stop_continuous_capture():
-    """Stop continuous capture thread."""
+    """Stop backend service (deprecated endpoint)."""
     try:
-        camera.stop_continuous_capture()
+        backend.stop_backend()
 
         return {
             "status": "success",
-            "message": "Continuous capture stopped",
+            "message": "Backend service stopped",
             "timestamp": time.time(),
         }
 
     except Exception as e:
-        raise HTTPException(
-            status_code=500, detail=f"Continuous capture stop failed: {e}"
-        )
+        logger.error("Backend stop failed", error=str(e))
+        raise HTTPException(status_code=500, detail=f"Backend stop failed: {e}")
 
 
 def run_flask(port: int = 5000):
@@ -270,24 +271,21 @@ def run_fastapi():
 
 
 def start_web_servers(flask_port=5000, fastapi_port=8000):
-    """Start both Flask and FastAPI servers."""
-    # Connect to camera on startup
-    print("Initializing camera...")
-    if camera.connect():
-        print("Camera connected successfully!")
-
-        # Start continuous capture for stateless frame delivery
-        print("Starting continuous capture...")
-        if camera.start_continuous_capture():
-            print("Continuous capture started - stateless frame access now available!")
-            print("New endpoints:")
-            print("  - Stateless frame: http://localhost:8000/api/latest-frame")
-            print("  - Update settings: POST http://localhost:8000/api/update-settings")
-            print("  - Frame info: http://localhost:8000/api/frame-info")
-        else:
-            print("Warning: Continuous capture failed to start")
+    """Start both Flask and FastAPI servers with backend service."""
+    # Start backend service on startup
+    logger.info("Starting backend service...")
+    if backend.start_backend():
+        logger.info("Backend service started successfully!")
+        logger.info("Available endpoints:")
+        logger.info(
+            f"  - Latest frame: http://localhost:{fastapi_port}/api/latest-frame"
+        )
+        logger.info(
+            f"  - Update settings: POST http://localhost:{fastapi_port}/api/update-settings"
+        )
+        logger.info(f"  - Status: http://localhost:{fastapi_port}/api/status")
     else:
-        print("Warning: Failed to connect to camera. Use /api/connect to retry.")
+        logger.warning("Backend service failed to start. Use /api/connect to retry.")
 
     # Start Flask in a separate thread
     flask_thread = threading.Thread(
@@ -296,14 +294,16 @@ def start_web_servers(flask_port=5000, fastapi_port=8000):
     flask_thread.start()
 
     # Start FastAPI in the main thread
-    print("Starting web servers...")
-    print("Flask (web pages): http://localhost:5000")
-    print("FastAPI (API): http://localhost:8000")
-    print(
-        "Fast capture endpoint: http://localhost:8000/api/capture-fast?exp=100&gain=250"
-    )
+    logger.info("Starting web servers...")
+    logger.info(f"Flask (web pages): http://localhost:{flask_port}")
+    logger.info(f"FastAPI (API): http://localhost:{fastapi_port}")
 
-    run_fastapi()
+    try:
+        run_fastapi()
+    finally:
+        # Graceful shutdown
+        logger.info("Shutting down backend service...")
+        backend.shutdown_gracefully()
 
 
 if __name__ == "__main__":

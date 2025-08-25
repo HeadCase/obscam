@@ -1,0 +1,273 @@
+#!/usr/bin/env python3
+"""Camera backend service - owns continuous capture entirely."""
+
+import time
+from pathlib import Path
+from typing import Any
+
+from obscam.camera_interface import CameraInterface
+from obscam.capture_loop import ContinuousCaptureLoop
+from obscam.frame_buffer import LatestFrameBuffer
+from obscam.frame_cache import FrameCache
+from obscam.settings_manager import SettingsManager
+from obscam.logging_config import get_logger, log_camera_event
+
+logger = get_logger("backend_service")
+
+
+class CameraBackendService:
+    """
+    Main backend service that owns camera operations entirely.
+
+    This service orchestrates all camera-related components and provides
+    a clean API for the web layer. It uses queue-based coordination
+    for thread safety with minimal locking.
+
+    Responsibilities:
+    - Camera connection and lifecycle management
+    - Continuous capture orchestration
+    - Settings persistence and management
+    - Frame serving to web layer with disk fallback
+    """
+
+    def __init__(self, camera: CameraInterface, cache_dir: Path):
+        self.camera = camera
+        self.cache_dir = cache_dir
+        self._started = False
+
+        # Initialize core components
+        self.frame_buffer = LatestFrameBuffer()
+        self.capture_loop = ContinuousCaptureLoop(camera, self.frame_buffer)
+        self.settings_manager = SettingsManager(cache_dir)
+        self.frame_cache = FrameCache(cache_dir)
+
+        logger.info(
+            "Backend service initialized",
+            camera_type=type(camera).__name__,
+            cache_dir=str(cache_dir),
+        )
+
+    def start_backend(self) -> bool:
+        """Start the complete backend service - camera + capture + persistence."""
+        if self._started:
+            logger.info("Backend service already started")
+            return True
+
+        logger.info("Starting camera backend service")
+
+        # Start background workers
+        self.settings_manager.start()
+        self.frame_cache.start()
+
+        # Connect to camera hardware
+        if not self.camera.connect():
+            logger.error("Failed to connect to camera")
+            log_camera_event("connection_failed")
+            self._stop_background_workers()
+            return False
+
+        camera_status = self.camera.get_status()
+        log_camera_event("connected", camera_status=camera_status)
+
+        # Apply cached settings if available
+        cached_settings = self.settings_manager.load_settings()
+        if cached_settings:
+            logger.info("Applying cached settings", settings=cached_settings)
+            success = self.camera.update_settings(**cached_settings)
+            if success:
+                log_camera_event("settings_applied", settings=cached_settings)
+            else:
+                logger.warning("Failed to apply some cached settings")
+
+        # Start continuous capture loop
+        if not self.capture_loop.start():
+            logger.error("Failed to start capture loop")
+            self.camera.disconnect()
+            self._stop_background_workers()
+            return False
+
+        self._started = True
+        logger.info("Backend service started successfully")
+        log_camera_event("backend_started", status=self.get_status())
+        return True
+
+    def stop_backend(self) -> None:
+        """Stop the complete backend service."""
+        if not self._started:
+            return
+
+        logger.info("Stopping backend service")
+
+        # Stop capture loop first
+        self.capture_loop.stop()
+
+        # Disconnect camera
+        self.camera.disconnect()
+
+        # Stop background workers
+        self._stop_background_workers()
+
+        self._started = False
+        log_camera_event("backend_stopped")
+
+    def _stop_background_workers(self) -> None:
+        """Stop all background worker threads."""
+        self.settings_manager.stop()
+        self.frame_cache.stop()
+
+    # API Methods for Web Layer - Clean interface with no threading concerns
+
+    def get_latest_frame(self) -> bytes | None:
+        """
+        Get latest frame for HTTP response.
+
+        Returns fresh frame from memory if available,
+        falls back to disk cache for new clients during long exposures.
+        """
+        if not self._started:
+            logger.warning("Backend not started - cannot serve frame")
+            return None
+
+        # Try fresh frame first
+        frame = self.frame_buffer.get_latest_frame()
+
+        if frame:
+            # Cache fresh frame to disk asynchronously
+            self.frame_cache.cache_frame_async(frame)
+            logger.debug("Latest frame served from memory", frame_size=len(frame))
+            return frame
+        else:
+            # Fallback to cached frame for new clients
+            cached_frame = self.frame_cache.load_cached_frame()
+            if cached_frame:
+                logger.info(
+                    "Serving cached frame from disk", frame_size=len(cached_frame)
+                )
+            else:
+                logger.warning("No frame available - neither fresh nor cached")
+            return cached_frame
+
+    def get_frame_metadata(self) -> dict[str, Any] | None:
+        """Get metadata for latest frame."""
+        if not self._started:
+            return None
+        return self.frame_buffer.get_frame_metadata()
+
+    def update_settings(self, **settings: Any) -> bool:
+        """
+        Update camera settings and persist them.
+
+        This method coordinates between the camera hardware,
+        capture loop, and settings persistence. For DSLR cameras,
+        it temporarily pauses capture to avoid I/O conflicts.
+        """
+        if not self._started:
+            logger.error("Backend not started - cannot update settings")
+            return False
+
+        logger.info("Updating camera settings", new_settings=settings)
+
+        # For DSLR cameras, pause capture loop to avoid I/O conflicts
+        was_capturing = self.capture_loop.is_running()
+        if was_capturing:
+            logger.debug("Pausing capture loop for settings update")
+            self.capture_loop.stop()
+            # Brief wait for capture loop to stop cleanly
+            time.sleep(0.2)
+
+        # Apply settings to camera hardware
+        success = self.camera.update_settings(**settings)
+
+        if success:
+            # Get updated settings from camera
+            current_settings = self.camera.get_current_settings()
+
+            # Restart capture loop if it was running
+            if was_capturing:
+                logger.debug("Restarting capture loop after settings update")
+                capture_started = self.capture_loop.start()
+                if not capture_started:
+                    logger.error("Failed to restart capture loop after settings update")
+                    success = False
+
+            # Persist settings asynchronously
+            if success:
+                self.settings_manager.save_settings_async(current_settings)
+                log_camera_event("settings_updated", settings=current_settings)
+                logger.info("Settings updated successfully", settings=current_settings)
+        else:
+            logger.error("Failed to update camera settings", settings=settings)
+
+            # Restart capture loop even if settings failed
+            if was_capturing:
+                logger.debug("Restarting capture loop after failed settings update")
+                self.capture_loop.start()
+
+        return success
+
+    def get_current_settings(self) -> dict[str, Any]:
+        """Get current camera settings."""
+        if not self._started:
+            return {}
+        return self.camera.get_current_settings()
+
+    def get_status(self) -> dict[str, Any]:
+        """Get comprehensive backend status for monitoring/debugging."""
+        base_status = {
+            "backend_service": "running" if self._started else "stopped",
+            "continuous_capture": False,
+            "has_frame": False,
+        }
+
+        if not self._started:
+            return base_status
+
+        # Get camera status
+        try:
+            camera_status = self.camera.get_status()
+            base_status.update(camera_status)
+        except Exception as e:
+            logger.error("Failed to get camera status", error=str(e))
+            base_status["camera_error"] = str(e)
+
+        # Add backend-specific status
+        base_status.update(
+            {
+                "continuous_capture": self.capture_loop.is_running(),
+                "has_frame": self.frame_buffer.has_frame(),
+                "has_cached_frame": self.frame_cache.has_cached_frame(),
+            }
+        )
+
+        return base_status
+
+    def is_started(self) -> bool:
+        """Check if backend service is started."""
+        return self._started
+
+    # Lifecycle management for web application integration
+
+    def __enter__(self):
+        """Context manager entry."""
+        self.start_backend()
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        """Context manager exit."""
+        self.stop_backend()
+
+    def shutdown_gracefully(self) -> None:
+        """Graceful shutdown with final settings save."""
+        if self._started:
+            logger.info("Performing graceful shutdown")
+
+            # Save current settings synchronously before shutdown
+            try:
+                current_settings = self.camera.get_current_settings()
+                self.settings_manager.save_settings_sync(current_settings)
+            except Exception as e:
+                logger.error("Failed to save settings during shutdown", error=str(e))
+
+            # Stop the backend
+            self.stop_backend()
+            logger.info("Graceful shutdown completed")
