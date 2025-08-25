@@ -57,7 +57,7 @@ class CameraInterface(Protocol):
         """
         ...
 
-    def get_current_settings(self) -> FrameMetadata:
+    def get_current_settings(self) -> dict[str, Any]:
         """Get the current camera settings.
 
         Returns:

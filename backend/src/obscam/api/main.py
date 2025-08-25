@@ -1,25 +1,28 @@
-import threading
+"""Main FastAPI application entry point."""
+
 import time
-
 import uvicorn
-from fastapi import FastAPI, HTTPException, Request
-from fastapi.middleware.cors import CORSMiddleware
+from fastapi import FastAPI, Request, HTTPException
 from fastapi.responses import Response
-from flask import Flask, render_template
+from fastapi.templating import Jinja2Templates
+from fastapi.middleware.cors import CORSMiddleware
+from pathlib import Path
 
-from obscam.camera_factory import get_backend_service
-from obscam.logging_config import get_logger
+from obscam.core.camera_factory import get_backend_service
+from obscam.common.logging_config import get_logger
+from obscam.common.constants import PROJECT_ROOT
 
-logger = get_logger("web_server")
+logger = get_logger("api_main")
 
-# Flask app for serving web pages
-flask_app = Flask(__name__, template_folder="templates")
+# Get template directory (relative to this file location)
+template_dir = PROJECT_ROOT / "frontend/templates"
+templates = Jinja2Templates(directory=str(template_dir))
 
-# FastAPI app for API endpoints
-fastapi_app = FastAPI()
+# Create FastAPI app
+app = FastAPI(title="ObsCam API", version="1.0.0")
 
-# Add CORS middleware for cross-origin requests
-fastapi_app.add_middleware(
+# Setup CORS middleware
+app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
     allow_credentials=True,
@@ -31,18 +34,19 @@ fastapi_app.add_middleware(
 backend = get_backend_service()
 
 
-@flask_app.route("/")
-def index():
+# Template routes (replacing Flask)
+@app.get("/")
+async def index(request: Request):
     """Main page displaying the camera feed."""
-    return render_template("index.html")
+    return templates.TemplateResponse("index.html", {"request": request})
 
 
-@fastapi_app.get("/api/status")
+# API routes
+@app.get("/api/status")
 async def get_status():
     """Get current backend and camera status."""
     try:
         backend_status = backend.get_status()
-
         return {
             **backend_status,
             "timestamp": time.time(),
@@ -56,7 +60,7 @@ async def get_status():
         }
 
 
-@fastapi_app.get("/api/connect")
+@app.get("/api/connect")
 async def connect_camera():
     """Start the backend service (connects camera and starts capture)."""
     try:
@@ -82,7 +86,7 @@ async def connect_camera():
         }
 
 
-@fastapi_app.get("/api/latest-frame")
+@app.get("/api/latest-frame")
 async def get_latest_frame():
     """Get the latest frame from backend service."""
     try:
@@ -123,7 +127,7 @@ async def get_latest_frame():
         raise HTTPException(status_code=500, detail=f"Frame retrieval failed: {e}")
 
 
-@fastapi_app.post("/api/update-settings")
+@app.post("/api/update-settings")
 async def update_settings(request: Request):
     """Update camera settings (stateless, no session required)."""
     try:
@@ -196,7 +200,7 @@ async def update_settings(request: Request):
         raise HTTPException(status_code=500, detail=f"Settings update failed: {e}")
 
 
-@fastapi_app.get("/api/frame-info")
+@app.get("/api/frame-info")
 async def get_frame_info():
     """Get information about the latest frame and backend status."""
     try:
@@ -220,86 +224,31 @@ async def get_frame_info():
         raise HTTPException(status_code=500, detail=f"Frame info failed: {e}")
 
 
-@fastapi_app.post("/api/start-background")
-async def start_continuous_capture():
-    """Start backend service (deprecated - use /api/connect instead)."""
-    try:
-        success = backend.start_backend()
-
-        if success:
-            return {
-                "status": "success",
-                "message": "Continuous capture started",
-                "timestamp": time.time(),
-            }
-        else:
-            raise HTTPException(
-                status_code=500, detail="Failed to start continuous capture"
-            )
-
-    except Exception as e:
-        raise HTTPException(
-            status_code=500, detail=f"Continuous capture start failed: {e}"
-        )
+def run_server(port: int = 8000):
+    """Run the FastAPI server."""
+    uvicorn.run(app, host="0.0.0.0", port=port, log_level="info")
 
 
-@fastapi_app.post("/api/stop-background")
-async def stop_continuous_capture():
-    """Stop backend service (deprecated endpoint)."""
-    try:
-        backend.stop_backend()
-
-        return {
-            "status": "success",
-            "message": "Backend service stopped",
-            "timestamp": time.time(),
-        }
-
-    except Exception as e:
-        logger.error("Backend stop failed", error=str(e))
-        raise HTTPException(status_code=500, detail=f"Backend stop failed: {e}")
-
-
-def run_flask(port: int = 5000):
-    """Run Flask app in a separate thread."""
-    flask_app.run(host="0.0.0.0", port=port, debug=False, use_reloader=False)
-
-
-def run_fastapi():
-    """Run FastAPI app in a separate thread."""
-    uvicorn.run(fastapi_app, host="0.0.0.0", port=8000, log_level="info")
-
-
-def start_web_servers(flask_port=5000, fastapi_port=8000):
-    """Start both Flask and FastAPI servers with backend service."""
-    # Start backend service on startup
+def start_server():
+    """Start the web server with backend service."""
     logger.info("Starting backend service...")
     if backend.start_backend():
         logger.info("Backend service started successfully!")
         logger.info("Available endpoints:")
+        logger.info("  - Main page: http://localhost:8000/")
+        logger.info("  - Latest frame: http://localhost:8000/api/latest-frame")
         logger.info(
-            f"  - Latest frame: http://localhost:{fastapi_port}/api/latest-frame"
+            "  - Update settings: POST http://localhost:8000/api/update-settings"
         )
-        logger.info(
-            f"  - Update settings: POST http://localhost:{fastapi_port}/api/update-settings"
-        )
-        logger.info(f"  - Status: http://localhost:{fastapi_port}/api/status")
+        logger.info("  - Status: http://localhost:8000/api/status")
     else:
         logger.warning("Backend service failed to start. Use /api/connect to retry.")
 
-    # Start Flask in a separate thread
-    flask_thread = threading.Thread(
-        target=run_flask, kwargs={"port": flask_port}, daemon=True
-    )
-    flask_thread.start()
-
-    # Start FastAPI in the main thread
-    logger.info("Starting web servers...")
-    logger.info(f"Flask (web pages): http://localhost:{flask_port}")
-    logger.info(f"FastAPI (API): http://localhost:{fastapi_port}")
+    # Start the server
+    logger.info("Starting web server on port 8000...")
 
     try:
-        run_fastapi()
+        run_server()
     finally:
         # Graceful shutdown
         logger.info("Shutting down backend service...")
@@ -307,4 +256,4 @@ def start_web_servers(flask_port=5000, fastapi_port=8000):
 
 
 if __name__ == "__main__":
-    start_web_servers()
+    start_server()

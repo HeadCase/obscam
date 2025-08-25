@@ -9,7 +9,7 @@ from typing import Any
 from PIL import Image
 import gphoto2 as gp  # pyright: ignore[reportMissingTypeStubs]
 
-from obscam.camera_interface import CameraInterface, FrameMetadata
+from obscam.camera.camera_interface import CameraInterface, FrameMetadata
 
 
 class Gphoto2Camera(CameraInterface):
@@ -198,10 +198,10 @@ class Gphoto2Camera(CameraInterface):
             print(f"Failed to update camera settings: {e}")
             return False
 
-    def get_current_settings(self) -> FrameMetadata:
+    def get_current_settings(self) -> dict[str, Any]:
         """Get current camera settings."""
         with self.settings_lock:
-            return self.current_settings.copy()
+            return dict(self.current_settings)
 
     # Helper methods specific to gphoto2
 

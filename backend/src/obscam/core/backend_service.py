@@ -5,12 +5,12 @@ import time
 from pathlib import Path
 from typing import Any
 
-from obscam.camera_interface import CameraInterface
-from obscam.capture_loop import ContinuousCaptureLoop
-from obscam.frame_buffer import LatestFrameBuffer
-from obscam.frame_cache import FrameCache
-from obscam.settings_manager import SettingsManager
-from obscam.logging_config import get_logger, log_camera_event
+from obscam.camera.camera_interface import CameraInterface
+from obscam.core.capture_loop import ContinuousCaptureLoop
+from obscam.core.frame_buffer import LatestFrameBuffer
+from obscam.storage.frame_cache import FrameCache
+from obscam.storage.settings_manager import SettingsManager
+from obscam.common.logging_config import get_logger, log_camera_event
 
 logger = get_logger("backend_service")
 

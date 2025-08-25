@@ -2,9 +2,11 @@
 
 ## Build/Test Commands
 
-- **Install dependencies**: `uv add` or `uv sync`
+- **Install dependencies**: `uv add`
+- **Access environment**: `source .venv/bin/activate`
+- _Update environment_: `uv sync`
 - **Run main application**: `uv run obscam`
-- **Run python code with development environment using**: uv run
+- **Run python code with development environment using**: `uv run`
 - **Tests should be written with pytest**
 - _Use package name for imports_: `from obscam.foo import Foo`
 - _Use loguru for logging_

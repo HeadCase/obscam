@@ -3,8 +3,8 @@
 import os
 from pathlib import Path
 
-from obscam.backend_service import CameraBackendService
-from obscam.logging_config import get_logger
+from obscam.core.backend_service import CameraBackendService
+from obscam.common.logging_config import get_logger
 
 logger = get_logger("camera_factory")
 
@@ -41,12 +41,12 @@ def get_backend_service() -> CameraBackendService:
 
         if camera_type == "gphoto2":
             logger.info("Using gphoto2 camera implementation (development mode)")
-            from obscam.libgphoto2_camera import Gphoto2Camera
+            from obscam.camera.libgphoto2_camera import Gphoto2Camera
 
             base_camera = Gphoto2Camera()
         else:
             logger.info("Using ZWO ASI camera implementation (production mode)")
-            from obscam.zwo_asi_camera import ZwoAsiCamera
+            from obscam.camera.zwo_asi_camera import ZwoAsiCamera
 
             base_camera = ZwoAsiCamera()
 

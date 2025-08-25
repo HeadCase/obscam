@@ -3,7 +3,7 @@ import sys
 from pathlib import Path
 
 from loguru import logger
-from obscam.constants import PROJECT_ROOT
+from obscam.common.constants import PROJECT_ROOT
 
 
 def setup_logging(

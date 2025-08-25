@@ -5,7 +5,7 @@ import queue
 import threading
 from pathlib import Path
 
-from obscam.logging_config import get_logger
+from obscam.common.logging_config import get_logger
 
 logger = get_logger("frame_cache")
 
