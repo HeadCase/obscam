@@ -1,0 +1,4 @@
+2025-08-25 14:25:39.856 | ERROR    | obscam.backend_service:update_settings:199 | {'module': 'backend_service', 'settings': {'exposure_ms': 750.0, 'gain': 250, 'wb_r': 75, 'wb_b': 120}} | Failed to update camera settings
+2025-08-25 14:25:47.859 | ERROR    | obscam.backend_service:update_settings:199 | {'module': 'backend_service', 'settings': {'exposure_ms': 3000.0, 'gain': 100, 'wb_r': 75, 'wb_b': 120}} | Failed to update camera settings
+2025-08-25 14:25:51.528 | ERROR    | obscam.backend_service:update_settings:199 | {'module': 'backend_service', 'settings': {'exposure_ms': 3000.0, 'gain': 100, 'wb_r': 75, 'wb_b': 120}} | Failed to update camera settings
+2025-08-31 22:53:12.018 | ERROR    | obscam:main:33 | {'module': 'main'} | Unexpected error: Failed to initialize ZWO ASI SDK: ZWO ASI SDK library not found. Set ZWO_ASI_LIB environment variable or provide library_path

@@ -146,10 +146,7 @@ def test_single_frame_capture() -> bool:
         # Allow up to 15 seconds for first frame (longer for DSLR)
         if not wait_with_timeout(has_fresh_frame, timeout_seconds=15.0):
             print("❌ No fresh frame captured within timeout")
-            # Check what we do have
-            cached_frame = backend.frame_cache.load_cached_frame()
-            if cached_frame:
-                print(f"ℹ️  Only cached frame available: {len(cached_frame)} bytes")
+            # No frame captured within timeout
             return False
 
         frame_data = backend.frame_buffer.get_latest_frame()

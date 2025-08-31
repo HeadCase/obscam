@@ -44,6 +44,40 @@ class Gphoto2Camera(CameraInterface):
                 print("Warning: Camera does not expose writable bulb control")
                 print("Make sure camera is set to Bulb mode on the dial")
 
+            # Configure camera for JPEG capture (for monitoring, not RAW NEF files)
+            try:
+                cfg = self._fresh_cfg()
+                image_quality = cfg.get_child_by_name("imagequality")
+                current_value = image_quality.get_value()
+                print(f"Current image quality: {current_value}")
+
+                # Set to JPEG Fine (Choice 2) for best quality JPEG-only capture
+                image_quality.set_value("JPEG Fine")  # Use the actual choice name
+                self.camera.set_config(cfg)
+
+                # Verify the change took effect
+                cfg = self._fresh_cfg()
+                image_quality = cfg.get_child_by_name("imagequality")
+                new_value = image_quality.get_value()
+                print(f"Image quality after configuration: {new_value}")
+
+                if "JPEG" in str(new_value):
+                    print(
+                        "✅ Camera configured for JPEG capture (optimal for monitoring)"
+                    )
+                else:
+                    print(
+                        "⚠️  Camera still in RAW mode - may require manual configuration"
+                    )
+            except Exception as e:
+                print(f"Warning: Could not configure camera image quality: {e}")
+                print(
+                    "Camera may still capture NEF files - manual configuration recommended"
+                )
+                import traceback
+
+                print(f"Full error: {traceback.format_exc()}")
+
             return True
         except Exception as e:
             print(f"Failed to connect to gphoto2 camera: {e}")
@@ -291,20 +325,21 @@ class Gphoto2Camera(CameraInterface):
 
             folder, name = self._wait_for_file_added(timeout_s=30.0)
 
-            cam_file = self.camera.file_get(folder, name, gp.GP_FILE_TYPE_NORMAL)  # pyright: ignore[reportUnknownMemberType]
+            cam_file = self.camera.file_get(folder, name, gp.GP_FILE_TYPE_NORMAL)  # pyright: ignore[reportUnknownMemberType,reportUnknownArgumentType,reportAttributeAccessIssue]
             data = cam_file.get_data_and_size()
 
             return bytes(data) if not isinstance(data, bytes) else data
 
         except Exception as e:
-            print(f"Bulb capture failed: {e}, trying normal capture")
+            print(f"Bulb capture failed: {e}")
+            return None
 
     def _wait_for_file_added(self, timeout_s: float = 30.0) -> tuple[str, str]:
         """Wait for camera to report a new file."""
         deadline = time.time() + timeout_s
         while time.time() < deadline:
             ev_type, ev_data = self.camera.wait_for_event(1000)  # ms
-            if ev_type == gp.GP_EVENT_FILE_ADDED:  # pyright: ignore[reportUnknownMemberType]
+            if ev_type == gp.GP_EVENT_FILE_ADDED:  # pyright: ignore[reportUnknownMemberType,reportAttributeAccessIssue]
                 return ev_data.folder, ev_data.name
 
         raise TimeoutError("Timed out waiting for FILE_ADDED event from camera")

@@ -2,7 +2,7 @@
 
 ## Build/Test Commands
 
-- *Project hosts front and backends*: python code lives in `backend`
+- _Project hosts front and backends_: python code lives in `backend`
 - **Install dependencies**: `uv add`
 - **Access environment**: `source /backend/.venv/bin/activate`
 - _Update environment_: `uv sync`
@@ -28,10 +28,17 @@
 - Build system: uv_build
 
 ## ZWO SDKs
+
 - https://zwoastro.yuque.com/olyczd/sfwyw6/kpde2odaw3h4ekix
 - Python bindings: https://github.com/python-zwoasi/python-zwoasi
 - Example python usage: https://raw.githubusercontent.com/python-zwoasi/python-zwoasi/refs/heads/master/zwoasi/examples/zwoasi_demo.py
+
 ## General Guidelines
+
+## gphoto2 SDK
+
+- Python bindings: https://github.com/jim-easterbrook/python-gphoto2
+- https://github.com/gphoto/libgphoto2
 
 - This application's purpose to provide monitoring (CCTV-style) for my remote
   astrophotography observatory

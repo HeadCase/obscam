@@ -8,7 +8,6 @@ from typing import Any
 from obscam.camera.camera_interface import CameraInterface
 from obscam.core.capture_loop import ContinuousCaptureLoop
 from obscam.core.frame_buffer import LatestFrameBuffer
-from obscam.storage.frame_cache import FrameCache
 from obscam.storage.settings_manager import SettingsManager
 from obscam.common.logging_config import get_logger, log_camera_event
 
@@ -27,7 +26,7 @@ class CameraBackendService:
     - Camera connection and lifecycle management
     - Continuous capture orchestration
     - Settings persistence and management
-    - Frame serving to web layer with disk fallback
+    - Frame serving to web layer from memory buffer
     """
 
     def __init__(self, camera: CameraInterface, cache_dir: Path):
@@ -39,7 +38,6 @@ class CameraBackendService:
         self.frame_buffer = LatestFrameBuffer()
         self.capture_loop = ContinuousCaptureLoop(camera, self.frame_buffer)
         self.settings_manager = SettingsManager(cache_dir)
-        self.frame_cache = FrameCache(cache_dir)
 
         logger.info(
             "Backend service initialized",
@@ -57,7 +55,6 @@ class CameraBackendService:
 
         # Start background workers
         self.settings_manager.start()
-        self.frame_cache.start()
 
         # Connect to camera hardware
         if not self.camera.connect():
@@ -78,23 +75,6 @@ class CameraBackendService:
                 log_camera_event("settings_applied", settings=cached_settings)
             else:
                 logger.warning("Failed to apply some cached settings")
-
-        # Load cached frame into buffer for immediate display
-        cached_frame = self.frame_cache.load_cached_frame()
-        if cached_frame:
-            # Create minimal metadata for cached frame
-            cached_settings = self.camera.get_current_settings()
-            cached_metadata = {
-                **cached_settings,
-                "timestamp": time.time(),
-                "capture_duration_ms": 0.0,  # Unknown for cached frame
-                "cached": True,  # Mark as cached frame
-            }
-            self.frame_buffer.update_frame(cached_frame, cached_metadata)
-            logger.info(
-                "Cached frame loaded into buffer for immediate display",
-                frame_size=len(cached_frame),
-            )
 
         # Start continuous capture loop
         if not self.capture_loop.start():
@@ -130,39 +110,21 @@ class CameraBackendService:
     def _stop_background_workers(self) -> None:
         """Stop all background worker threads."""
         self.settings_manager.stop()
-        self.frame_cache.stop()
 
     # API Methods for Web Layer - Clean interface with no threading concerns
 
     def get_latest_frame(self) -> bytes | None:
-        """
-        Get latest frame for HTTP response.
-
-        Returns fresh frame from memory if available,
-        falls back to disk cache for new clients during long exposures.
-        """
+        """Get latest frame for HTTP response from memory buffer."""
         if not self._started:
             logger.warning("Backend not started - cannot serve frame")
             return None
 
-        # Try fresh frame first
         frame = self.frame_buffer.get_latest_frame()
-
         if frame:
-            # Cache fresh frame to disk asynchronously
-            self.frame_cache.cache_frame_async(frame)
             logger.debug("Latest frame served from memory", frame_size=len(frame))
-            return frame
         else:
-            # Fallback to cached frame for new clients
-            cached_frame = self.frame_cache.load_cached_frame()
-            if cached_frame:
-                logger.info(
-                    "Serving cached frame from disk", frame_size=len(cached_frame)
-                )
-            else:
-                logger.warning("No frame available - neither fresh nor cached")
-            return cached_frame
+            logger.debug("No frame available in memory buffer")
+        return frame
 
     def get_frame_metadata(self) -> dict[str, Any] | None:
         """Get metadata for latest frame."""
@@ -252,7 +214,6 @@ class CameraBackendService:
             {
                 "continuous_capture": self.capture_loop.is_running(),
                 "has_frame": self.frame_buffer.has_frame(),
-                "has_cached_frame": self.frame_cache.has_cached_frame(),
             }
         )
 
