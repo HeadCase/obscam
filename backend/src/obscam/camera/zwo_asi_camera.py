@@ -4,7 +4,7 @@
 import io
 import os
 import threading
-from typing import Any
+from typing import Any, override
 
 import zwoasi as asi  # pyright: ignore[reportMissingTypeStubs]
 from PIL import Image
@@ -17,23 +17,17 @@ class ZwoAsiCamera(CameraInterface):
 
     def __init__(self, library_path: str | None = None):
         """Initialize the ZWO ASI camera."""
-        self.camera: Any = None
-        self.camera_info: dict[str, Any] | None = None
-        self.is_initialized = False
-
-        # Current camera settings
-        self.current_settings = {
-            "exposure_ms": 200.0,  # 200ms default
-            "gain": 250,  # More reasonable default gain
-            "wb_r": 75,
-            "wb_b": 120,
-            "image_format": "mono",  # Default to mono for performance (options: "mono", "color")
+        self.camera_info: dict[str, Any] = {}
+        self.camera: asi.Camera | None = None
+        self.is_initialized: bool = False
+        self.settings_lock: threading.Lock = threading.Lock()
+        self.current_capture_mode: str = ""
+        self.video_mode_threshold_ms: float = 1000.0
+        self.current_settings: dict[str, str | float | int] = {
+            "exposure_ms": 200.0,
+            "gain": 250,
+            "image_format": "mono",
         }
-        self.settings_lock = threading.Lock()
-
-        # Capture mode management
-        self.current_capture_mode = None  # None, "video", or "single"
-        self.video_mode_threshold_ms = 1000.0  # Switch to single mode above 1s
 
         # Initialize the SDK
         self._init_sdk(library_path)
@@ -66,6 +60,7 @@ class ZwoAsiCamera(CameraInterface):
         except Exception as e:
             raise RuntimeError(f"Failed to initialize ZWO ASI SDK: {e}")
 
+    @override
     def connect(self) -> bool:
         """Connect to the camera."""
         try:
@@ -105,21 +100,13 @@ class ZwoAsiCamera(CameraInterface):
             return
 
         try:
-            # Stop any ongoing operations
             try:
                 self.camera.stop_video_capture()
                 self.camera.stop_exposure()
-            except:
+            except asi.ZWO_Error:
                 pass
 
-            # Disable dark subtract
             self.camera.disable_dark_subtract()
-
-            # Basic color camera settings
-            if self.camera_info and self.camera_info.get("IsColorCam", False):
-                self.camera.set_control_value(asi.ASI_WB_B, 120)
-                self.camera.set_control_value(asi.ASI_WB_R, 75)
-
             self.camera.set_control_value(asi.ASI_GAMMA, 50)
             self.camera.set_control_value(asi.ASI_BRIGHTNESS, 50)
             self.camera.set_control_value(asi.ASI_FLIP, 0)
@@ -133,21 +120,23 @@ class ZwoAsiCamera(CameraInterface):
         except Exception as e:
             print(f"Warning: Could not configure all camera settings: {e}")
 
+    @override
     def disconnect(self) -> None:
         """Disconnect from the camera."""
         if self.camera:
             try:
                 self.camera.stop_video_capture()
                 self.camera.stop_exposure()
-            except:
+            except asi.ZWO_Error:
                 pass
 
             self.camera = None
-            self.camera_info = None
+            self.camera_info = {}
             self.is_initialized = False
-            self.current_capture_mode = None
+            self.current_capture_mode = ""
             print("Camera disconnected")
 
+    @override
     def get_status(self) -> dict[str, Any]:
         """Get current camera status."""
         if not self.is_initialized or not self.camera:
@@ -159,60 +148,34 @@ class ZwoAsiCamera(CameraInterface):
 
             return {
                 "status": "connected",
-                "camera_model": self.camera_info.get("Name", "Unknown")
-                if self.camera_info
-                else "Unknown",
-                "is_color_camera": self.camera_info.get("IsColorCam", False)
-                if self.camera_info
-                else False,
-                "image_format": settings.get("image_format", "mono"),
+                "camera_model": self.camera_info.get("Name", "Unknown"),
+                "image_format": "mono",
                 "current_exposure_ms": settings["exposure_ms"],
                 "current_gain": settings["gain"],
-                "current_wb_r": settings.get("wb_r"),
-                "current_wb_b": settings.get("wb_b"),
             }
 
         except Exception as e:
             return {"status": "error", "error": str(e)}
 
+    @override
     def capture_frame(self) -> bytes | None:
-        """Capture a single frame using appropriate mode based on exposure time."""
+        """Capture a single frame using appropriate mode based on exposure
+        time."""
         if not self.is_initialized or not self.camera:
             return None
 
         try:
-            # Get current settings
             with self.settings_lock:
                 exposure_ms = float(self.current_settings["exposure_ms"])
                 gain = int(self.current_settings["gain"])
-                wb_r = int(self.current_settings.get("wb_r", 75))
-                wb_b = int(self.current_settings.get("wb_b", 120))
-                image_format = str(self.current_settings.get("image_format", "mono"))
 
-            # Determine capture mode based on exposure time
-            use_video_mode = exposure_ms <= self.video_mode_threshold_ms
-
-            # Apply settings to camera
             exposure_us = int(exposure_ms * 1000)
             self.camera.set_control_value(asi.ASI_EXPOSURE, exposure_us)
             self.camera.set_control_value(asi.ASI_GAIN, gain)
+            self.camera.set_image_type(asi.ASI_IMG_Y8)
 
-            # Determine image type based on user preference and camera capability
-            is_color_camera = self.camera_info and self.camera_info.get(
-                "IsColorCam", False
-            )
-            use_color = image_format == "color" and is_color_camera
+            use_video_mode = False  # exposure_ms <= self.video_mode_threshold_ms
 
-            if use_color:
-                # Color mode - set white balance and RGB format
-                self.camera.set_control_value(asi.ASI_WB_R, wb_r)
-                self.camera.set_control_value(asi.ASI_WB_B, wb_b)
-                self.camera.set_image_type(asi.ASI_IMG_RGB24)
-            else:
-                # Mono mode (default) - use Y8 for proper luminance data
-                self.camera.set_image_type(asi.ASI_IMG_Y8)
-
-            # Capture frame using appropriate mode
             if use_video_mode:
                 img_data = self._capture_video_frame()
             else:
@@ -221,26 +184,13 @@ class ZwoAsiCamera(CameraInterface):
             if img_data is None or len(img_data) == 0:
                 return None
 
-            # Convert numpy array to PIL Image based on actual format used
-            if use_color and self.camera_info:
+            if len(img_data.shape) == 1 and self.camera_info:
                 width = int(self.camera_info["MaxWidth"])
                 height = int(self.camera_info["MaxHeight"])
-                if len(img_data.shape) == 1:
-                    # Flatten array needs reshaping
-                    img_array = img_data.reshape((height, width, 3))
-                else:
-                    img_array = img_data
-                pil_image = Image.fromarray(img_array, mode="RGB")
+                img_array = img_data.reshape((height, width))
             else:
-                # Mono mode
-                if len(img_data.shape) == 1 and self.camera_info:
-                    # Flatten array needs reshaping
-                    width = int(self.camera_info["MaxWidth"])
-                    height = int(self.camera_info["MaxHeight"])
-                    img_array = img_data.reshape((height, width))
-                else:
-                    img_array = img_data
-                pil_image = Image.fromarray(img_array, mode="L")
+                img_array = img_data
+            pil_image = Image.fromarray(img_array, mode="L")
 
             # Encode to JPEG
             buffer = io.BytesIO()
@@ -304,10 +254,6 @@ class ZwoAsiCamera(CameraInterface):
                     )
                 if "gain" in settings:
                     self.current_settings["gain"] = int(settings["gain"])
-                if "wb_r" in settings:
-                    self.current_settings["wb_r"] = int(settings["wb_r"])
-                if "wb_b" in settings:
-                    self.current_settings["wb_b"] = int(settings["wb_b"])
                 if "image_format" in settings:
                     format_value = str(settings["image_format"]).lower()
                     if format_value in ["mono", "color"]:
@@ -332,18 +278,11 @@ class ZwoAsiCamera(CameraInterface):
             return {
                 "exposure_ms": {"min": 0.032, "max": 30000, "type": "float"},
                 "gain": {"min": 0, "max": 600, "type": "int"},
-                "wb_r": {"min": 50, "max": 150, "type": "int"},
-                "wb_b": {"min": 50, "max": 150, "type": "int"},
-                "image_format": {
-                    "options": ["mono", "color"],
-                    "type": "enum",
-                    "default": "mono",
-                },
+                "image_format": "mono",
                 "camera_type": "ZWO ASI (disconnected)",
             }
 
         try:
-            # Get actual control capabilities from connected camera
             control_caps = self.camera.get_controls()
 
             capabilities = {"camera_type": "ZWO ASI"}
@@ -365,23 +304,6 @@ class ZwoAsiCamera(CameraInterface):
                     "type": "int",
                 }
 
-            # White balance limits (camera specific)
-            if self.camera_info and self.camera_info.get("IsColorCam", False):
-                capabilities["wb_r"] = {"min": 50, "max": 150, "type": "int"}
-                capabilities["wb_b"] = {"min": 50, "max": 150, "type": "int"}
-                capabilities["image_format"] = {
-                    "options": ["mono", "color"],
-                    "type": "enum",
-                    "default": "mono",
-                }
-            else:
-                # Mono-only camera
-                capabilities["image_format"] = {
-                    "options": ["mono"],
-                    "type": "enum",
-                    "default": "mono",
-                }
-
             return capabilities
 
         except Exception as e:
@@ -390,12 +312,6 @@ class ZwoAsiCamera(CameraInterface):
             return {
                 "exposure_ms": {"min": 0.032, "max": 30000, "type": "float"},
                 "gain": {"min": 0, "max": 600, "type": "int"},
-                "wb_r": {"min": 50, "max": 150, "type": "int"},
-                "wb_b": {"min": 50, "max": 150, "type": "int"},
-                "image_format": {
-                    "options": ["mono", "color"],
-                    "type": "enum",
-                    "default": "mono",
-                },
+                "image_format": "mono",
                 "camera_type": "ZWO ASI (error)",
             }
