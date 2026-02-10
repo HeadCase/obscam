@@ -10,8 +10,6 @@ class FrameMetadata(TypedDict):
 
     exposure_ms: float
     gain: int
-    wb_r: int | None
-    wb_b: int | None
     timestamp: float
 
 
@@ -50,7 +48,7 @@ class CameraInterface(Protocol):
         """Update camera settings for the next capture.
 
         Args:
-            **settings: Camera settings (exposure_ms, gain, wb_r, wb_b)
+            **settings: Camera settings (exposure_ms, gain)
 
         Returns:
             True if settings updated successfully, False otherwise
