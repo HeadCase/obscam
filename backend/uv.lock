@@ -100,22 +100,6 @@ wheels = [
 ]
 
 [[package]]
-name = "gphoto2"
-version = "2.6.2"
-source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/f3/3e/f12a3ba6e1b57c1098fc1a2138979b897cfe90ba672a40f863673d5c865e/gphoto2-2.6.2.tar.gz", hash = "sha256:33d53d9eb2a817bebcf76395d8f49b4c0b57936ee97fd047a2ce2afd88c23cc1", size = 532992 }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/34/ca/46cc00ebd0731805e422b3d29d10aa7600fe6e241034ab3bb2678a388990/gphoto2-2.6.2-cp312-cp312-macosx_13_0_x86_64.whl", hash = "sha256:7a49bf20b28d6dbd5d263805ade86875a98b61254271e8106d07678202497297", size = 6371985 },
-    { url = "https://files.pythonhosted.org/packages/7c/23/ccabaed1a46a6743081fb528eb8f71e575b34587510d5a45332396d8169c/gphoto2-2.6.2-cp312-cp312-macosx_14_0_arm64.whl", hash = "sha256:18da42dbfcb2a2be4a619a484774ce1ad84f3096998bd6fc118005fbedd482b1", size = 5817386 },
-    { url = "https://files.pythonhosted.org/packages/10/1f/48370705ec70f84dfdc6c16d681fb979ced7ce682d93bb96c9de1bcfccc3/gphoto2-2.6.2-cp312-cp312-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:f08852409f6b721127f0ec821f0ce741ee2c5e3954bc51ab3cc6148dba0cfbb8", size = 11409658 },
-    { url = "https://files.pythonhosted.org/packages/09/66/121b31378bd14e0dcc0d28103267f00203073a64a9fc79ad017f104cec66/gphoto2-2.6.2-cp312-cp312-manylinux_2_28_aarch64.whl", hash = "sha256:6064930c8eaf84de384121dc6224da66fc603de47f5a21064c3fcddfc5dc8c08", size = 12592297 },
-    { url = "https://files.pythonhosted.org/packages/d4/19/d7de5a114cd1efa38278519a9c8ffbe0e9bed8556f83a45015640ddbc492/gphoto2-2.6.2-cp313-cp313-macosx_13_0_x86_64.whl", hash = "sha256:cb874afefeb9645bbcab1a90ab83b96ed2c90249cc7b2947d0833bfafb79d7ce", size = 6372896 },
-    { url = "https://files.pythonhosted.org/packages/7d/6f/f8a5dad05b65051b65e82ab59bde1b2b4ada8323e2c71c19f3b6057c8e1c/gphoto2-2.6.2-cp313-cp313-macosx_14_0_arm64.whl", hash = "sha256:2e6f5730a48dd52097253d93061952e0cfd1f0e58e2b551e663fa9f29dcfd798", size = 5818043 },
-    { url = "https://files.pythonhosted.org/packages/18/3e/5c0f24667c3de2a8dc34379b7214d7fbcae64cb41d74b738076576f24eee/gphoto2-2.6.2-cp313-cp313-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:b3c2ace5039142e6569aa13a0626f880507872f1955d91a3fa4300e221f13ea8", size = 11408973 },
-    { url = "https://files.pythonhosted.org/packages/88/cd/c8972d3247703e86e0e1b7ab69ca687a0434545327265b1f5c2b3369ce59/gphoto2-2.6.2-cp313-cp313-manylinux_2_28_aarch64.whl", hash = "sha256:5547a7deacb1c6b936141c6bdc619e7e5b83bec2b7fc8e4b2ecbff6ae9e7bcdc", size = 12585995 },
-]
-
-[[package]]
 name = "h11"
 version = "0.16.0"
 source = { registry = "https://pypi.org/simple" }
@@ -333,7 +317,6 @@ version = "0.2.0"
 source = { editable = "." }
 dependencies = [
     { name = "fastapi" },
-    { name = "gphoto2" },
     { name = "jinja2" },
     { name = "loguru" },
     { name = "numpy" },
@@ -354,7 +337,6 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "fastapi", specifier = ">=0.116.1" },
-    { name = "gphoto2", specifier = ">=2.6.2" },
     { name = "jinja2", specifier = ">=3.1.0" },
     { name = "loguru", specifier = ">=0.7.0" },
     { name = "numpy", specifier = ">=2.2.6" },
