@@ -12,6 +12,21 @@ logger = get_logger("api_routes")
 # Initialize backend service
 backend = get_backend_service()
 
+DEFAULT_EXPOSURE_RANGE_MS = (0.032, 30000.0)
+DEFAULT_GAIN_RANGE = (0, 600)
+
+
+def _capability_range(
+    capabilities: dict[str, object], key: str, default_min: float, default_max: float
+) -> tuple[float, float]:
+    cap = capabilities.get(key)
+    if isinstance(cap, dict):
+        min_val = cap.get("min")
+        max_val = cap.get("max")
+        if isinstance(min_val, (int, float)) and isinstance(max_val, (int, float)):
+            return float(min_val), float(max_val)
+    return float(default_min), float(default_max)
+
 
 async def get_status():
     """Get current backend and camera status."""
@@ -103,55 +118,37 @@ async def update_settings(request: Request):
             raise HTTPException(status_code=400, detail="Backend service not started")
 
         data = await request.json()
+        capabilities = backend.camera.get_control_capabilities()
+        exposure_min, exposure_max = _capability_range(
+            capabilities,
+            "exposure_ms",
+            DEFAULT_EXPOSURE_RANGE_MS[0],
+            DEFAULT_EXPOSURE_RANGE_MS[1],
+        )
+        gain_min, gain_max = _capability_range(
+            capabilities, "gain", DEFAULT_GAIN_RANGE[0], DEFAULT_GAIN_RANGE[1]
+        )
 
         # Validate and sanitize settings
         valid_settings = {}
         if "exposure_ms" in data:
             exposure_ms = float(data["exposure_ms"])
-            if 0.1 <= exposure_ms <= 30000:  # 0.1ms to 30s range
+            if exposure_min <= exposure_ms <= exposure_max:
                 valid_settings["exposure_ms"] = exposure_ms
             else:
                 raise HTTPException(
-                    status_code=400, detail="Exposure must be between 0.1ms and 30s"
+                    status_code=400,
+                    detail=f"Exposure must be between {exposure_min}ms and {exposure_max}ms",
                 )
 
         if "gain" in data:
             gain = int(data["gain"])
-            if 0 <= gain <= 51200:  # Extended range for both ZWO and DSLR
+            if gain_min <= gain <= gain_max:
                 valid_settings["gain"] = gain
             else:
                 raise HTTPException(
-                    status_code=400, detail="Gain must be between 0 and 51200"
-                )
-
-        if "wb_r" in data:
-            wb_r = int(data["wb_r"])
-            if 50 <= wb_r <= 150:  # White balance range
-                valid_settings["wb_r"] = wb_r
-            else:
-                raise HTTPException(
                     status_code=400,
-                    detail="Red white balance must be between 50 and 150",
-                )
-
-        if "wb_b" in data:
-            wb_b = int(data["wb_b"])
-            if 50 <= wb_b <= 150:  # White balance range
-                valid_settings["wb_b"] = wb_b
-            else:
-                raise HTTPException(
-                    status_code=400,
-                    detail="Blue white balance must be between 50 and 150",
-                )
-
-        if "image_format" in data:
-            image_format = str(data["image_format"]).lower()
-            if image_format in ["mono", "color"]:
-                valid_settings["image_format"] = image_format
-            else:
-                raise HTTPException(
-                    status_code=400,
-                    detail="Image format must be 'mono' or 'color'",
+                    detail=f"Gain must be between {gain_min} and {gain_max}",
                 )
 
         if not valid_settings:

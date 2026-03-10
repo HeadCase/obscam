@@ -26,7 +26,6 @@ class ZwoAsiCamera(CameraInterface):
         self.current_settings: dict[str, str | float | int] = {
             "exposure_ms": 200.0,
             "gain": 250,
-            "image_format": "mono",
         }
 
         # Initialize the SDK
@@ -149,7 +148,6 @@ class ZwoAsiCamera(CameraInterface):
             return {
                 "status": "connected",
                 "camera_model": self.camera_info.get("Name", "Unknown"),
-                "image_format": "mono",
                 "current_exposure_ms": settings["exposure_ms"],
                 "current_gain": settings["gain"],
             }
@@ -254,11 +252,6 @@ class ZwoAsiCamera(CameraInterface):
                     )
                 if "gain" in settings:
                     self.current_settings["gain"] = int(settings["gain"])
-                if "image_format" in settings:
-                    format_value = str(settings["image_format"]).lower()
-                    if format_value in ["mono", "color"]:
-                        self.current_settings["image_format"] = format_value
-
             print(f"Settings updated: {settings}")
             return True
 
@@ -278,7 +271,6 @@ class ZwoAsiCamera(CameraInterface):
             return {
                 "exposure_ms": {"min": 0.032, "max": 30000, "type": "float"},
                 "gain": {"min": 0, "max": 600, "type": "int"},
-                "image_format": "mono",
                 "camera_type": "ZWO ASI (disconnected)",
             }
 
@@ -312,6 +304,5 @@ class ZwoAsiCamera(CameraInterface):
             return {
                 "exposure_ms": {"min": 0.032, "max": 30000, "type": "float"},
                 "gain": {"min": 0, "max": 600, "type": "int"},
-                "image_format": "mono",
                 "camera_type": "ZWO ASI (error)",
             }

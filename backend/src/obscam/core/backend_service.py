@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 """Backend service coordinator for camera system."""
 
-import time
 from pathlib import Path
 from typing import Any
 
@@ -137,22 +136,13 @@ class CameraBackendService:
         Update camera settings and persist them.
 
         This method coordinates between the camera hardware,
-        capture loop, and settings persistence. For DSLR cameras,
-        it temporarily pauses capture to avoid I/O conflicts.
+        capture loop, and settings persistence.
         """
         if not self._started:
             logger.error("Backend not started - cannot update settings")
             return False
 
         logger.info("Updating camera settings", new_settings=settings)
-
-        # For DSLR cameras, pause capture loop to avoid I/O conflicts
-        was_capturing = self.capture_loop.is_running()
-        if was_capturing:
-            logger.debug("Pausing capture loop for settings update")
-            self.capture_loop.stop()
-            # Brief wait for capture loop to stop cleanly
-            time.sleep(0.2)
 
         # Apply settings to camera hardware
         success = self.camera.update_settings(**settings)
@@ -161,14 +151,6 @@ class CameraBackendService:
             # Get updated settings from camera
             current_settings = self.camera.get_current_settings()
 
-            # Restart capture loop if it was running
-            if was_capturing:
-                logger.debug("Restarting capture loop after settings update")
-                capture_started = self.capture_loop.start()
-                if not capture_started:
-                    logger.error("Failed to restart capture loop after settings update")
-                    success = False
-
             # Persist settings asynchronously
             if success:
                 self.settings_manager.save_settings_async(current_settings)
@@ -176,11 +158,6 @@ class CameraBackendService:
                 logger.info("Settings updated successfully", settings=current_settings)
         else:
             logger.error("Failed to update camera settings", settings=settings)
-
-            # Restart capture loop even if settings failed
-            if was_capturing:
-                logger.debug("Restarting capture loop after failed settings update")
-                self.capture_loop.start()
 
         return success
 
