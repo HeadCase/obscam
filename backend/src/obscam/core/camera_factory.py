@@ -3,12 +3,14 @@
 import os
 from pathlib import Path
 
+from obscam.camera.synthetic_camera import SyntheticCamera
 from obscam.core.backend_service import CameraBackendService
 from obscam.common.logging_config import get_logger
 
 logger = get_logger("camera_factory")
 
 _backend_service: CameraBackendService | None = None
+DEFAULT_CAMERA_BACKEND = "zwo"
 
 
 def _get_cache_directory() -> Path:
@@ -33,12 +35,23 @@ def get_backend_service() -> CameraBackendService:
 
     if _backend_service is None:
         cache_dir = _get_cache_directory()
-        logger.info("Using ZWO ASI camera implementation")
-        from obscam.camera.zwo_asi_camera import ZwoAsiCamera
+        camera_backend = os.getenv("OBSCAM_CAMERA_BACKEND", DEFAULT_CAMERA_BACKEND).strip().lower()
+        if camera_backend == "synthetic":
+            logger.info("Using synthetic camera implementation")
+            base_camera = SyntheticCamera()
+        elif camera_backend == "zwo":
+            logger.info("Using ZWO ASI camera implementation")
+            from obscam.camera.zwo_asi_camera import ZwoAsiCamera
 
-        base_camera = ZwoAsiCamera()
+            base_camera = ZwoAsiCamera()
+        else:
+            raise ValueError(f"Unsupported camera backend: {camera_backend}")
 
         _backend_service = CameraBackendService(base_camera, cache_dir)
-        logger.info("Backend service created", cache_dir=str(cache_dir))
+        logger.info(
+            "Backend service created",
+            cache_dir=str(cache_dir),
+            camera_backend=camera_backend,
+        )
 
     return _backend_service
