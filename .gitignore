@@ -1,3 +1,6 @@
+# Rubbish
+*.DS_STORE
+
 # Python-generated files
 __pycache__/
 *.py[oc]
@@ -10,4 +13,5 @@ wheels/
 .venv
 
 images/
+assets/
 logs/
