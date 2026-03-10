@@ -5,17 +5,16 @@ from pathlib import Path
 from typing import Any
 
 from obscam.camera.camera_interface import CameraInterface
+from obscam.common.logging_config import get_logger, log_camera_event
 from obscam.core.capture_loop import ContinuousCaptureLoop
 from obscam.core.frame_buffer import LatestFrameBuffer
 from obscam.storage.settings_manager import SettingsManager
-from obscam.common.logging_config import get_logger, log_camera_event
 
 logger = get_logger("backend_service")
 
 
 class CameraBackendService:
-    """
-    Main backend service that owns camera operations entirely.
+    """Main backend service that owns camera operations entirely.
 
     This service orchestrates all camera-related components and provides
     a clean API for the web layer. It uses queue-based coordination
@@ -125,6 +124,22 @@ class CameraBackendService:
             logger.debug("No frame available in memory buffer")
         return frame
 
+    def get_latest_frame_with_metadata(self) -> tuple[bytes, dict[str, Any]] | None:
+        """Get latest frame bytes and metadata for snapshot persistence."""
+        if not self._started:
+            logger.warning("Backend not started - cannot serve frame with metadata")
+            return None
+
+        frame_data = self.frame_buffer.get_frame_with_metadata()
+        if frame_data:
+            logger.debug(
+                "Latest frame with metadata served from memory",
+                frame_size=len(frame_data[0]),
+            )
+        else:
+            logger.debug("No frame with metadata available in memory buffer")
+        return frame_data
+
     def get_frame_metadata(self) -> dict[str, Any] | None:
         """Get metadata for latest frame."""
         if not self._started:
@@ -132,11 +147,10 @@ class CameraBackendService:
         return self.frame_buffer.get_frame_metadata()
 
     def update_settings(self, **settings: Any) -> bool:
-        """
-        Update camera settings and persist them.
+        """Update camera settings and persist them.
 
-        This method coordinates between the camera hardware,
-        capture loop, and settings persistence.
+        This method coordinates between the camera hardware, capture
+        loop, and settings persistence.
         """
         if not self._started:
             logger.error("Backend not started - cannot update settings")

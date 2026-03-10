@@ -1,5 +1,6 @@
 """Camera factory for backend service initialization."""
 
+import os
 from pathlib import Path
 
 from obscam.core.backend_service import CameraBackendService
