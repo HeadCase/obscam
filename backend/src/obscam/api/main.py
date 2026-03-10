@@ -2,16 +2,20 @@
 
 import asyncio
 import json
+import re
 import time
 from collections import deque
+from datetime import datetime
+from pathlib import Path, PurePosixPath
 
 import uvicorn
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response, StreamingResponse
 from fastapi.templating import Jinja2Templates
+from pydantic import BaseModel
 
-from obscam.common.constants import PROJECT_ROOT
+from obscam.common.constants import ASSETS_DIR, PROJECT_ROOT
 from obscam.common.logging_config import get_logger
 from obscam.core.backend_service import CameraBackendService
 from obscam.core.camera_factory import get_backend_service
@@ -42,6 +46,13 @@ DEFAULT_EXPOSURE_RANGE_MS = (0.032, 30000.0)
 DEFAULT_GAIN_RANGE = (0, 600)
 
 
+class SnapshotRequest(BaseModel):
+    """Snapshot save request payload."""
+
+    subdirectory: str | None = None
+    filename_prefix: str | None = None
+
+
 def _capability_range(
     capabilities: dict[str, object], key: str, default_min: float, default_max: float
 ) -> tuple[float, float]:
@@ -70,6 +81,78 @@ def _on_new_frame():
     new_frame_event.set()
     new_frame_event.clear()  # Clear for next wait
     frame_times.append(time.time())
+
+
+def _ensure_backend() -> CameraBackendService:
+    """Initialize the backend singleton when routes are used outside
+    start_server()."""
+    global backend
+
+    if backend is None:
+        backend = get_backend_service()
+        backend.frame_buffer.on_new_frame = _on_new_frame
+
+    return backend
+
+
+def _resolve_snapshot_directory(subdirectory: str | None) -> Path:
+    """Resolve an optional snapshot subdirectory under the assets root."""
+    assets_root = ASSETS_DIR.resolve()
+    assets_root.mkdir(parents=True, exist_ok=True)
+
+    if subdirectory is None or not subdirectory.strip():
+        return assets_root
+
+    normalized = PurePosixPath(subdirectory.strip())
+    if normalized.is_absolute():
+        raise HTTPException(
+            status_code=400, detail="Snapshot subdirectory must be relative"
+        )
+
+    parts = normalized.parts
+    if not parts or any(part in {"", ".", ".."} for part in parts):
+        raise HTTPException(status_code=400, detail="Invalid snapshot subdirectory")
+
+    target_dir = (assets_root / Path(*parts)).resolve()
+    try:
+        target_dir.relative_to(assets_root)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=400, detail="Snapshot subdirectory must stay under assets/"
+        ) from exc
+
+    return target_dir
+
+
+def _sanitize_filename_prefix(filename_prefix: str | None) -> str:
+    """Sanitize user-supplied filename prefixes to a narrow safe subset."""
+    candidate = (filename_prefix or "snapshot").strip().lower()
+    candidate = re.sub(r"[^a-z0-9_-]+", "-", candidate)
+    candidate = re.sub(r"[-_]+", "-", candidate).strip("-_")
+    return candidate or "snapshot"
+
+
+def _build_snapshot_filename(filename_prefix: str, current_time: datetime) -> str:
+    """Build a sortable JPEG snapshot filename with millisecond precision."""
+    timestamp = current_time.strftime("%Y%m%d_%H%M%S")
+    milliseconds = current_time.microsecond // 1000
+    return f"{filename_prefix}_{timestamp}_{milliseconds:03d}.jpg"
+
+
+def _ensure_unique_snapshot_path(directory: Path, filename: str) -> Path:
+    """Resolve filename collisions by appending a numeric suffix."""
+    snapshot_path = directory / filename
+    if not snapshot_path.exists():
+        return snapshot_path
+
+    stem = snapshot_path.stem
+    suffix = snapshot_path.suffix
+    counter = 1
+    while True:
+        candidate = directory / f"{stem}_{counter}{suffix}"
+        if not candidate.exists():
+            return candidate
+        counter += 1
 
 
 # Frame buffer callback will be connected in start_server after backend is initialized
@@ -166,6 +249,61 @@ async def get_latest_frame():
     except Exception as e:
         logger.error("Frame retrieval failed", error=str(e))
         raise HTTPException(status_code=500, detail=f"Frame retrieval failed: {e}")
+
+
+@app.post("/api/snapshots")
+async def create_snapshot(payload: SnapshotRequest):
+    """Persist the latest buffered frame to disk."""
+    active_backend = _ensure_backend()
+
+    try:
+        if not active_backend.is_started() and not active_backend.start_backend():
+            raise HTTPException(status_code=503, detail="Backend service not available")
+
+        frame_data = active_backend.get_latest_frame_with_metadata()
+        if frame_data is None:
+            raise HTTPException(status_code=503, detail="No frame available")
+
+        frame_bytes, frame_metadata = frame_data
+        target_dir = _resolve_snapshot_directory(payload.subdirectory)
+        target_dir.mkdir(parents=True, exist_ok=True)
+
+        filename_prefix = _sanitize_filename_prefix(payload.filename_prefix)
+        snapshot_path = _ensure_unique_snapshot_path(
+            target_dir,
+            _build_snapshot_filename(filename_prefix, datetime.now()),
+        )
+        snapshot_path.write_bytes(frame_bytes)
+
+        saved_at = time.time()
+        frame_timestamp = float(frame_metadata.get("timestamp", 0.0) or 0.0)
+        frame_age_seconds = saved_at - frame_timestamp if frame_timestamp > 0 else 0.0
+        relative_path = (
+            Path("assets") / snapshot_path.relative_to(ASSETS_DIR.resolve())
+        ).as_posix()
+        current_settings = active_backend.get_current_settings()
+
+        logger.info(
+            "Snapshot saved",
+            path=str(snapshot_path),
+            frame_age_seconds=round(frame_age_seconds, 3),
+            current_settings=current_settings,
+        )
+
+        return {
+            "status": "success",
+            "filename": snapshot_path.name,
+            "relative_path": relative_path,
+            "saved_at": saved_at,
+            "frame_timestamp": frame_timestamp,
+            "frame_age_seconds": round(frame_age_seconds, 2),
+            "current_settings": current_settings,
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("Snapshot save failed", error=str(e))
+        raise HTTPException(status_code=500, detail=f"Snapshot save failed: {e}")
 
 
 @app.post("/api/update-settings")
