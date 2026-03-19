@@ -1,0 +1,49 @@
+<!-- Footer Status Bar -->
+<footer
+  class="bg-tokyo-night-surface/95 backdrop-blur-sm border border-tokyo-night-overlay rounded-xl p-3"
+>
+  <div class="flex items-center justify-center gap-6 text-xs">
+    <button
+      @click="toggleStream()"
+      class="px-4 py-2 rounded-lg transition-all duration-300"
+      :class="streaming ? 'bg-tokyo-night-blue text-tokyo-night-bg' : 'bg-tokyo-night-overlay text-tokyo-night-text hover:bg-tokyo-night-overlay/80'"
+    >
+      <span x-text="streaming ? 'Streaming' : 'Start Stream'">Stream</span>
+    </button>
+
+    <div class="flex items-center gap-4 text-tokyo-night-subtle">
+      <span
+        >FPS:
+        <span
+          class="text-tokyo-night-green font-mono"
+          x-text="telemetry.fps || '--'"
+          >--</span
+        ></span
+      >
+      <span
+        >Last:
+        <span
+          class="text-tokyo-night-blue"
+          x-text="telemetry.lastUpdate || '--'"
+          >--</span
+        ></span
+      >
+      <span
+        >Age:
+        <span
+          class="text-tokyo-night-yellow"
+          x-text="telemetry.frameAge || '--'"
+          >--</span
+        ></span
+      >
+      <span
+        >Camera:
+        <span
+          class="text-tokyo-night-purple"
+          x-text="telemetry.cameraStatus || 'Init'"
+          >Init</span
+        ></span
+      >
+    </div>
+  </div>
+</footer>
