@@ -4,16 +4,19 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>ObsCam - Observatory Monitor</title>
+
+    <!-- External Libraries -->
     <script src="https://unpkg.com/htmx.org@1.9.12"></script>
     <script src="https://unpkg.com/alpinejs" defer></script>
     <script src="https://cdn.tailwindcss.com"></script>
+
+    <!-- Tailwind CSS -->
     <script>
       tailwind.config = {
         darkMode: "class",
         theme: {
           extend: {
             colors: {
-              // Tokyo Night color palette for observatory theme
               "tokyo-night": {
                 bg: "#1a1b26",
                 surface: "#24283b",
@@ -34,6 +37,8 @@
         },
       };
     </script>
+
+    <!-- Page Styles -->
     <style>
       /* Custom slider styling */
       .control-slider::-webkit-slider-thumb {
