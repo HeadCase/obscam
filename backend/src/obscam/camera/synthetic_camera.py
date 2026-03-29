@@ -32,7 +32,8 @@ class SyntheticCamera(CameraInterface):
 
     def __init__(self, frame_dir: str | Path | None = None):
         self.frame_dir = Path(
-            frame_dir or os.getenv("OBSCAM_SYNTHETIC_FRAME_DIR", DEFAULT_SYNTHETIC_FRAME_DIR)
+            frame_dir
+            or os.getenv("OBSCAM_SYNTHETIC_FRAME_DIR", DEFAULT_SYNTHETIC_FRAME_DIR)
         )
         self.settings_lock = threading.Lock()
         self.current_settings: dict[str, float | int] = {
@@ -98,7 +99,9 @@ class SyntheticCamera(CameraInterface):
 
         time.sleep(max(MIN_CAPTURE_INTERVAL_S, exposure_ms / 1000.0))
 
-        base_frame = self.fixture_frames[self.frame_index % len(self.fixture_frames)].copy()
+        base_frame = self.fixture_frames[
+            self.frame_index % len(self.fixture_frames)
+        ].copy()
         rendered = self._apply_camera_effects(base_frame, exposure_ms, gain)
         rendered = self._annotate_frame(rendered, exposure_ms, gain)
 
@@ -112,7 +115,9 @@ class SyntheticCamera(CameraInterface):
         try:
             with self.settings_lock:
                 if "exposure_ms" in settings:
-                    self.current_settings["exposure_ms"] = float(settings["exposure_ms"])
+                    self.current_settings["exposure_ms"] = float(
+                        settings["exposure_ms"]
+                    )
                 if "gain" in settings:
                     self.current_settings["gain"] = int(settings["gain"])
             return True
@@ -135,7 +140,10 @@ class SyntheticCamera(CameraInterface):
 
     def _discover_frame_paths(self) -> list[Path]:
         if not self.frame_dir.exists():
-            raise FileNotFoundError(f"Synthetic frame directory not found: {self.frame_dir}")
+            self.frame_dir.mkdir(parents=True)
+            # raise FileNotFoundError(
+            #     f"Synthetic frame directory not found: {self.frame_dir}"
+            # )
 
         frame_paths = sorted(
             path
