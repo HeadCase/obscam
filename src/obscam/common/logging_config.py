@@ -3,11 +3,11 @@ import sys
 from pathlib import Path
 
 from loguru import logger
-from obscam.common.constants import PROJECT_ROOT
+from obscam.common.constants import LOG_DIR
 
 
 def setup_logging(
-    debug_mode: bool = False, log_dir: Path = PROJECT_ROOT / "logs"
+    debug_mode: bool = False, log_dir: Path = LOG_DIR
 ) -> None:
     """Configure loguru for ObsCam with Pi-optimized settings.
 
