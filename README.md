@@ -90,6 +90,11 @@ uv run pre-commit install
 
 # Run all configured checks manually
 uv run pre-commit run --all-files
+# Test reliability features
+python test_reliability.py
+
+# Test logging implementation
+python test_logging.py
 ```
 
 ### Architecture
