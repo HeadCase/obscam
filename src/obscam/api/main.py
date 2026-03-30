@@ -163,7 +163,7 @@ def _ensure_unique_snapshot_path(directory: Path, filename: str) -> Path:
 @app.get("/")
 async def index(request: Request):
     """Main page displaying the camera feed."""
-    return templates.TemplateResponse("index.html", {"request": request})
+    return templates.TemplateResponse(request, "index.html", {"request": request})
 
 
 # API routes
