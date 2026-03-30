@@ -16,7 +16,7 @@ def test_graceful_shutdown():
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
         text=True,
-        cwd="/home/gheadley/develop/obscam/backend",
+        cwd="/home/gheadley/dev/obscam",
     )
 
     print(f"Process started with PID: {process.pid}")
