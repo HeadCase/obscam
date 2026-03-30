@@ -1,5 +1,6 @@
 import asyncio
 from pathlib import Path
+from typing import cast
 
 from fastapi import HTTPException
 
@@ -67,7 +68,9 @@ def test_get_latest_frame_with_metadata_returns_none_when_buffer_empty(tmp_path:
     assert service.get_latest_frame_with_metadata() is None
 
 
-def test_resolve_snapshot_directory_accepts_relative_subdirectory(tmp_path: Path, monkeypatch):
+def test_resolve_snapshot_directory_accepts_relative_subdirectory(
+    tmp_path: Path, monkeypatch
+):
     monkeypatch.setattr(api_main, "ASSETS_DIR", tmp_path / "assets")
 
     resolved = api_main._resolve_snapshot_directory("interesting/frames")
@@ -94,9 +97,12 @@ def test_sanitize_filename_prefix():
 
 
 def test_snapshot_endpoint_saves_file_and_returns_metadata(tmp_path: Path, monkeypatch):
-    frame_data = (
-        b"jpeg-bytes",
-        {"timestamp": 1234.5, "exposure_ms": 200.0, "gain": 250},
+    frame_data = cast(
+        tuple[bytes, dict[str, object]],
+        (
+            b"jpeg-bytes",
+            {"timestamp": 1234.5, "exposure_ms": 200.0, "gain": 250},
+        ),
     )
     fake_backend = FakeBackend(started=True, frame_data=frame_data)
 
@@ -134,7 +140,9 @@ def test_snapshot_endpoint_returns_503_when_backend_unavailable(monkeypatch):
         raise AssertionError("Expected backend-unavailable snapshot to fail")
 
 
-def test_snapshot_endpoint_returns_503_when_no_frame_available(tmp_path: Path, monkeypatch):
+def test_snapshot_endpoint_returns_503_when_no_frame_available(
+    tmp_path: Path, monkeypatch
+):
     fake_backend = FakeBackend(started=True, frame_data=None)
 
     monkeypatch.setattr(api_main, "backend", fake_backend)
@@ -150,7 +158,9 @@ def test_snapshot_endpoint_returns_503_when_no_frame_available(tmp_path: Path, m
 
 
 def test_snapshot_endpoint_creates_assets_subdirectories(tmp_path: Path, monkeypatch):
-    frame_data = (b"jpeg-bytes", {"timestamp": 1234.5})
+    frame_data = cast(
+        tuple[bytes, dict[str, object]], (b"jpeg-bytes", {"timestamp": 1234.5})
+    )
     fake_backend = FakeBackend(started=True, frame_data=frame_data)
 
     monkeypatch.setattr(api_main, "backend", fake_backend)

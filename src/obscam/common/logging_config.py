@@ -3,12 +3,22 @@ import sys
 from pathlib import Path
 
 from loguru import logger
+
 from obscam.common.constants import LOG_DIR
 
+CONSOLE_LOG_FORMAT = (
+    "<green>{time:YYYY-MM-DD HH:mm:ss}</green> | "
+    "<level>{level: <8}</level> | "
+    "<cyan>{name}</cyan>:<cyan>{function}</cyan>:<cyan>{line}</cyan> - "
+    "<level>{message}</level>"
+)
+FILE_LOG_FORMAT = (
+    "{time:YYYY-MM-DD HH:mm:ss.SSS} | {level: <8} | "
+    "{name}:{function}:{line} | {extra} | {message}"
+)
 
-def setup_logging(
-    debug_mode: bool = False, log_dir: Path = LOG_DIR
-) -> None:
+
+def setup_logging(debug_mode: bool = False, log_dir: Path = LOG_DIR) -> None:
     """Configure loguru for ObsCam with Pi-optimized settings.
 
     Args:
@@ -19,7 +29,7 @@ def setup_logging(
     try:
         logger.stop()
         logger.remove()
-    except:
+    except Exception:
         pass  # In case logger wasn't started yet
 
     log_dir.mkdir(exist_ok=True)
@@ -29,7 +39,7 @@ def setup_logging(
     logger.add(
         sys.stdout,
         level=console_level,
-        format="<green>{time:YYYY-MM-DD HH:mm:ss}</green> | <level>{level: <8}</level> | <cyan>{name}</cyan>:<cyan>{function}</cyan>:<cyan>{line}</cyan> - <level>{message}</level>",
+        format=CONSOLE_LOG_FORMAT,
         colorize=True,
     )
 
@@ -40,7 +50,7 @@ def setup_logging(
         rotation="10 MB",  # Pi-friendly file sizes
         retention="7 days",  # Keep a week for debugging
         compression="gz",  # Save disk space
-        format="{time:YYYY-MM-DD HH:mm:ss.SSS} | {level: <8} | {name}:{function}:{line} | {extra} | {message}",
+        format=FILE_LOG_FORMAT,
         serialize=False,
     )
 
@@ -51,7 +61,7 @@ def setup_logging(
         rotation="5 MB",
         retention="14 days",  # Keep errors longer
         compression="gz",
-        format="{time:YYYY-MM-DD HH:mm:ss.SSS} | {level: <8} | {name}:{function}:{line} | {extra} | {message}",
+        format=FILE_LOG_FORMAT,
         serialize=False,
     )
 
@@ -63,7 +73,7 @@ def setup_logging(
             rotation="20 MB",  # Larger for verbose debug info
             retention="3 days",  # Shorter retention for debug logs
             compression="gz",
-            format="{time:YYYY-MM-DD HH:mm:ss.SSS} | {level: <8} | {name}:{function}:{line} | {extra} | {message}",
+            format=FILE_LOG_FORMAT,
             serialize=False,
         )
 

@@ -6,8 +6,10 @@ def main() -> None:
     # Initialize logging first
     import os
     import sys
+
     from loguru import logger
-    from obscam.common.logging_config import setup_logging, get_logger
+
+    from obscam.common.logging_config import get_logger, setup_logging
 
     # Force clear any existing handlers to ensure clean setup
     logger.remove()

@@ -53,11 +53,12 @@ class ZwoAsiCamera(CameraInterface):
                         break
                 else:
                     raise RuntimeError(
-                        "ZWO ASI SDK library not found. Set ZWO_ASI_LIB environment variable or provide library_path"
+                        "ZWO ASI SDK library not found. Set ZWO_ASI_LIB "
+                        "environment variable or provide library_path"
                     )
 
         except Exception as e:
-            raise RuntimeError(f"Failed to initialize ZWO ASI SDK: {e}")
+            raise RuntimeError(f"Failed to initialize ZWO ASI SDK: {e}") from e
 
     @override
     def connect(self) -> bool:
@@ -112,7 +113,7 @@ class ZwoAsiCamera(CameraInterface):
             self.camera.set_control_value(asi.ASI_GAIN, 250)
 
             # Reset capture mode
-            self.current_capture_mode = None
+            self.current_capture_mode = ""
 
             print("Camera configured with minimal settings")
 
@@ -204,6 +205,9 @@ class ZwoAsiCamera(CameraInterface):
 
     def _capture_video_frame(self):
         """Capture frame using video mode."""
+        if self.camera is None:
+            return None
+
         # Ensure video mode is active
         if self.current_capture_mode != "video":
             self._switch_to_video_mode()
@@ -213,6 +217,9 @@ class ZwoAsiCamera(CameraInterface):
 
     def _capture_single_frame(self):
         """Capture frame using single exposure mode."""
+        if self.camera is None:
+            return None
+
         # Ensure single mode is active (stop video if running)
         if self.current_capture_mode == "video":
             self._switch_to_single_mode()
@@ -222,10 +229,13 @@ class ZwoAsiCamera(CameraInterface):
 
     def _switch_to_video_mode(self):
         """Switch camera to video capture mode."""
+        if self.camera is None:
+            return
+
         try:
             # Stop any single exposure
             self.camera.stop_exposure()
-        except:
+        except Exception:
             pass
 
         # Start video mode
@@ -234,10 +244,13 @@ class ZwoAsiCamera(CameraInterface):
 
     def _switch_to_single_mode(self):
         """Switch camera to single exposure mode."""
+        if self.camera is None:
+            return
+
         try:
             # Stop video capture
             self.camera.stop_video_capture()
-        except:
+        except Exception:
             pass
 
         self.current_capture_mode = "single"
@@ -277,7 +290,7 @@ class ZwoAsiCamera(CameraInterface):
         try:
             control_caps = self.camera.get_controls()
 
-            capabilities = {"camera_type": "ZWO ASI"}
+            capabilities: dict[str, Any] = {"camera_type": "ZWO ASI"}
 
             # Map ASI control types to our interface
             if "Exposure" in control_caps:

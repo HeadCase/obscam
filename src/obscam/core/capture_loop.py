@@ -7,8 +7,8 @@ import time
 from typing import Any
 
 from obscam.camera.camera_interface import CameraInterface
+from obscam.common.logging_config import get_logger, log_camera_event
 from obscam.core.frame_buffer import LatestFrameBuffer
-from obscam.common.logging_config import get_logger, log_camera_event, log_performance
 
 logger = get_logger("capture_loop")
 
