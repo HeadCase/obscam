@@ -34,6 +34,8 @@ uv sync
 uv run obscam
 ```
 
+Run those commands from the repository root.
+
 ### Access Points
 - **Web Interface**: http://localhost:5000
 - **API Endpoints**: http://localhost:8000

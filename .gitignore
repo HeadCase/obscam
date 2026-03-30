@@ -13,5 +13,4 @@ wheels/
 .venv
 
 images/
-assets/
 logs/

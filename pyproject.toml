@@ -27,5 +27,8 @@ build-backend = "uv_build"
 dev = [
     "basedpyright>=1.31.2",
     "ipdb>=0.13.13",
- "ipython>=9.4.0",
+    "ipython>=9.4.0",
 ]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

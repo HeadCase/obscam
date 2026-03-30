@@ -16,21 +16,19 @@ from fastapi.templating import Jinja2Templates
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from obscam.common.constants import ASSETS_DIR, PROJECT_ROOT
+from obscam.common.constants import ASSETS_DIR, STATIC_DIR, TEMPLATE_DIR
 from obscam.common.logging_config import get_logger
 from obscam.core.backend_service import CameraBackendService
 from obscam.core.camera_factory import get_backend_service
 
 logger = get_logger("api_main")
 
-static_dir = PROJECT_ROOT / "frontend/static"
-template_dir = PROJECT_ROOT / "frontend/templates"
-templates = Jinja2Templates(directory=str(template_dir))
+templates = Jinja2Templates(directory=str(TEMPLATE_DIR))
 
 # Create FastAPI app
 app = FastAPI(title="ObsCam API", version="1.0.0")
 
-app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
+app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
 # Setup CORS middleware
 app.add_middleware(

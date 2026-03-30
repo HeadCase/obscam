@@ -4,9 +4,9 @@
 
 - _Project hosts front and backends_: python code lives in `backend`
 - **Install dependencies**: `uv add`
-- **Access environment**: `source /backend/.venv/bin/activate`
+- **Access environment**: `source .venv/bin/activate`
 - _Update environment_: `uv sync`
-- **Run main application**: `uv run obscam` from `backend` directory
+- **Run main application**: `uv run obscam` from project root
 - **Run python code with development environment using**: `uv run`
 - **Tests should be written with pytest**
 - _Use package name for imports_: `from obscam.foo import Foo`
