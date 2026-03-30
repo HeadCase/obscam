@@ -2,7 +2,8 @@
 """Thread-safe frame buffer using queue for latest image storage."""
 
 import queue
-from typing import Any, Callable
+from collections.abc import Callable
+from typing import Any
 
 from obscam.common.logging_config import get_logger
 

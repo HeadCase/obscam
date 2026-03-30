@@ -79,11 +79,17 @@ scp pi@your-observatory:logs/*.log ./local-logs/
 
 ### Testing
 ```bash
-# Test reliability features
-python test_reliability.py
+# Run the test suite
+uv run pytest
+```
 
-# Test logging implementation
-python test_logging.py
+### Quality Checks
+```bash
+# Install git hooks once per clone
+uv run pre-commit install
+
+# Run all configured checks manually
+uv run pre-commit run --all-files
 ```
 
 ### Architecture

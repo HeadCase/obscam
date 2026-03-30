@@ -6,8 +6,9 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent / "src"))
 
-from obscam.camera.zwo_asi_camera import ZwoAsiCamera
 from obscam.camera.libgphoto2_camera import Gphoto2Camera
+
+from obscam.camera.zwo_asi_camera import ZwoAsiCamera
 
 
 def test_zwo_camera():

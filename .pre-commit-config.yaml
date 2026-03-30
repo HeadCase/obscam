@@ -1,0 +1,21 @@
+repos:
+  - repo: local
+    hooks:
+      - id: ruff-format
+        name: ruff format
+        entry: uv run ruff format --check src tests test_mono_format.py test_shutdown.py
+        language: system
+        pass_filenames: false
+        types_or: [python]
+      - id: ruff-check
+        name: ruff check
+        entry: uv run ruff check src tests test_mono_format.py test_shutdown.py
+        language: system
+        pass_filenames: false
+        types_or: [python]
+      - id: ty-check
+        name: ty check
+        entry: uv run ty check src tests
+        language: system
+        pass_filenames: false
+        types_or: [python]
