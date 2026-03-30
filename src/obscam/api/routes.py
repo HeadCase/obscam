@@ -1,11 +1,13 @@
 """FastAPI routes for obscam camera backend."""
 
 import time
+from typing import cast
+
 from fastapi import HTTPException, Request
 from fastapi.responses import Response
 
-from obscam.core.camera_factory import get_backend_service
 from obscam.common.logging_config import get_logger
+from obscam.core.camera_factory import get_backend_service
 
 logger = get_logger("api_routes")
 
@@ -21,8 +23,9 @@ def _capability_range(
 ) -> tuple[float, float]:
     cap = capabilities.get(key)
     if isinstance(cap, dict):
-        min_val = cap.get("min")
-        max_val = cap.get("max")
+        typed_cap = cast(dict[str, object], cap)
+        min_val = typed_cap.get("min")
+        max_val = typed_cap.get("max")
         if isinstance(min_val, (int, float)) and isinstance(max_val, (int, float)):
             return float(min_val), float(max_val)
     return float(default_min), float(default_max)
@@ -108,7 +111,9 @@ async def get_latest_frame():
         raise
     except Exception as e:
         logger.error("Frame retrieval failed", error=str(e))
-        raise HTTPException(status_code=500, detail=f"Frame retrieval failed: {e}")
+        raise HTTPException(
+            status_code=500, detail=f"Frame retrieval failed: {e}"
+        ) from e
 
 
 async def update_settings(request: Request):
@@ -138,7 +143,10 @@ async def update_settings(request: Request):
             else:
                 raise HTTPException(
                     status_code=400,
-                    detail=f"Exposure must be between {exposure_min}ms and {exposure_max}ms",
+                    detail=(
+                        f"Exposure must be between {exposure_min}ms "
+                        f"and {exposure_max}ms"
+                    ),
                 )
 
         if "gain" in data:
@@ -172,7 +180,9 @@ async def update_settings(request: Request):
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Settings update failed: {e}")
+        raise HTTPException(
+            status_code=500, detail=f"Settings update failed: {e}"
+        ) from e
 
 
 async def get_frame_info():
@@ -195,4 +205,4 @@ async def get_frame_info():
 
     except Exception as e:
         logger.error("Frame info failed", error=str(e))
-        raise HTTPException(status_code=500, detail=f"Frame info failed: {e}")
+        raise HTTPException(status_code=500, detail=f"Frame info failed: {e}") from e

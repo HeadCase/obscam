@@ -7,13 +7,14 @@ import time
 from collections import deque
 from datetime import datetime
 from pathlib import Path, PurePosixPath
+from typing import cast
 
 import uvicorn
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response, StreamingResponse
-from fastapi.templating import Jinja2Templates
 from fastapi.staticfiles import StaticFiles
+from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
 
 from obscam.common.constants import ASSETS_DIR, STATIC_DIR, TEMPLATE_DIR
@@ -59,8 +60,9 @@ def _capability_range(
 ) -> tuple[float, float]:
     cap = capabilities.get(key)
     if isinstance(cap, dict):
-        min_val = cap.get("min")
-        max_val = cap.get("max")
+        typed_cap = cast(dict[str, object], cap)
+        min_val = typed_cap.get("min")
+        max_val = typed_cap.get("max")
         if isinstance(min_val, (int, float)) and isinstance(max_val, (int, float)):
             return float(min_val), float(max_val)
     return float(default_min), float(default_max)
@@ -249,7 +251,9 @@ async def get_latest_frame():
         raise
     except Exception as e:
         logger.error("Frame retrieval failed", error=str(e))
-        raise HTTPException(status_code=500, detail=f"Frame retrieval failed: {e}")
+        raise HTTPException(
+            status_code=500, detail=f"Frame retrieval failed: {e}"
+        ) from e
 
 
 @app.post("/api/snapshots")
@@ -304,7 +308,7 @@ async def create_snapshot(payload: SnapshotRequest):
         raise
     except Exception as e:
         logger.error("Snapshot save failed", error=str(e))
-        raise HTTPException(status_code=500, detail=f"Snapshot save failed: {e}")
+        raise HTTPException(status_code=500, detail=f"Snapshot save failed: {e}") from e
 
 
 @app.post("/api/update-settings")
@@ -335,7 +339,10 @@ async def update_settings(request: Request):
             else:
                 raise HTTPException(
                     status_code=400,
-                    detail=f"Exposure must be between {exposure_min}ms and {exposure_max}ms",
+                    detail=(
+                        f"Exposure must be between {exposure_min}ms "
+                        f"and {exposure_max}ms"
+                    ),
                 )
 
         if "gain" in data:
@@ -369,7 +376,9 @@ async def update_settings(request: Request):
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Settings update failed: {e}")
+        raise HTTPException(
+            status_code=500, detail=f"Settings update failed: {e}"
+        ) from e
 
 
 @app.get("/api/frame-info")
@@ -393,7 +402,7 @@ async def get_frame_info():
 
     except Exception as e:
         logger.error("Frame info failed", error=str(e))
-        raise HTTPException(status_code=500, detail=f"Frame info failed: {e}")
+        raise HTTPException(status_code=500, detail=f"Frame info failed: {e}") from e
 
 
 @app.get("/stream.mjpg")
@@ -501,7 +510,7 @@ async def telemetry_sse():
 
 @app.get("/api/bootstrap")
 async def bootstrap():
-    """Bootstrap endpoint for initial page load - gets current settings and capabilities."""
+    """Bootstrap endpoint for initial page load and camera capabilities."""
     try:
         if not backend.is_started():
             # Try to start backend automatically
@@ -525,7 +534,7 @@ async def bootstrap():
 
     except Exception as e:
         logger.error("Bootstrap failed", error=str(e))
-        raise HTTPException(status_code=500, detail=f"Bootstrap failed: {e}")
+        raise HTTPException(status_code=500, detail=f"Bootstrap failed: {e}") from e
 
 
 @app.post("/api/settings")
@@ -588,7 +597,9 @@ async def update_settings_v2(request: Request):
         raise
     except Exception as e:
         logger.error("Settings update failed", error=str(e))
-        raise HTTPException(status_code=500, detail=f"Settings update failed: {e}")
+        raise HTTPException(
+            status_code=500, detail=f"Settings update failed: {e}"
+        ) from e
 
 
 def run_server(port: int = 8000):

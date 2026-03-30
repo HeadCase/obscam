@@ -4,8 +4,8 @@ import os
 from pathlib import Path
 
 from obscam.camera.synthetic_camera import SyntheticCamera
-from obscam.core.backend_service import CameraBackendService
 from obscam.common.logging_config import get_logger
+from obscam.core.backend_service import CameraBackendService
 
 logger = get_logger("camera_factory")
 
@@ -35,7 +35,9 @@ def get_backend_service() -> CameraBackendService:
 
     if _backend_service is None:
         cache_dir = _get_cache_directory()
-        camera_backend = os.getenv("OBSCAM_CAMERA_BACKEND", DEFAULT_CAMERA_BACKEND).strip().lower()
+        camera_backend = (
+            os.getenv("OBSCAM_CAMERA_BACKEND", DEFAULT_CAMERA_BACKEND).strip().lower()
+        )
         if camera_backend == "synthetic":
             logger.info("Using synthetic camera implementation")
             base_camera = SyntheticCamera()

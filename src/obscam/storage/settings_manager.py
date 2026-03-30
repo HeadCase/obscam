@@ -57,7 +57,7 @@ class SettingsManager:
         """Load settings from disk."""
         try:
             if self.settings_file.exists():
-                with open(self.settings_file, "r") as f:
+                with open(self.settings_file) as f:
                     settings = json.load(f)
                 logger.info("Settings loaded successfully", settings=settings)
                 return settings
@@ -131,5 +131,5 @@ class SettingsManager:
             if temp_file.exists():
                 try:
                     temp_file.unlink()
-                except:
+                except Exception:
                     pass
