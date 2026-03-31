@@ -26,6 +26,7 @@ build-backend = "uv_build"
 [dependency-groups]
 dev = [
     "basedpyright>=1.31.2",
+    "deptry>=0.25.1",
     "ipdb>=0.13.13",
     "ipython>=9.4.0",
     "pre-commit>=4.2.0",
