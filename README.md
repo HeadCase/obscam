@@ -108,8 +108,7 @@ uv run pytest
 Run formatting and lint hooks:
 
 ```bash
-uv run pre-commit install
-uv run pre-commit run --all-files
+uv run pre-commit
 ```
 
 ## Repo Layout

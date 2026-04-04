@@ -311,76 +311,6 @@ async def create_snapshot(payload: SnapshotRequest):
         raise HTTPException(status_code=500, detail=f"Snapshot save failed: {e}") from e
 
 
-@app.post("/api/update-settings")
-async def update_settings(request: Request):
-    """Update camera settings (stateless, no session required)."""
-    try:
-        if not backend.is_started():
-            raise HTTPException(status_code=400, detail="Backend service not started")
-
-        data = await request.json()
-        capabilities = backend.camera.get_control_capabilities()
-        exposure_min, exposure_max = _capability_range(
-            capabilities,
-            "exposure_ms",
-            DEFAULT_EXPOSURE_RANGE_MS[0],
-            DEFAULT_EXPOSURE_RANGE_MS[1],
-        )
-        gain_min, gain_max = _capability_range(
-            capabilities, "gain", DEFAULT_GAIN_RANGE[0], DEFAULT_GAIN_RANGE[1]
-        )
-
-        # Validate and sanitize settings
-        valid_settings = {}
-        if "exposure_ms" in data:
-            exposure_ms = float(data["exposure_ms"])
-            if exposure_min <= exposure_ms <= exposure_max:
-                valid_settings["exposure_ms"] = exposure_ms
-            else:
-                raise HTTPException(
-                    status_code=400,
-                    detail=(
-                        f"Exposure must be between {exposure_min}ms "
-                        f"and {exposure_max}ms"
-                    ),
-                )
-
-        if "gain" in data:
-            gain = int(data["gain"])
-            if gain_min <= gain <= gain_max:
-                valid_settings["gain"] = gain
-            else:
-                raise HTTPException(
-                    status_code=400,
-                    detail=f"Gain must be between {gain_min} and {gain_max}",
-                )
-
-        if not valid_settings:
-            raise HTTPException(status_code=400, detail="No valid settings provided")
-
-        success = backend.update_settings(**valid_settings)
-
-        if success:
-            current_settings = backend.get_current_settings()
-            return {
-                "status": "success",
-                "message": "Settings updated",
-                "current_settings": current_settings,
-                "timestamp": time.time(),
-            }
-        else:
-            raise HTTPException(
-                status_code=500, detail="Failed to update camera settings"
-            )
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(
-            status_code=500, detail=f"Settings update failed: {e}"
-        ) from e
-
-
 @app.get("/api/frame-info")
 async def get_frame_info():
     """Get information about the latest frame and backend status."""
@@ -636,9 +566,7 @@ def start_server():
         logger.info("Available endpoints:")
         logger.info("  - Main page: http://localhost:8000/")
         logger.info("  - Latest frame: http://localhost:8000/api/latest-frame")
-        logger.info(
-            "  - Update settings: POST http://localhost:8000/api/update-settings"
-        )
+        logger.info("  - Update settings: POST http://localhost:8000/api/settings")
         logger.info("  - Status: http://localhost:8000/api/status")
     else:
         logger.warning("Backend service failed to start. Use /api/connect to retry.")
