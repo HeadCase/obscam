@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
-"""Thread-safe frame buffer using queue for latest image storage."""
+"""Thread-safe latest-frame storage for camera output."""
 
-import queue
-from collections.abc import Callable
+import threading
+from collections.abc import Callable, Mapping
+from dataclasses import dataclass
+from types import MappingProxyType
 from typing import Any
 
 from obscam.common.logging_config import get_logger
@@ -10,104 +12,90 @@ from obscam.common.logging_config import get_logger
 logger = get_logger("frame_buffer")
 
 
-class LatestFrameBuffer:
-    """Thread-safe storage for the most recent captured frame using queues."""
+@dataclass(frozen=True, slots=True)
+class FrameSnapshot:
+    """Immutable latest-frame snapshot for consumers."""
 
-    def __init__(self):
-        # Use maxsize=1 queue to automatically drop old frames
-        self._frame_queue: queue.Queue[tuple[bytes, dict[str, Any]]] = queue.Queue(
-            maxsize=1
-        )
-        # Callback for new frame notifications (for MJPEG/SSE)
-        self.on_new_frame: Callable[[], None] | None = None
-        logger.debug("Frame buffer initialized with queue-based storage")
+    frame_bytes: bytes
+    metadata: Mapping[str, Any]
+    generation: int
+
+
+class LatestFrameBuffer:
+    """Thread-safe storage for the most recent captured frame."""
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._latest_snapshot: FrameSnapshot | None = None
+        self._next_generation = 0
+        self.on_new_frame: Callable[[FrameSnapshot], None] | None = None
+        logger.debug("Frame buffer initialized with snapshot-based storage")
 
     def update_frame(self, frame_bytes: bytes, metadata: dict[str, Any]) -> None:
         """Update the latest frame and metadata."""
-        try:
-            # Non-blocking put - if queue is full, drop old frame
-            self._frame_queue.put_nowait((frame_bytes, metadata))
-            logger.debug(
-                "Frame updated",
-                frame_size=len(frame_bytes),
-                timestamp=metadata.get("timestamp"),
-                exposure_ms=metadata.get("exposure_ms"),
+        frozen_metadata = MappingProxyType(dict(metadata))
+        with self._lock:
+            self._next_generation += 1
+            snapshot = FrameSnapshot(
+                frame_bytes=frame_bytes,
+                metadata=frozen_metadata,
+                generation=self._next_generation,
             )
-        except queue.Full:
-            # Queue is full (has 1 item), so remove old and add new
-            try:
-                self._frame_queue.get_nowait()  # Drop old frame
-                self._frame_queue.put_nowait((frame_bytes, metadata))
-                logger.debug(
-                    "Frame updated (replaced old)",
-                    frame_size=len(frame_bytes),
-                    timestamp=metadata.get("timestamp"),
-                )
-            except queue.Empty:
-                # Race condition - queue became empty, try again
-                try:
-                    self._frame_queue.put_nowait((frame_bytes, metadata))
-                except queue.Full:
-                    logger.warning("Failed to update frame due to queue contention")
+            self._latest_snapshot = snapshot
 
-        # Notify listeners about new frame (for MJPEG/SSE)
+        logger.debug(
+            "Frame updated",
+            frame_size=len(frame_bytes),
+            timestamp=metadata.get("timestamp"),
+            exposure_ms=metadata.get("exposure_ms"),
+            generation=snapshot.generation,
+        )
+
         if self.on_new_frame:
             try:
-                self.on_new_frame()
+                self.on_new_frame(snapshot)
             except Exception as e:
                 logger.error("Error in new frame callback", error=str(e))
 
     def get_latest_frame(self) -> bytes | None:
-        """Get the latest frame bytes without removing from queue."""
-        try:
-            frame_bytes, metadata = self._frame_queue.get_nowait()
-            # Put it back for other consumers
-            self._frame_queue.put_nowait((frame_bytes, metadata))
-            logger.debug("Frame retrieved", frame_size=len(frame_bytes))
-            return frame_bytes
-        except queue.Empty:
+        """Get the latest frame bytes without consuming the snapshot."""
+        snapshot = self.get_latest_snapshot()
+        if snapshot is None:
             logger.debug("No frame available")
             return None
-        except queue.Full:
-            # This shouldn't happen with our design but handle gracefully
-            logger.warning("Queue contention during frame retrieval")
-            return None
+
+        logger.debug(
+            "Frame retrieved",
+            frame_size=len(snapshot.frame_bytes),
+            generation=snapshot.generation,
+        )
+        return snapshot.frame_bytes
 
     def get_frame_metadata(self) -> dict[str, Any] | None:
-        """Get metadata for the latest frame without removing from queue."""
-        try:
-            frame_bytes, metadata = self._frame_queue.get_nowait()
-            # Put it back for other consumers
-            self._frame_queue.put_nowait((frame_bytes, metadata))
-            return metadata
-        except queue.Empty:
+        """Get metadata for the latest frame without consuming the snapshot."""
+        snapshot = self.get_latest_snapshot()
+        if snapshot is None:
             return None
-        except queue.Full:
-            logger.warning("Queue contention during metadata retrieval")
-            return None
+        return dict(snapshot.metadata)
 
     def get_frame_with_metadata(self) -> tuple[bytes, dict[str, Any]] | None:
-        """Get both frame and metadata without removing from queue."""
-        try:
-            frame_data = self._frame_queue.get_nowait()
-            # Put it back for other consumers
-            self._frame_queue.put_nowait(frame_data)
-            return frame_data
-        except queue.Empty:
+        """Get both frame bytes and metadata without consuming the snapshot."""
+        snapshot = self.get_latest_snapshot()
+        if snapshot is None:
             return None
-        except queue.Full:
-            logger.warning("Queue contention during combined retrieval")
-            return None
+        return snapshot.frame_bytes, dict(snapshot.metadata)
+
+    def get_latest_snapshot(self) -> FrameSnapshot | None:
+        """Get the latest immutable frame snapshot."""
+        with self._lock:
+            return self._latest_snapshot
 
     def has_frame(self) -> bool:
         """Check if a frame is available."""
-        return not self._frame_queue.empty()
+        return self.get_latest_snapshot() is not None
 
     def clear(self) -> None:
         """Clear the frame buffer."""
-        try:
-            while True:
-                self._frame_queue.get_nowait()
-        except queue.Empty:
-            pass
+        with self._lock:
+            self._latest_snapshot = None
         logger.debug("Frame buffer cleared")

@@ -5,9 +5,11 @@ import json
 import re
 import time
 from collections import deque
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from datetime import datetime
 from pathlib import Path, PurePosixPath
-from typing import cast
+from typing import Any, cast
 
 import uvicorn
 from fastapi import FastAPI, HTTPException, Request
@@ -21,31 +23,11 @@ from obscam.common.constants import ASSETS_DIR, STATIC_DIR, TEMPLATE_DIR
 from obscam.common.logging_config import get_logger
 from obscam.core.backend_service import CameraBackendService
 from obscam.core.camera_factory import get_backend_service
+from obscam.core.frame_buffer import FrameSnapshot
 
 logger = get_logger("api_main")
 
 templates = Jinja2Templates(directory=str(TEMPLATE_DIR))
-
-# Create FastAPI app
-app = FastAPI(title="ObsCam API", version="1.0.0")
-
-app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
-
-# Setup CORS middleware
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
-# Backend service - will be initialized in start_server after logging is configured
-
-backend: CameraBackendService = None  # type: ignore # Will be initialized in start_server()
-
-DEFAULT_EXPOSURE_RANGE_MS = (0.032, 30000.0)
-DEFAULT_GAIN_RANGE = (0, 600)
 
 
 class SnapshotRequest(BaseModel):
@@ -69,21 +51,210 @@ def _capability_range(
 
 
 # Global state for MJPEG streaming and SSE
-new_frame_event = asyncio.Event()
 settings_version = 0
-settings_applied_event = asyncio.Event()
-frame_times = deque(maxlen=120)
 
 # No custom shutdown handling - let FastAPI/Python handle Ctrl+C immediately
 
 
-# Wire frame notification callback
-def _on_new_frame():
+class FrameDeliveryNotifier:
+    """Coordinates loop-safe wakeups for frame and settings updates."""
+
+    def __init__(self) -> None:
+        self._loop: asyncio.AbstractEventLoop | None = None
+        self._condition: asyncio.Condition | None = None
+        self._frame_generation = 0
+        self._settings_version = 0
+        self._frame_times: deque[float] = deque(maxlen=120)
+
+    def bind(
+        self,
+        loop: asyncio.AbstractEventLoop,
+        frame_generation: int,
+        current_settings_version: int,
+    ) -> None:
+        """Bind the notifier to the active event loop."""
+        if self._loop is loop and self._condition is not None:
+            self._frame_generation = max(self._frame_generation, frame_generation)
+            self._settings_version = max(
+                self._settings_version, current_settings_version
+            )
+            return
+
+        self._loop = loop
+        self._condition = asyncio.Condition()
+        self._frame_generation = frame_generation
+        self._settings_version = current_settings_version
+        self._frame_times.clear()
+
+    def publish_frame(self, snapshot: FrameSnapshot) -> None:
+        """Schedule a loop-safe frame update."""
+        loop = self._get_active_loop()
+        if loop is None:
+            return
+        published_at = time.time()
+        loop.call_soon_threadsafe(
+            self._schedule_frame_update, snapshot.generation, published_at
+        )
+
+    def publish_settings(self, current_settings_version: int) -> None:
+        """Schedule a loop-safe settings update."""
+        loop = self._get_active_loop()
+        if loop is None:
+            return
+        loop.call_soon_threadsafe(
+            self._schedule_settings_update, current_settings_version
+        )
+
+    async def wait_for_frame(self, last_generation: int) -> int:
+        """Wait for a newer frame generation."""
+        condition = self._require_condition()
+        async with condition:
+            await condition.wait_for(lambda: self._frame_generation > last_generation)
+            return self._frame_generation
+
+    async def wait_for_update(
+        self, last_generation: int, last_settings_version: int
+    ) -> tuple[int, int]:
+        """Wait for either a newer frame or a newer settings version."""
+        condition = self._require_condition()
+        async with condition:
+            await condition.wait_for(
+                lambda: (
+                    self._frame_generation > last_generation
+                    or self._settings_version > last_settings_version
+                )
+            )
+            return self._frame_generation, self._settings_version
+
+    def estimate_fps(self, window_s: float = 5.0) -> float | None:
+        """Estimate FPS from recent frame arrival times."""
+        if len(self._frame_times) < 2:
+            return None
+        now = time.time()
+        recent = [
+            frame_time
+            for frame_time in self._frame_times
+            if now - frame_time <= window_s
+        ]
+        if len(recent) < 2:
+            return None
+        return round((len(recent) - 1) / (recent[-1] - recent[0]), 1)
+
+    def _require_condition(self) -> asyncio.Condition:
+        condition = self._condition
+        if condition is None:
+            raise RuntimeError("Frame delivery notifier not bound to event loop")
+        return condition
+
+    def _get_active_loop(self) -> asyncio.AbstractEventLoop | None:
+        loop = self._loop
+        if loop is None:
+            return None
+        if loop.is_closed():
+            self._loop = None
+            self._condition = None
+            return None
+        return loop
+
+    def _schedule_frame_update(self, generation: int, published_at: float) -> None:
+        asyncio.create_task(self._apply_frame_update(generation, published_at))
+
+    def _schedule_settings_update(self, current_settings_version: int) -> None:
+        asyncio.create_task(self._apply_settings_update(current_settings_version))
+
+    async def _apply_frame_update(self, generation: int, published_at: float) -> None:
+        condition = self._require_condition()
+        async with condition:
+            if generation <= self._frame_generation:
+                return
+            self._frame_generation = generation
+            self._frame_times.append(published_at)
+            condition.notify_all()
+
+    async def _apply_settings_update(self, current_settings_version: int) -> None:
+        condition = self._require_condition()
+        async with condition:
+            if current_settings_version <= self._settings_version:
+                return
+            self._settings_version = current_settings_version
+            condition.notify_all()
+
+
+delivery_notifier = FrameDeliveryNotifier()
+
+
+def _on_new_frame(snapshot: FrameSnapshot) -> None:
     """Called when a new frame is available."""
-    global frame_times
-    new_frame_event.set()
-    new_frame_event.clear()  # Clear for next wait
-    frame_times.append(time.time())
+    delivery_notifier.publish_frame(snapshot)
+
+
+def _wire_backend_callbacks(
+    active_backend: CameraBackendService,
+) -> CameraBackendService:
+    """Ensure the backend frame buffer publishes through the async notifier."""
+    active_backend.frame_buffer.on_new_frame = _on_new_frame
+    return active_backend
+
+
+def _bind_notifier_to_current_loop() -> None:
+    """Bind the delivery notifier to the active event loop."""
+    active_backend = _wire_backend_callbacks(_ensure_backend())
+    snapshot = active_backend.frame_buffer.get_latest_snapshot()
+    frame_generation = snapshot.generation if snapshot is not None else 0
+    delivery_notifier.bind(
+        asyncio.get_running_loop(),
+        frame_generation=frame_generation,
+        current_settings_version=settings_version,
+    )
+
+
+@asynccontextmanager
+async def obscam_lifespan(_: FastAPI) -> AsyncIterator[None]:
+    """Bind async delivery state to the running FastAPI loop."""
+    _bind_notifier_to_current_loop()
+    yield
+
+
+# Create FastAPI app
+app = FastAPI(title="ObsCam API", version="1.0.0", lifespan=obscam_lifespan)
+
+app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
+
+# Setup CORS middleware
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# Backend service - will be initialized in start_server after logging is configured
+
+backend: CameraBackendService = None  # type: ignore # Will be initialized in start_server()
+
+DEFAULT_EXPOSURE_RANGE_MS = (0.032, 30000.0)
+DEFAULT_GAIN_RANGE = (0, 600)
+
+
+def _build_telemetry_payload(
+    snapshot: FrameSnapshot | None,
+    current_settings: dict[str, Any],
+    *,
+    include_settings_version: bool,
+) -> dict[str, object]:
+    """Build a telemetry payload from the latest snapshot and current settings."""
+    metadata = snapshot.metadata if snapshot is not None else {}
+    payload: dict[str, object] = {
+        "timestamp": metadata.get("timestamp"),
+        "capture_ms": metadata.get("capture_duration_ms"),
+        "has_frame": snapshot is not None,
+        "fps": _estimate_fps(),
+        "settings": current_settings,
+    }
+    if include_settings_version:
+        payload["settings_version"] = settings_version
+    return payload
 
 
 def _ensure_backend() -> CameraBackendService:
@@ -93,7 +264,7 @@ def _ensure_backend() -> CameraBackendService:
 
     if backend is None:
         backend = get_backend_service()
-        backend.frame_buffer.on_new_frame = _on_new_frame
+        _wire_backend_callbacks(backend)
 
     return backend
 
@@ -220,15 +391,13 @@ async def get_latest_frame():
         if not backend.is_started():
             raise HTTPException(status_code=400, detail="Backend service not started")
 
-        frame_bytes = backend.get_latest_frame()
-        frame_metadata = backend.get_frame_metadata()
+        frame_data = backend.get_latest_frame_with_metadata()
 
-        if frame_bytes:
+        if frame_data:
+            frame_bytes, frame_metadata = frame_data
             # Calculate frame age for honest timestamp reporting
             current_time = time.time()
-            frame_timestamp = (
-                frame_metadata.get("timestamp", 0) if frame_metadata else 0
-            )
+            frame_timestamp = frame_metadata.get("timestamp", 0)
             frame_age_seconds = (
                 current_time - frame_timestamp if frame_timestamp > 0 else 0
             )
@@ -338,26 +507,28 @@ async def get_frame_info():
 @app.get("/stream.mjpg")
 async def mjpeg_stream():
     """MJPEG video stream for efficient frame delivery."""
+    _bind_notifier_to_current_loop()
     boundary = "frame"
 
     async def generate_stream():
-        while True:
-            # Wait for new frame
-            await new_frame_event.wait()
+        last_generation = 0
 
-            # Get latest frame
-            frame_bytes = backend.get_latest_frame()
-            if not frame_bytes:
+        while True:
+            snapshot = backend.frame_buffer.get_latest_snapshot()
+            if snapshot is None or snapshot.generation <= last_generation:
+                await delivery_notifier.wait_for_frame(last_generation)
                 continue
+
+            last_generation = snapshot.generation
 
             # Send MJPEG frame
             frame_data = (
                 (
                     f"--{boundary}\r\n"
                     "Content-Type: image/jpeg\r\n"
-                    f"Content-Length: {len(frame_bytes)}\r\n\r\n"
+                    f"Content-Length: {len(snapshot.frame_bytes)}\r\n\r\n"
                 ).encode("ascii")
-                + frame_bytes
+                + snapshot.frame_bytes
                 + b"\r\n"
             )
 
@@ -372,62 +543,44 @@ async def mjpeg_stream():
 
 def _estimate_fps(window_s: float = 5.0) -> float | None:
     """Estimate FPS from recent frame times."""
-    if len(frame_times) < 2:
-        return None
-    now = time.time()
-    recent = [t for t in frame_times if now - t <= window_s]
-    if len(recent) < 2:
-        return None
-    return round((len(recent) - 1) / (recent[-1] - recent[0]), 1)
+    return delivery_notifier.estimate_fps(window_s)
 
 
 @app.get("/api/telemetry")
 async def telemetry_sse():
     """Server-Sent Events stream for telemetry data."""
+    _bind_notifier_to_current_loop()
 
     async def generate_telemetry():
-        # Send initial snapshot
-        metadata = backend.get_frame_metadata() or {}
+        snapshot = backend.frame_buffer.get_latest_snapshot()
         settings = backend.get_current_settings() or {}
-        fps = _estimate_fps()
-
-        initial_payload = {
-            "timestamp": metadata.get("timestamp"),
-            "capture_ms": metadata.get("capture_duration_ms"),
-            "has_frame": backend.frame_buffer.has_frame(),
-            "fps": fps,
-            "settings": settings,
-        }
+        initial_payload = _build_telemetry_payload(
+            snapshot, settings, include_settings_version=False
+        )
+        last_generation = snapshot.generation if snapshot is not None else 0
+        last_settings_version = settings_version
 
         yield f"event: snapshot\ndata: {json.dumps(initial_payload)}\n\n"
 
         while True:
-            # Wait for new frame or settings change
-            done, pending = await asyncio.wait(
-                [
-                    asyncio.create_task(new_frame_event.wait()),
-                    asyncio.create_task(settings_applied_event.wait()),
-                ],
-                return_when=asyncio.FIRST_COMPLETED,
-            )
-
-            # Cancel pending task
-            for task in pending:
-                task.cancel()
-
-            # Build telemetry payload
-            metadata = backend.get_frame_metadata() or {}
+            snapshot = backend.frame_buffer.get_latest_snapshot()
             settings = backend.get_current_settings() or {}
-            fps = _estimate_fps()
+            current_generation = snapshot.generation if snapshot is not None else 0
 
-            payload = {
-                "timestamp": metadata.get("timestamp"),
-                "capture_ms": metadata.get("capture_duration_ms"),
-                "has_frame": backend.frame_buffer.has_frame(),
-                "fps": fps,
-                "settings": settings,
-                "settings_version": settings_version,
-            }
+            if (
+                current_generation <= last_generation
+                and settings_version <= last_settings_version
+            ):
+                await delivery_notifier.wait_for_update(
+                    last_generation, last_settings_version
+                )
+                continue
+
+            payload = _build_telemetry_payload(
+                snapshot, settings, include_settings_version=True
+            )
+            last_generation = current_generation
+            last_settings_version = settings_version
 
             yield f"event: frame\ndata: {json.dumps(payload)}\n\n"
 
@@ -513,8 +666,7 @@ async def update_settings_v2(request: Request):
 
         # Notify SSE listeners
         settings_version += 1
-        settings_applied_event.set()
-        settings_applied_event.clear()
+        delivery_notifier.publish_settings(settings_version)
 
         return {
             "status": "success",
@@ -557,8 +709,7 @@ def start_server():
     # Initialize backend AFTER logging is configured
     if backend is None:
         backend = get_backend_service()
-        # Connect frame buffer callback
-        backend.frame_buffer.on_new_frame = _on_new_frame
+        _wire_backend_callbacks(backend)
 
     logger.info("Starting backend service...")
     if backend.start_backend():
