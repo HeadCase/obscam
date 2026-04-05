@@ -1,8 +1,12 @@
 import asyncio
 import json
+from collections.abc import AsyncGenerator
 from pathlib import Path
+from typing import cast
 
-from obscam.api import main as api_main
+from obscam.api.routers import camera as camera_routes
+from obscam.api.routers import stream as stream_routes
+from obscam.api.runtime import ApiRuntimeState, FrameDeliveryNotifier
 from obscam.core.backend_service import CameraBackendService
 from obscam.core.frame_buffer import LatestFrameBuffer
 
@@ -81,7 +85,7 @@ def test_frame_buffer_callback_receives_monotonic_generations() -> None:
 
 def test_delivery_notifier_wakes_on_new_frame() -> None:
     async def scenario() -> None:
-        notifier = api_main.FrameDeliveryNotifier()
+        notifier = FrameDeliveryNotifier()
         buffer = LatestFrameBuffer()
         notifier.bind(
             asyncio.get_running_loop(),
@@ -101,7 +105,7 @@ def test_delivery_notifier_wakes_on_new_frame() -> None:
 
 def test_delivery_notifier_keeps_latest_generation_when_frames_arrive_quickly() -> None:
     async def scenario() -> None:
-        notifier = api_main.FrameDeliveryNotifier()
+        notifier = FrameDeliveryNotifier()
         buffer = LatestFrameBuffer()
         notifier.bind(
             asyncio.get_running_loop(),
@@ -124,7 +128,7 @@ def test_delivery_notifier_keeps_latest_generation_when_frames_arrive_quickly() 
 
 def test_delivery_notifier_wakes_on_settings_update_before_next_frame() -> None:
     async def scenario() -> None:
-        notifier = api_main.FrameDeliveryNotifier()
+        notifier = FrameDeliveryNotifier()
         notifier.bind(
             asyncio.get_running_loop(),
             frame_generation=0,
@@ -144,7 +148,7 @@ def test_delivery_notifier_wakes_on_settings_update_before_next_frame() -> None:
 
 
 def test_latest_frame_response_uses_one_atomic_snapshot(
-    tmp_path: Path, monkeypatch
+    tmp_path: Path,
 ) -> None:
     service = CameraBackendService(DummyCamera(), tmp_path)
     service._started = True
@@ -156,18 +160,15 @@ def test_latest_frame_response_uses_one_atomic_snapshot(
         b"latest-frame",
         {"timestamp": 5.0, "exposure_ms": 250.0, "capture_duration_ms": 250.0},
     )
-    monkeypatch.setattr(api_main, "backend", service)
 
-    response = asyncio.run(api_main.get_latest_frame())
+    response = asyncio.run(camera_routes.get_latest_frame(service))
 
     assert response.body == b"latest-frame"
     assert response.headers["x-frame-timestamp"] == "5.0"
     assert response.headers["x-frame-age-seconds"]
 
 
-def test_telemetry_initial_snapshot_uses_existing_frame(
-    tmp_path: Path, monkeypatch
-) -> None:
+def test_telemetry_initial_snapshot_uses_existing_frame(tmp_path: Path) -> None:
     async def scenario() -> None:
         service = CameraBackendService(DummyCamera(), tmp_path)
         service._started = True
@@ -175,17 +176,19 @@ def test_telemetry_initial_snapshot_uses_existing_frame(
             b"latest-frame",
             {"timestamp": 7.0, "exposure_ms": 300.0, "capture_duration_ms": 300.0},
         )
-        monkeypatch.setattr(api_main, "backend", service)
-        monkeypatch.setattr(api_main, "settings_version", 4)
+        runtime = ApiRuntimeState()
+        runtime.backend = service
+        runtime.settings_version = 4
 
-        response = await api_main.telemetry_sse()
-        first_chunk = await response.body_iterator.__anext__()
-        await response.body_iterator.aclose()
-
-        payload_text = (
-            first_chunk.decode() if isinstance(first_chunk, bytes) else first_chunk
+        response = await stream_routes.telemetry_sse(service, runtime)
+        body_iterator = cast(
+            AsyncGenerator[str, None],
+            response.body_iterator,
         )
-        payload = json.loads(payload_text.split("data: ", maxsplit=1)[1])
+        first_chunk = await anext(body_iterator)
+        await body_iterator.aclose()
+
+        payload = json.loads(first_chunk.split("data: ", maxsplit=1)[1])
         assert payload["has_frame"] is True
         assert payload["timestamp"] == 7.0
         assert payload["capture_ms"] == 300.0

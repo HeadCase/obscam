@@ -1,11 +1,16 @@
 import asyncio
 from pathlib import Path
-from typing import cast
+from typing import TypedDict, cast
 
 from fastapi import HTTPException
 
-from obscam.api import main as api_main
+from obscam.api.routers import camera as camera_routes
+from obscam.api.schemas import SnapshotRequest
 from obscam.core.backend_service import CameraBackendService
+from obscam.core.snapshot_service import (
+    resolve_snapshot_directory,
+    sanitize_filename_prefix,
+)
 
 
 class DummyCamera:
@@ -34,16 +39,25 @@ class DummyCamera:
         }
 
 
+class FakeFrameBuffer:
+    def __init__(self) -> None:
+        self.on_new_frame = None
+
+    def get_latest_snapshot(self):
+        return None
+
+
 class FakeBackend:
     def __init__(
         self,
         started: bool = True,
         frame_data: tuple[bytes, dict[str, object]] | None = None,
         start_result: bool = True,
-    ):
+    ) -> None:
         self.started = started
         self.frame_data = frame_data
         self.start_result = start_result
+        self.frame_buffer = FakeFrameBuffer()
 
     def is_started(self) -> bool:
         return self.started
@@ -61,6 +75,16 @@ class FakeBackend:
         return {"exposure_ms": 200.0, "gain": 250}
 
 
+class SnapshotPayload(TypedDict):
+    filename: str
+    relative_path: str
+    current_settings: dict[str, object]
+
+
+def _typed_backend(fake_backend: FakeBackend) -> CameraBackendService:
+    return cast(CameraBackendService, fake_backend)
+
+
 def test_get_latest_frame_with_metadata_returns_none_when_buffer_empty(tmp_path: Path):
     service = CameraBackendService(DummyCamera(), tmp_path)
     service._started = True
@@ -69,34 +93,32 @@ def test_get_latest_frame_with_metadata_returns_none_when_buffer_empty(tmp_path:
 
 
 def test_resolve_snapshot_directory_accepts_relative_subdirectory(
-    tmp_path: Path, monkeypatch
-):
-    monkeypatch.setattr(api_main, "ASSETS_DIR", tmp_path / "assets")
-
-    resolved = api_main._resolve_snapshot_directory("interesting/frames")
+    tmp_path: Path,
+) -> None:
+    resolved = resolve_snapshot_directory(tmp_path / "assets", "interesting/frames")
 
     assert resolved == (tmp_path / "assets" / "interesting" / "frames").resolve()
 
 
-def test_resolve_snapshot_directory_rejects_invalid_paths(tmp_path: Path, monkeypatch):
-    monkeypatch.setattr(api_main, "ASSETS_DIR", tmp_path / "assets")
-
+def test_resolve_snapshot_directory_rejects_invalid_paths(tmp_path: Path) -> None:
     for invalid in ("../foo", "/tmp/foo", "foo/../../bar"):
         try:
-            api_main._resolve_snapshot_directory(invalid)
+            resolve_snapshot_directory(tmp_path / "assets", invalid)
         except Exception as exc:
-            assert getattr(exc, "status_code", None) == 400
+            assert str(exc)
         else:
             raise AssertionError(f"Expected invalid path to fail: {invalid}")
 
 
-def test_sanitize_filename_prefix():
-    assert api_main._sanitize_filename_prefix("  Roof Event!!  ") == "roof-event"
-    assert api_main._sanitize_filename_prefix("___") == "snapshot"
-    assert api_main._sanitize_filename_prefix(None) == "snapshot"
+def test_sanitize_filename_prefix() -> None:
+    assert sanitize_filename_prefix("  Roof Event!!  ") == "roof-event"
+    assert sanitize_filename_prefix("___") == "snapshot"
+    assert sanitize_filename_prefix(None) == "snapshot"
 
 
-def test_snapshot_endpoint_saves_file_and_returns_metadata(tmp_path: Path, monkeypatch):
+def test_snapshot_endpoint_saves_file_and_returns_metadata(
+    tmp_path: Path, monkeypatch
+) -> None:
     frame_data = cast(
         tuple[bytes, dict[str, object]],
         (
@@ -105,17 +127,19 @@ def test_snapshot_endpoint_saves_file_and_returns_metadata(tmp_path: Path, monke
         ),
     )
     fake_backend = FakeBackend(started=True, frame_data=frame_data)
+    monkeypatch.setattr(camera_routes, "ASSETS_DIR", tmp_path / "assets")
 
-    monkeypatch.setattr(api_main, "backend", fake_backend)
-    monkeypatch.setattr(api_main, "ASSETS_DIR", tmp_path / "assets")
-
-    payload = asyncio.run(
-        api_main.create_snapshot(
-            api_main.SnapshotRequest(
-                subdirectory="interesting-roof-events",
-                filename_prefix="Roof Event",
+    payload = cast(
+        SnapshotPayload,
+        asyncio.run(
+            camera_routes.create_snapshot(
+                SnapshotRequest(
+                    subdirectory="interesting-roof-events",
+                    filename_prefix="Roof Event",
+                ),
+                _typed_backend(fake_backend),
             )
-        )
+        ),
     )
 
     saved_path = tmp_path / payload["relative_path"]
@@ -126,13 +150,16 @@ def test_snapshot_endpoint_saves_file_and_returns_metadata(tmp_path: Path, monke
     assert payload["current_settings"] == {"exposure_ms": 200.0, "gain": 250}
 
 
-def test_snapshot_endpoint_returns_503_when_backend_unavailable(monkeypatch):
+def test_snapshot_endpoint_returns_503_when_backend_unavailable() -> None:
     fake_backend = FakeBackend(started=False, frame_data=None, start_result=False)
 
-    monkeypatch.setattr(api_main, "backend", fake_backend)
-
     try:
-        asyncio.run(api_main.create_snapshot(api_main.SnapshotRequest()))
+        asyncio.run(
+            camera_routes.create_snapshot(
+                SnapshotRequest(),
+                _typed_backend(fake_backend),
+            )
+        )
     except HTTPException as exc:
         assert exc.status_code == 503
         assert exc.detail == "Backend service not available"
@@ -142,14 +169,17 @@ def test_snapshot_endpoint_returns_503_when_backend_unavailable(monkeypatch):
 
 def test_snapshot_endpoint_returns_503_when_no_frame_available(
     tmp_path: Path, monkeypatch
-):
+) -> None:
     fake_backend = FakeBackend(started=True, frame_data=None)
-
-    monkeypatch.setattr(api_main, "backend", fake_backend)
-    monkeypatch.setattr(api_main, "ASSETS_DIR", tmp_path / "assets")
+    monkeypatch.setattr(camera_routes, "ASSETS_DIR", tmp_path / "assets")
 
     try:
-        asyncio.run(api_main.create_snapshot(api_main.SnapshotRequest()))
+        asyncio.run(
+            camera_routes.create_snapshot(
+                SnapshotRequest(),
+                _typed_backend(fake_backend),
+            )
+        )
     except HTTPException as exc:
         assert exc.status_code == 503
         assert exc.detail == "No frame available"
@@ -157,17 +187,23 @@ def test_snapshot_endpoint_returns_503_when_no_frame_available(
         raise AssertionError("Expected no-frame snapshot to fail")
 
 
-def test_snapshot_endpoint_creates_assets_subdirectories(tmp_path: Path, monkeypatch):
+def test_snapshot_endpoint_creates_assets_subdirectories(
+    tmp_path: Path, monkeypatch
+) -> None:
     frame_data = cast(
         tuple[bytes, dict[str, object]], (b"jpeg-bytes", {"timestamp": 1234.5})
     )
     fake_backend = FakeBackend(started=True, frame_data=frame_data)
+    monkeypatch.setattr(camera_routes, "ASSETS_DIR", tmp_path / "assets")
 
-    monkeypatch.setattr(api_main, "backend", fake_backend)
-    monkeypatch.setattr(api_main, "ASSETS_DIR", tmp_path / "assets")
-
-    payload = asyncio.run(
-        api_main.create_snapshot(api_main.SnapshotRequest(subdirectory="nested/folder"))
+    payload = cast(
+        SnapshotPayload,
+        asyncio.run(
+            camera_routes.create_snapshot(
+                SnapshotRequest(subdirectory="nested/folder"),
+                _typed_backend(fake_backend),
+            )
+        ),
     )
 
     assert (tmp_path / payload["relative_path"]).exists()
