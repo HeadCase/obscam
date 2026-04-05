@@ -9,7 +9,12 @@ from typing import Any, override
 import zwoasi as asi  # pyright: ignore[reportMissingTypeStubs]
 from PIL import Image
 
+from obscam.common.logging_config import get_logger
+
 from .camera_interface import CameraInterface
+
+logger = get_logger("zwo_asi_camera")
+DEFAULT_VIDEO_MODE_THRESHOLD_MS = 200.0
 
 
 class ZwoAsiCamera(CameraInterface):
@@ -22,7 +27,7 @@ class ZwoAsiCamera(CameraInterface):
         self.is_initialized: bool = False
         self.settings_lock: threading.Lock = threading.Lock()
         self.current_capture_mode: str = ""
-        self.video_mode_threshold_ms: float = 1000.0
+        self.video_mode_threshold_ms: float = DEFAULT_VIDEO_MODE_THRESHOLD_MS
         self.current_settings: dict[str, str | float | int] = {
             "exposure_ms": 200.0,
             "gain": 250,
@@ -173,10 +178,20 @@ class ZwoAsiCamera(CameraInterface):
             self.camera.set_control_value(asi.ASI_GAIN, gain)
             self.camera.set_image_type(asi.ASI_IMG_Y8)
 
-            use_video_mode = False  # exposure_ms <= self.video_mode_threshold_ms
+            use_video_mode = self._should_use_video_mode(exposure_ms)
 
             if use_video_mode:
-                img_data = self._capture_video_frame()
+                try:
+                    img_data = self._capture_video_frame()
+                    if img_data is None or len(img_data) == 0:
+                        raise RuntimeError("Video capture returned no data")
+                except Exception as exc:
+                    logger.warning(
+                        "Video capture failed; falling back to single exposure",
+                        error=str(exc),
+                        exposure_ms=exposure_ms,
+                    )
+                    img_data = self._capture_single_frame()
             else:
                 img_data = self._capture_single_frame()
 
@@ -202,6 +217,10 @@ class ZwoAsiCamera(CameraInterface):
 
             traceback.print_exc()
             return None
+
+    def _should_use_video_mode(self, exposure_ms: float) -> bool:
+        """Return whether the current exposure should use video capture mode."""
+        return exposure_ms <= self.video_mode_threshold_ms
 
     def _capture_video_frame(self):
         """Capture frame using video mode."""
@@ -241,6 +260,7 @@ class ZwoAsiCamera(CameraInterface):
         # Start video mode
         self.camera.start_video_capture()
         self.current_capture_mode = "video"
+        logger.info("Switched capture mode", mode="video")
 
     def _switch_to_single_mode(self):
         """Switch camera to single exposure mode."""
@@ -254,6 +274,7 @@ class ZwoAsiCamera(CameraInterface):
             pass
 
         self.current_capture_mode = "single"
+        logger.info("Switched capture mode", mode="single")
 
     def update_settings(self, **settings: Any) -> bool:
         """Update camera settings."""
