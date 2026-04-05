@@ -102,7 +102,7 @@ When relevant, explicitly consider:
 
 - obscam is a CCTV-style monitoring system for a remote astrophotography observatory.
 - Monitoring telescope slews is operationally important.
-- Typical monitoring should support roughly 200-500ms frame refresh where feasible.
+- Low-latency monitoring mode should aim to support roughly 10ms exposures and near-honest client-visible framerates when hardware, sensor mode, and lighting permit.
 - Long exposures may still be needed in very dark conditions or when the roof is closed.
 
 ## Build and Code Conventions

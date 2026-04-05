@@ -137,13 +137,18 @@ class ContinuousCaptureLoop:
                     pass
 
                 # Capture frame with timing
+                capture_started_at = time.perf_counter()
                 frame_bytes = self.camera.capture_frame()
+                capture_duration_ms = round(
+                    (time.perf_counter() - capture_started_at) * 1000.0,
+                    2,
+                )
 
                 if frame_bytes:
                     metadata = {
                         **settings,
                         "timestamp": time.time(),
-                        "capture_duration_ms": settings["exposure_ms"],
+                        "capture_duration_ms": capture_duration_ms,
                     }
 
                     # Update frame buffer (thread-safe queue internally)

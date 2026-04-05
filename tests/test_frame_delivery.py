@@ -1,5 +1,6 @@
 import asyncio
 import json
+import threading
 from collections.abc import AsyncGenerator
 from pathlib import Path
 from typing import cast
@@ -8,6 +9,7 @@ from obscam.api.routers import camera as camera_routes
 from obscam.api.routers import stream as stream_routes
 from obscam.api.runtime import ApiRuntimeState, FrameDeliveryNotifier
 from obscam.core.backend_service import CameraBackendService
+from obscam.core.capture_loop import ContinuousCaptureLoop
 from obscam.core.frame_buffer import LatestFrameBuffer
 
 
@@ -195,3 +197,65 @@ def test_telemetry_initial_snapshot_uses_existing_frame(tmp_path: Path) -> None:
         assert "settings_version" not in payload
 
     asyncio.run(scenario())
+
+
+def test_capture_loop_records_measured_capture_duration(monkeypatch) -> None:
+    class TimedCamera:
+        def __init__(self) -> None:
+            self._settings: dict[str, float | int] = {"exposure_ms": 10.0, "gain": 250}
+
+        def connect(self) -> bool:
+            return True
+
+        def disconnect(self) -> None:
+            return None
+
+        def get_status(self) -> dict[str, object]:
+            return {"status": "connected"}
+
+        def capture_frame(self) -> bytes | None:
+            return b"dummy-frame"
+
+        def update_settings(self, **settings: object) -> bool:
+            if "exposure_ms" in settings:
+                exposure = settings["exposure_ms"]
+                assert isinstance(exposure, int | float)
+                self._settings["exposure_ms"] = float(exposure)
+            if "gain" in settings:
+                gain = settings["gain"]
+                assert isinstance(gain, int | float)
+                self._settings["gain"] = int(gain)
+            return True
+
+        def get_current_settings(self) -> dict[str, float | int]:
+            return self._settings.copy()
+
+        def get_control_capabilities(self) -> dict[str, object]:
+            return {
+                "exposure_ms": {"min": 0.032, "max": 30000.0, "type": "float"},
+                "gain": {"min": 0, "max": 600, "type": "int"},
+            }
+
+    perf_counter_values = iter([10.0, 10.045])
+    monkeypatch.setattr(
+        "obscam.core.capture_loop.time.perf_counter",
+        lambda: next(perf_counter_values),
+    )
+
+    frame_buffer = LatestFrameBuffer()
+    capture_complete = threading.Event()
+
+    def on_new_frame(_snapshot) -> None:
+        capture_complete.set()
+
+    frame_buffer.on_new_frame = on_new_frame
+    capture_loop = ContinuousCaptureLoop(TimedCamera(), frame_buffer)
+
+    capture_loop.start()
+    assert capture_complete.wait(timeout=1.0)
+    capture_loop.stop()
+
+    snapshot = frame_buffer.get_latest_snapshot()
+    assert snapshot is not None
+    assert snapshot.metadata["exposure_ms"] == 10.0
+    assert snapshot.metadata["capture_duration_ms"] == 45.0
