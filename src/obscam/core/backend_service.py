@@ -146,6 +146,10 @@ class CameraBackendService:
             return None
         return self.frame_buffer.get_frame_metadata()
 
+    def get_control_capabilities(self) -> dict[str, Any]:
+        """Get the control capabilities exposed by the active camera."""
+        return self.camera.get_control_capabilities()
+
     def update_settings(self, **settings: Any) -> bool:
         """Update camera settings and persist them.
 
@@ -174,6 +178,17 @@ class CameraBackendService:
             logger.error("Failed to update camera settings", settings=settings)
 
         return success
+
+    def queue_settings_update(self, settings: dict[str, Any]) -> None:
+        """Queue settings for coalesced application and async persistence."""
+        if not self._started:
+            raise RuntimeError("Backend not started - cannot update settings")
+
+        logger.info("Queueing camera settings update", new_settings=settings)
+        self.capture_loop.update_settings(settings)
+        self.settings_manager.save_settings_async(
+            {**self.get_current_settings(), **settings}
+        )
 
     def get_current_settings(self) -> dict[str, Any]:
         """Get current camera settings."""

@@ -8,6 +8,11 @@ The current codebase is optimized for simple, reliable operation on Raspberry Pi
 class hardware. The implemented camera backends are ZWO ASI and a synthetic
 fixture-backed camera for local development.
 
+Low-latency monitoring mode should aim to support roughly `10ms` exposures and
+near-honest client-visible framerates when hardware, sensor mode, and lighting
+permit. When conditions require longer exposures, telemetry should report the
+resulting capture time honestly rather than echoing the requested exposure.
+
 ## Quick Start
 
 Install dependencies and run the app from the repository root:

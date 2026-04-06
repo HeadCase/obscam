@@ -8,11 +8,11 @@ dependencies = [
   "fastapi>=0.116.1",
   "uvicorn>=0.30.0",
   "jinja2>=3.1.0",
-  "pydantic>=2.0.0",
   "zwoasi>=0.2.0",
   "pillow>=10.0.0",
   "numpy>=2.2.6",
   "loguru>=0.7.0",
+  "pydantic>=2.11.9",
 ]
 
 [project.scripts]
@@ -24,8 +24,7 @@ build-backend = "uv_build"
 
 [dependency-groups]
 dev = [
-    "basedpyright>=1.31.2",
-    "deptry>=0.25.1",
+    "deptry>=0.23.1",
     "ipdb>=0.13.13",
     "ipython>=9.4.0",
     "pre-commit>=4.2.0",
@@ -33,10 +32,6 @@ dev = [
     "ruff>=0.12.10",
     "ty>=0.0.1a16",
 ]
-
-[tool.deptry]
-known_first_party = ["obscam"]
-per_rule_ignores = { DEP002 = ["jinja2"] }
 
 [tool.ruff]
 target-version = "py312"
@@ -56,3 +51,11 @@ select = ["E", "F", "I", "B", "UP"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+
+[tool.ty.environment]
+python = "./.venv"
+
+[tool.deptry]
+known_first_party = ["obscam"]
+extend_exclude = ["backend/.venv", "frontend", "logs"]
+per_rule_ignores = { DEP002 = ["jinja2"] }

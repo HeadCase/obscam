@@ -75,6 +75,20 @@
   - health endpoints
   - non-hardware execution paths
 
+## Quality Gate
+
+- After any code change, run all applicable project code quality checks before treating the work as complete.
+- The default quality checks for this repo are:
+  - `uv run ruff check`
+  - `uv run ruff format --check`
+  - `uv run ty check`
+  - `uv run deptry .`
+  - `uv run pytest`
+- Resolve failures from these checks as part of the change when they are in scope.
+- If a check is unavailable due to environment setup or missing dependencies, report that explicitly.
+- Do not treat work as complete if any required check fails.
+- In the final response, report which checks were run, which passed, and which were blocked or not run.
+
 ## Edge Cases To Review
 
 When relevant, explicitly consider:
@@ -88,7 +102,7 @@ When relevant, explicitly consider:
 
 - obscam is a CCTV-style monitoring system for a remote astrophotography observatory.
 - Monitoring telescope slews is operationally important.
-- Typical monitoring should support roughly 200-500ms frame refresh where feasible.
+- Low-latency monitoring mode should aim to support roughly 10ms exposures and near-honest client-visible framerates when hardware, sensor mode, and lighting permit.
 - Long exposures may still be needed in very dark conditions or when the roof is closed.
 
 ## Build and Code Conventions
