@@ -1,13 +1,4 @@
 repos:
-  - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.15.1
-    hooks:
-      - id: ruff-check
-        args: []
-
-      - id: ruff-format
-        args: [--check]
-
   - repo: local
     hooks:
       - id: deptry
@@ -17,10 +8,19 @@ repos:
         pass_filenames: false
       - id: ty
         name: ty
-        # 'uv run' ensures it runs in your project's synced environment.
-        # Keep this aligned with CI (see .github/workflows/push_checks.yml),
-        # which runs: `uv run --all-groups ty check`.
         entry: uv run ty check 
+        language: system
+        pass_filenames: false
+        types_or: [python]
+      - id: ruff-format
+        name: ruff format
+        entry: uv run ruff format --check src tests
+        language: system
+        pass_filenames: false
+        types_or: [python]
+      - id: ruff-check
+        name: ruff check
+        entry: uv run ruff check src tests
         language: system
         types: [python]
         pass_filenames: false

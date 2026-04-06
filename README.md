@@ -1,152 +1,122 @@
-# ObsCam - Observatory Camera Monitoring
+# ObsCam
 
-High-performance camera monitoring system optimized for Raspberry Pi observatory environments.
+ObsCam is a small observatory camera monitor for remote browser-based viewing.
+It runs a single FastAPI service that owns camera capture, serves the web UI, and
+exposes endpoints for streaming, telemetry, settings updates, and snapshots.
 
-## Features
-
-### Core Functionality
-- **Real-time camera feed** with sub-500ms frame updates for telescope monitoring
-- **Dual capture modes**: Fast video monitoring and long exposure snapshots
-- **Multi-client support** with master/observer role management
-- **WebSocket streaming** for low-latency observatory monitoring
-
-### Reliability & Performance
-- **USB camera recovery** - Automatic reconnection from hardware failures
-- **Connection limiting** - Pi resource protection (max 5 concurrent connections)
-- **Session persistence** - VPN-optimized 30-minute timeouts
-- **Memory efficient** - Reduced cleanup frequency for Pi constraints
-
-### Production Logging (New!)
-- **Structured logging** with loguru for production debugging
-- **Pi-optimized storage** - 10MB rotation, 7-day retention, compression
-- **Remote access** - Logs saved to `logs` for SSH access
-- **Event tracking** - USB recovery, session management, WebSocket errors
-- **Performance metrics** - Frame rates, response times, resource usage
+The current codebase is optimized for simple, reliable operation on Raspberry Pi
+class hardware. The implemented camera backends are ZWO ASI and a synthetic
+fixture-backed camera for local development.
 
 ## Quick Start
 
-### Installation
-```bash
-# Install dependencies
-uv sync
+Install dependencies and run the app from the repository root:
 
-# Run application
+```bash
+uv sync
 uv run obscam
 ```
 
-Run those commands from the repository root.
+Open the UI at [http://localhost:8000](http://localhost:8000).
 
-### Access Points
-- **Web Interface**: http://localhost:5000
-- **API Endpoints**: http://localhost:8000
-- **Force Master Mode**: http://localhost:5000/?force_master=true
+## Configuration
 
-### Environment Variables
+ObsCam is configured with environment variables.
+
 ```bash
-# Enable detailed debug logging (optional)
+# Camera backend: "zwo" or "synthetic"
+export OBSCAM_CAMERA_BACKEND=synthetic
+
+# Optional fixture directory for the synthetic camera
+export OBSCAM_SYNTHETIC_FRAME_DIR=assets/test_loop
+
+# Enable verbose logging
 export OBSCAM_DEBUG=true
+
+# Optional path to the ZWO SDK shared library
+export ZWO_ASI_LIB=/usr/local/lib/libASICamera2.so
 ```
 
-## Production Deployment
+Notes:
 
-### Log Monitoring
+- `OBSCAM_CAMERA_BACKEND` defaults to `zwo`.
+- The synthetic backend is the simplest way to run the UI without camera hardware.
+- Camera settings are cached to `/dev/shm` when available, otherwise under `/tmp/obscam`.
+
+## What It Does
+
+- Serves the browser UI and API from a single FastAPI process on port `8000`
+- Streams the latest camera frames as MJPEG at `/stream.mjpg`
+- Publishes frame and settings telemetry over Server-Sent Events at `/api/telemetry`
+- Allows exposure and gain changes from the browser UI
+- Saves snapshots under `assets/`
+- Persists the latest settings asynchronously between runs
+- Writes rotating logs under `logs/`
+
+## Useful Endpoints
+
+- `GET /` - browser UI
+- `GET /api/bootstrap` - initial settings, capabilities, and stream URLs
+- `GET /api/status` - backend and camera status
+- `GET /api/latest-frame` - most recent JPEG frame
+- `GET /api/frame-info` - current frame metadata and backend state
+- `GET /stream.mjpg` - MJPEG stream
+- `GET /api/telemetry` - Server-Sent Events telemetry stream
+- `POST /api/settings` - queue exposure and gain changes
+- `POST /api/snapshots` - save the latest buffered frame to disk
+- `GET /api/connect` - retry backend startup if camera initialization failed
+
+## Snapshots
+
+`POST /api/snapshots` writes the latest buffered JPEG frame to `assets/`.
+
+The request body accepts:
+
+```json
+{
+  "subdirectory": "optional/subdir",
+  "filename_prefix": "snapshot"
+}
+```
+
+`subdirectory` must stay within `assets/`. Filenames are timestamped and made
+safe for sorting and shell use.
+
+## Logs
+
+ObsCam writes logs to `logs/`:
+
+- `logs/obscam.log` - main application log
+- `logs/obscam-error.log` - error log
+- `logs/obscam-debug.log` - debug log when `OBSCAM_DEBUG=true`
+
+Useful commands:
+
 ```bash
-# View live logs
 tail -f logs/obscam.log
-
-# Monitor errors only
 tail -f logs/obscam-error.log
-
-# Remote log access via SSH
-ssh pi@your-observatory "tail -f logs/obscam.log"
-
-# Download logs for analysis
-scp pi@your-observatory:logs/*.log ./local-logs/
 ```
-
-### Log Files
-- `logs/obscam.log` - Main application log (INFO+)
-- `logs/obscam-error.log` - Error-only log for quick issue identification  
-- `logs/obscam-debug.log` - Detailed debug log (debug mode only)
-
-### Automatic Log Rotation
-- **Main/Error logs**: 10MB rotation, 7-14 day retention
-- **Debug logs**: 20MB rotation, 3-day retention  
-- **Compression**: gzip enabled to conserve Pi storage
-- **Cleanup**: Automatic archived log removal
 
 ## Development
 
-### Testing
+Run the test suite:
+
 ```bash
-# Run the test suite
 uv run pytest
 ```
 
-### Quality Checks
-```bash
-# Install git hooks once per clone
-uv run pre-commit install
+Run formatting and lint hooks:
 
-# Run all configured checks manually
-uv run pre-commit run --all-files
+```bash
+uv run pre-commit
 ```
 
-### Architecture
-Built following Pi-specific design principles:
-- **REUSE over CREATE** - Leverage existing Flask/FastAPI threads
-- **MEMORY over DISK** - Keep state in RAM, not databases
-- **CLIENT over SERVER** - Push complexity to desktop browsers
-- **SIMPLE over FEATURE-RICH** - Observatory needs reliability over features
-- **GRACEFUL DEGRADATION** - Lower quality beats service failure
+## Repo Layout
 
-## Troubleshooting
-
-### Common Issues
-
-**Camera not connecting:**
-```bash
-# Check logs for USB errors
-grep "usb_failure" logs/obscam.log
-
-# Manual reconnection attempt
-curl http://localhost:8000/api/connect
-```
-
-**WebSocket connection failures:**
-```bash
-# Monitor WebSocket events
-grep "WebSocket" logs/obscam.log
-
-# Check connection limits
-curl http://localhost:8000/api/health
-```
-
-**Session management issues:**
-```bash
-# View session events
-grep "session_event" logs/obscam.log
-
-# Force master transfer
-curl -X POST http://localhost:8000/api/force-master/SESSION_ID
-```
-
-### Performance Debugging
-```bash
-# Monitor performance metrics
-grep "Performance" logs/obscam.log
-
-# View resource usage
-grep "memory\|cpu" logs/obscam.log
-```
-
-## Hardware Requirements
-
-- **Raspberry Pi 4** (recommended) or Pi 3B+
-- **ZWO ASI camera** (ASI662MC tested)  
-- **Stable network** for remote monitoring
-- **microSD card** (32GB+ recommended for log storage)
-
-## License
-
-MIT License - Built for observatory automation and remote telescope monitoring.
+- `src/obscam/api/` - FastAPI app and endpoints
+- `src/obscam/core/` - backend service, capture loop, frame buffer, backend selection
+- `src/obscam/camera/` - camera backends
+- `src/obscam/storage/` - settings persistence
+- `frontend/` - templates, JavaScript, and CSS
+- `assets/` - fixture images and saved snapshots
+- `tests/` - pytest coverage for synthetic camera and snapshot behavior

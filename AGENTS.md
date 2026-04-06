@@ -1,65 +1,162 @@
-# AGENTS.md - Coding Guidelines for obscam
+# AGENTS.md - Working Rules for obscam
 
-## Build/Test Commands
+## Decision Policy
 
-- _Project hosts front and backends_: python code lives in `backend`
-- **Install dependencies**: `uv add`
-- **Access environment**: `source .venv/bin/activate`
-- _Update environment_: `uv sync`
-- **Run main application**: `uv run obscam` from project root
-- **Run python code with development environment using**: `uv run`
-- **Tests should be written with pytest**
-- _Use package name for imports_: `from obscam.foo import Foo`
-- _Use loguru for logging_
+- Always propose before implementing.
+- Do not implement when requirements are ambiguous. Stop and ask.
+- Treat any schema, API, or interface change as approval-required.
+- When presenting a proposal, include:
+  - `Summary`
+  - `Changes`
+  - `Verification`
+  - `Assumptions`
+- In proposals, include key tradeoffs and affected components.
+- When a design choice exists, present 2-3 options with a recommendation.
+- If a requested approach conflicts with project principles, recommend an alternative and wait for confirmation.
 
-## Code Style & Conventions
+## Response Style
 
-- **Python version**: >=3.11 (specified in pyproject.toml)
-- **Type hints**: Use modern Python type annotations (e.g., `dict[str, int]`, `list[str]`)
-- **Imports**: Group stdlib, third-party, local imports with blank lines between groups
-- **Variables**: snake_case for variables/functions, UPPER_CASE for constants
-- **Error handling**: Use specific exceptions, try/except blocks with minimal scope
-- **Classes**: CamelCase class names, use type annotations for attributes
+- Be concise but complete.
+- Default response structure:
+  - `Summary`
+  - `Changes`
+  - `Verification`
+- Add a dedicated `Assumptions` section whenever assumptions affect design, behavior, or validation.
+- For code review:
+  - list findings first
+  - order findings by severity
+  - include file/line references
+  - if there are no findings, say so explicitly and include residual risks and testing gaps
 
-## Dependencies
+## Engineering Priorities
 
-- Core: FastAPI, Flask
-- Dev: ipython for development/debugging
-- Build system: uv_build
+- Optimize first for reliability.
+- Prefer responsiveness over image quality when those goals conflict.
+- Optimize for Raspberry Pi constraints:
+  - CPU efficiency
+  - memory efficiency
+  - low disk I/O
+- Keep the server minimal and push complexity to the browser where practical.
+- Prefer cleaner refactors when they improve future work.
+- Aggressively remove unnecessary indirection, dead paths, and abstraction that do not materially help the system.
+- Prefer performance-path simplification and removal of abstraction over architectural expansion.
 
-## ZWO SDKs
+## Architecture Rules
 
+1. REUSE over CREATE - Reuse existing Flask/FastAPI threads and flows where practical.
+2. MEMORY over DISK - Keep runtime state in RAM, not persistent storage.
+3. CLIENT over SERVER - Push interaction and presentation complexity to the desktop browser.
+4. SIMPLE over FEATURE-RICH - Favor reliability over optional capability.
+5. GRACEFUL DEGRADATION - Lower quality is preferable to service failure.
+
+## Change Boundaries
+
+- Include adjacent cleanup only when it materially improves the area being changed.
+- Preserve backward compatibility for internal interfaces unless preserving it would materially expand scope.
+- For public or user-facing APIs, propose breaking changes only when clearly justified.
+- Avoid adding server-side complexity that could reasonably live in the client.
+- New dependencies are acceptable only when they significantly reduce code complexity.
+- Prefer thin wrappers over vendor camera SDKs.
+- Choose the simplest design that works for current hardware rather than building generalized abstraction early.
+
+## Testing and Verification
+
+- Tests must be written with `pytest`.
+- Add tests whenever behavior changes.
+- Prefer unit tests plus integration seams where possible, especially around hardware-dependent paths.
+- Before calling work complete, perform:
+  - relevant automated tests
+  - sanity checks where possible
+  - explicit edge-case review
+- If verification is blocked by environment or unavailable hardware, stop and report the limitation. Do not guess.
+- Sanity checks should use available local signals such as:
+  - startup behavior
+  - logs
+  - health endpoints
+  - non-hardware execution paths
+
+## Edge Cases To Review
+
+When relevant, explicitly consider:
+- camera disconnect and reconnect behavior
+- stale frames
+- latency spikes
+- multi-client session conflicts
+- degraded network or VPN interruptions
+
+## Project Context
+
+- obscam is a CCTV-style monitoring system for a remote astrophotography observatory.
+- Monitoring telescope slews is operationally important.
+- Typical monitoring should support roughly 200-500ms frame refresh where feasible.
+- Long exposures may still be needed in very dark conditions or when the roof is closed.
+
+## Build and Code Conventions
+
+- Python version: `>=3.11`
+- Use modern type annotations such as `dict[str, int]` and `list[str]`.
+- Use package imports such as `from obscam.foo import Foo`.
+- Use `loguru` for logging.
+- Build system: `uv_build`
+
+## Python Development Rules
+
+- Treat these rules as strong defaults. Deviate only when there is a clear, local justification.
+
+### Typing
+
+- Require type annotations everywhere in new or modified code, including private helpers.
+- Add explicit return types on all functions and methods.
+- Avoid `Any` by default. Use it only with explicit justification.
+- Prefer precise types over broad unions or loosely typed containers.
+- Wrap or isolate untyped third-party APIs before they reach core application logic where practical.
+
+### Data Models
+
+- Prefer `pydantic` for external, configuration, and shared structured models.
+- Use lighter typed classes or dataclasses for internal hot-path state where validation and serialization are not needed.
+- Avoid passing ad hoc dictionaries across module boundaries. Define typed models instead.
+- Prefer `pydantic` settings/models for configuration and environment-derived settings.
+- Favor explicit, named models over loosely structured payloads.
+
+### Validation
+
+- Validate aggressively at system boundaries, state transitions, and integration seams.
+- Avoid repeated runtime validation in hot internal paths unless it protects a critical invariant.
+- Coerce external input when it is clearly safe and predictable; otherwise fail with clear errors.
+- Validate and normalize hardware SDK and vendor responses as early as practical.
+- Do not let raw vendor-specific payloads spread through the codebase unless there is a strong performance reason.
+
+### Design
+
+- Prefer simple concrete functions and classes by default.
+- Use `Protocol` when abstraction is needed.
+- Use generics sparingly and only when they clearly improve correctness or API clarity.
+- Prefer synchronous code unless async is clearly necessary for correctness or performance.
+- When code becomes complex, first improve data models and simplify control flow before adding layers.
+- Prefer clearer models and more direct flow over additional abstraction.
+
+### Errors
+
+- Use specific custom exceptions at system and integration boundaries.
+- Prefer standard library exceptions internally unless a custom exception materially improves handling.
+- Keep exception scope tight and avoid broad catch-and-continue patterns.
+
+### Testability
+
+- Use dependency injection where it materially improves testability or isolation.
+- Prefer real components or high-fidelity seams where possible rather than heavy mock-driven tests.
+- Minimize mocks, especially for internal logic, unless they are the clearest way to isolate an external dependency.
+
+### Documentation
+
+- Add docstrings to public modules, classes, and functions.
+- Keep docstrings concise and focused on behavior, inputs, outputs, and non-obvious constraints.
+- Prefer readable code and well-named types over verbose inline explanation.
+
+## References
+
+### ZWO SDKs
 - https://zwoastro.yuque.com/olyczd/sfwyw6/kpde2odaw3h4ekix
-- Python bindings: https://github.com/python-zwoasi/python-zwoasi
-- Example python usage: https://raw.githubusercontent.com/python-zwoasi/python-zwoasi/refs/heads/master/zwoasi/examples/zwoasi_demo.py
-
-## General Guidelines
-
-## gphoto2 SDK
-
-- Python bindings: https://github.com/jim-easterbrook/python-gphoto2
-- https://github.com/gphoto/libgphoto2
-
-- This application's purpose to provide monitoring (CCTV-style) for my remote
-  astrophotography observatory
-- I access my observatory and all its functions remotely via Wireguard
-- The camera used for monitoring is pointed at my telescope, with a view of the
-  observatory roof which rolls on and off at my instruction
-- Monitoring my telescope during slewing actions is particularly important, and
-  frames need to be updated every 200-500 milliseconds to make this worthwhile
-- Sometimes I need a long exposure (1-10 seconds) when it's really dark or the
-  roof is closed
-
-## Pi-Specific Design Principles
-
-1. REUSE over CREATE - Use existing Flask/FastAPI threads
-2. MEMORY over DISK - Keep state in RAM, not databases
-3. CLIENT over SERVER - Push complexity to desktop browsers
-4. SIMPLE over FEATURE-RICH - Observatory needs reliability, not features
-5. GRACEFUL DEGRADATION - Lower quality beats service failure
-
-<!-- ## Architecture Notes -->
-<!-- - Camera control via ZWO ASI SDK bindings -->
-<!-- - Dual capture modes: video (short exposures) vs snapshot (long exposures)  -->
-<!-- - Buffer flushing strategy to prevent stale frames -->
-<!-- - Thread-safe frame grabbing with latest-frame semantics -->
+- https://github.com/python-zwoasi/python-zwoasi
+- https://raw.githubusercontent.com/python-zwoasi/python-zwoasi/refs/heads/master/zwoasi/examples/zwoasi_demo.py
