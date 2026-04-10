@@ -4,17 +4,22 @@
 import io
 import os
 import threading
+import time
+import zlib
 from typing import Any, override
 
 import zwoasi as asi  # pyright: ignore[reportMissingTypeStubs]
 from PIL import Image
 
-from obscam.common.logging_config import get_logger
+from obscam.common.logging_config import DEBUG_MODE, get_logger
 
 from .camera_interface import CameraInterface
 
 logger = get_logger("zwo_asi_camera")
 DEFAULT_VIDEO_MODE_THRESHOLD_MS = 200.0
+DEFAULT_VIDEO_CAPTURE_TIMEOUT_PADDING_MS = 500
+FRAME_SIGNATURE_SAMPLE_SIZE = 2048
+PERFORMANCE_LOG_EVERY_N_FRAMES = 120
 
 
 class ZwoAsiCamera(CameraInterface):
@@ -32,6 +37,9 @@ class ZwoAsiCamera(CameraInterface):
             "exposure_ms": 200.0,
             "gain": 250,
         }
+        self._capture_count = 0
+        self._last_frame_signature: int | None = None
+        self._duplicate_frame_streak = 0
 
         # Initialize the SDK
         self._init_sdk(library_path)
@@ -139,6 +147,9 @@ class ZwoAsiCamera(CameraInterface):
             self.camera_info = {}
             self.is_initialized = False
             self.current_capture_mode = ""
+            self._capture_count = 0
+            self._last_frame_signature = None
+            self._duplicate_frame_streak = 0
             print("Camera disconnected")
 
     @override
@@ -169,20 +180,24 @@ class ZwoAsiCamera(CameraInterface):
             return None
 
         try:
+            capture_started_at = time.perf_counter()
             with self.settings_lock:
                 exposure_ms = float(self.current_settings["exposure_ms"])
                 gain = int(self.current_settings["gain"])
 
-            exposure_us = int(exposure_ms * 1000)
-            self.camera.set_control_value(asi.ASI_EXPOSURE, exposure_us)
-            self.camera.set_control_value(asi.ASI_GAIN, gain)
-            self.camera.set_image_type(asi.ASI_IMG_Y8)
+            self._prepare_capture(exposure_ms=exposure_ms, gain=gain)
 
-            use_video_mode = self._should_use_video_mode(exposure_ms)
+            capture_mode = (
+                "video" if self._should_use_video_mode(exposure_ms) else "single"
+            )
+            switched_mode = self._ensure_capture_mode(capture_mode)
+            acquisition_started_at = time.perf_counter()
 
-            if use_video_mode:
+            if capture_mode == "video":
                 try:
-                    img_data = self._capture_video_frame()
+                    img_data = self._capture_video_frame(
+                        timeout_ms=self._video_capture_timeout_ms(exposure_ms)
+                    )
                     if img_data is None or len(img_data) == 0:
                         raise RuntimeError("Video capture returned no data")
                 except Exception as exc:
@@ -192,24 +207,55 @@ class ZwoAsiCamera(CameraInterface):
                         exposure_ms=exposure_ms,
                     )
                     img_data = self._capture_single_frame()
+                    capture_mode = "single"
+                    switched_mode = self.current_capture_mode == "single"
             else:
                 img_data = self._capture_single_frame()
 
             if img_data is None or len(img_data) == 0:
                 return None
 
+            acquisition_ms = round(
+                (time.perf_counter() - acquisition_started_at) * 1000.0,
+                2,
+            )
+            normalize_started_at = time.perf_counter()
             if len(img_data.shape) == 1 and self.camera_info:
                 width = int(self.camera_info["MaxWidth"])
                 height = int(self.camera_info["MaxHeight"])
                 img_array = img_data.reshape((height, width))
             else:
                 img_array = img_data
+            normalize_ms = round(
+                (time.perf_counter() - normalize_started_at) * 1000.0,
+                2,
+            )
+            frame_signature = self._frame_signature(img_array)
+            duplicate_frame_streak = self._update_duplicate_frame_streak(
+                frame_signature
+            )
+            encode_started_at = time.perf_counter()
             pil_image = Image.fromarray(img_array, mode="L")
 
             # Encode to JPEG
             buffer = io.BytesIO()
             pil_image.save(buffer, format="JPEG", quality=85)
-            return buffer.getvalue()
+            encode_ms = round((time.perf_counter() - encode_started_at) * 1000.0, 2)
+            total_ms = round((time.perf_counter() - capture_started_at) * 1000.0, 2)
+            frame_bytes = buffer.getvalue()
+            self._capture_count += 1
+            self._log_capture_profile(
+                exposure_ms=exposure_ms,
+                capture_mode=capture_mode,
+                switched_mode=switched_mode,
+                acquisition_ms=acquisition_ms,
+                normalize_ms=normalize_ms,
+                encode_ms=encode_ms,
+                total_ms=total_ms,
+                duplicate_frame_streak=duplicate_frame_streak,
+                frame_bytes=len(frame_bytes),
+            )
+            return frame_bytes
 
         except Exception as e:
             print(f"Frame capture failed: {e}")
@@ -222,17 +268,45 @@ class ZwoAsiCamera(CameraInterface):
         """Return whether the current exposure should use video capture mode."""
         return exposure_ms <= self.video_mode_threshold_ms
 
-    def _capture_video_frame(self):
+    def _prepare_capture(self, *, exposure_ms: float, gain: int) -> None:
+        """Apply exposure, gain, and image type before raw-frame acquisition."""
+        if self.camera is None:
+            raise RuntimeError("Camera not initialized")
+
+        exposure_us = int(exposure_ms * 1000)
+        self.camera.set_control_value(asi.ASI_EXPOSURE, exposure_us)
+        self.camera.set_control_value(asi.ASI_GAIN, gain)
+        self.camera.set_image_type(asi.ASI_IMG_Y8)
+
+    def _video_capture_timeout_ms(self, exposure_ms: float) -> int:
+        """Return a bounded SDK timeout for video-frame acquisition."""
+        return max(
+            DEFAULT_VIDEO_CAPTURE_TIMEOUT_PADDING_MS,
+            int((exposure_ms * 2.0) + DEFAULT_VIDEO_CAPTURE_TIMEOUT_PADDING_MS),
+        )
+
+    def _ensure_capture_mode(self, target_mode: str) -> bool:
+        """Ensure the camera is in the requested capture mode."""
+        if target_mode == "video":
+            if self.current_capture_mode != "video":
+                self._switch_to_video_mode()
+                return True
+            return False
+
+        if self.current_capture_mode == "video":
+            self._switch_to_single_mode()
+            return True
+        if self.current_capture_mode != "single":
+            self.current_capture_mode = "single"
+        return False
+
+    def _capture_video_frame(self, timeout_ms: int | None = None):
         """Capture frame using video mode."""
         if self.camera is None:
             return None
 
-        # Ensure video mode is active
-        if self.current_capture_mode != "video":
-            self._switch_to_video_mode()
-
         # Capture video frame
-        return self.camera.capture_video_frame()
+        return self.camera.capture_video_frame(timeout=timeout_ms)
 
     def _capture_single_frame(self):
         """Capture frame using single exposure mode."""
@@ -245,6 +319,66 @@ class ZwoAsiCamera(CameraInterface):
 
         # Capture single frame
         return self.camera.capture()
+
+    def _frame_signature(self, img_data: Any) -> int:
+        """Build a lightweight fingerprint for duplicate-frame tracking."""
+        flat_view = img_data.reshape(-1)
+        sample = flat_view[:FRAME_SIGNATURE_SAMPLE_SIZE]
+        sample_bytes = sample.tobytes()
+        return zlib.crc32(sample_bytes) ^ len(flat_view)
+
+    def _update_duplicate_frame_streak(self, frame_signature: int) -> int:
+        """Track consecutive identical frame signatures."""
+        if frame_signature == self._last_frame_signature:
+            self._duplicate_frame_streak += 1
+        else:
+            self._duplicate_frame_streak = 0
+            self._last_frame_signature = frame_signature
+        return self._duplicate_frame_streak
+
+    def _log_capture_profile(
+        self,
+        *,
+        exposure_ms: float,
+        capture_mode: str,
+        switched_mode: bool,
+        acquisition_ms: float,
+        normalize_ms: float,
+        encode_ms: float,
+        total_ms: float,
+        duplicate_frame_streak: int,
+        frame_bytes: int,
+    ) -> None:
+        """Log high-signal timing details without spamming the hot path."""
+        if switched_mode:
+            logger.info(
+                "Capture mode warmup frame",
+                capture_mode=capture_mode,
+                exposure_ms=exposure_ms,
+                acquisition_ms=acquisition_ms,
+                normalize_ms=normalize_ms,
+                encode_ms=encode_ms,
+                total_ms=total_ms,
+                duplicate_frame_streak=duplicate_frame_streak,
+                frame_bytes=frame_bytes,
+            )
+            return
+
+        if DEBUG_MODE and (
+            self._capture_count <= 3
+            or self._capture_count % PERFORMANCE_LOG_EVERY_N_FRAMES == 0
+        ):
+            logger.debug(
+                "Capture profile",
+                capture_mode=capture_mode,
+                exposure_ms=exposure_ms,
+                acquisition_ms=acquisition_ms,
+                normalize_ms=normalize_ms,
+                encode_ms=encode_ms,
+                total_ms=total_ms,
+                duplicate_frame_streak=duplicate_frame_streak,
+                frame_bytes=frame_bytes,
+            )
 
     def _switch_to_video_mode(self):
         """Switch camera to video capture mode."""
