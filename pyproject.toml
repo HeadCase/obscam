@@ -51,6 +51,9 @@ select = ["E", "F", "I", "B", "UP"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+markers = [
+    "integration: real-time exposure-spectrum integration tests gated by OBSCAM_RUN_INTEGRATION=1",
+]
 
 [tool.ty.environment]
 python = "./.venv"

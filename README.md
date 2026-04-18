@@ -110,6 +110,12 @@ Run the test suite:
 uv run pytest
 ```
 
+Run the gated real-time exposure sweep:
+
+```bash
+OBSCAM_RUN_INTEGRATION=1 uv run pytest tests/test_exposure_spectrum_integration.py
+```
+
 Run formatting and lint hooks:
 
 ```bash
