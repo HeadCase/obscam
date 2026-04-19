@@ -12,15 +12,16 @@ def _write_fixture(path: Path, color: int) -> None:
 
 
 def test_synthetic_camera_emits_jpeg_frames_from_fixture_directory(
-    tmp_path: Path, monkeypatch
+    tmp_path: Path,
+    monkeypatch,
 ):
     fixture_dir = tmp_path / "fixtures"
     fixture_dir.mkdir()
     _write_fixture(fixture_dir / "frame_01.jpg", 30)
     _write_fixture(fixture_dir / "frame_02.jpg", 190)
 
+    monkeypatch.setattr("obscam.camera.synthetic_camera.MIN_CAPTURE_INTERVAL_S", 0.0)
     camera = SyntheticCamera(frame_dir=fixture_dir)
-    monkeypatch.setattr("obscam.camera.synthetic_camera.time.sleep", lambda _: None)
 
     assert camera.connect() is True
 
@@ -36,8 +37,8 @@ def test_synthetic_camera_consecutive_frames_change(tmp_path: Path, monkeypatch)
     _write_fixture(fixture_dir / "frame_01.jpg", 30)
     _write_fixture(fixture_dir / "frame_02.jpg", 190)
 
+    monkeypatch.setattr("obscam.camera.synthetic_camera.MIN_CAPTURE_INTERVAL_S", 0.0)
     camera = SyntheticCamera(frame_dir=fixture_dir)
-    monkeypatch.setattr("obscam.camera.synthetic_camera.time.sleep", lambda _: None)
     assert camera.connect() is True
 
     first_frame = camera.capture_frame()
@@ -51,8 +52,8 @@ def test_synthetic_camera_gain_changes_output(tmp_path: Path, monkeypatch):
     fixture_dir.mkdir()
     _write_fixture(fixture_dir / "frame_01.jpg", 80)
 
+    monkeypatch.setattr("obscam.camera.synthetic_camera.MIN_CAPTURE_INTERVAL_S", 0.0)
     camera = SyntheticCamera(frame_dir=fixture_dir)
-    monkeypatch.setattr("obscam.camera.synthetic_camera.time.sleep", lambda _: None)
     assert camera.connect() is True
 
     low_gain_frame = camera.capture_frame()
@@ -60,6 +61,33 @@ def test_synthetic_camera_gain_changes_output(tmp_path: Path, monkeypatch):
     high_gain_frame = camera.capture_frame()
 
     assert low_gain_frame != high_gain_frame
+
+
+def test_synthetic_camera_interrupts_active_capture(tmp_path: Path) -> None:
+    fixture_dir = tmp_path / "fixtures"
+    fixture_dir.mkdir()
+    _write_fixture(fixture_dir / "frame_01.jpg", 80)
+
+    camera = SyntheticCamera(frame_dir=fixture_dir)
+    assert camera.connect() is True
+    assert camera.update_settings(exposure_ms=5000.0) is True
+
+    result: list[bytes | None] = []
+
+    def capture_frame() -> None:
+        result.append(camera.capture_frame())
+
+    import threading
+    import time
+
+    worker = threading.Thread(target=capture_frame)
+    worker.start()
+    time.sleep(0.05)
+    camera.interrupt_capture()
+    worker.join(timeout=1.0)
+
+    assert worker.is_alive() is False
+    assert result == [None]
 
 
 def test_camera_factory_selects_synthetic_backend(tmp_path: Path, monkeypatch):

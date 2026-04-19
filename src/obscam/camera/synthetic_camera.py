@@ -46,6 +46,7 @@ class SyntheticCamera(CameraInterface):
         self.frame_paths: list[Path] = []
         self.rng = np.random.default_rng(662)
         self._font = ImageFont.load_default()
+        self._capture_interrupt = threading.Event()
 
     def connect(self) -> bool:
         """Load fixture frames and make the synthetic camera available."""
@@ -54,6 +55,7 @@ class SyntheticCamera(CameraInterface):
             self.fixture_frames = [self._load_frame(path) for path in self.frame_paths]
             self.frame_index = 0
             self.connected = True
+            self._capture_interrupt.clear()
             logger.info(
                 "Synthetic camera connected",
                 frame_dir=str(self.frame_dir),
@@ -69,10 +71,15 @@ class SyntheticCamera(CameraInterface):
 
     def disconnect(self) -> None:
         """Disconnect the synthetic camera."""
+        self.interrupt_capture()
         self.connected = False
         self.fixture_frames = []
         self.frame_paths = []
         logger.info("Synthetic camera disconnected")
+
+    def interrupt_capture(self) -> None:
+        """Interrupt a synthetic exposure wait."""
+        self._capture_interrupt.set()
 
     def get_status(self) -> dict[str, Any]:
         """Get synthetic camera status and current settings."""
@@ -97,7 +104,11 @@ class SyntheticCamera(CameraInterface):
             exposure_ms = float(self.current_settings["exposure_ms"])
             gain = int(self.current_settings["gain"])
 
-        time.sleep(max(MIN_CAPTURE_INTERVAL_S, exposure_ms / 1000.0))
+        self._capture_interrupt.clear()
+        wait_s = max(MIN_CAPTURE_INTERVAL_S, exposure_ms / 1000.0)
+        if self._capture_interrupt.wait(timeout=wait_s):
+            self._capture_interrupt.clear()
+            return None
 
         base_frame = self.fixture_frames[
             self.frame_index % len(self.fixture_frames)
@@ -141,9 +152,6 @@ class SyntheticCamera(CameraInterface):
     def _discover_frame_paths(self) -> list[Path]:
         if not self.frame_dir.exists():
             self.frame_dir.mkdir(parents=True)
-            # raise FileNotFoundError(
-            #     f"Synthetic frame directory not found: {self.frame_dir}"
-            # )
 
         frame_paths = sorted(
             path

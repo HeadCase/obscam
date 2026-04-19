@@ -1,4 +1,4 @@
-"""Camera control and snapshot routes."""
+"""Camera control, backend lifecycle, and snapshot routes."""
 
 import time
 from datetime import datetime
@@ -9,10 +9,14 @@ from fastapi.responses import Response
 
 from obscam.api.dependencies import get_backend, get_runtime
 from obscam.api.runtime import ApiRuntimeState
-from obscam.api.schemas import SnapshotRequest
+from obscam.api.schemas import LifecycleCommandResponse, SnapshotRequest
 from obscam.common.constants import ASSETS_DIR
 from obscam.common.logging_config import get_logger
-from obscam.core.backend_service import CameraBackendService
+from obscam.core.backend_service import (
+    BackendLifecycleState,
+    BackendStatusSnapshot,
+    CameraBackendService,
+)
 from obscam.core.settings_service import validate_settings_payload
 from obscam.core.snapshot_service import (
     SnapshotPathError,
@@ -30,54 +34,94 @@ BackendDep = Annotated[CameraBackendService, Depends(get_backend)]
 RuntimeDep = Annotated[ApiRuntimeState, Depends(get_runtime)]
 
 
-@router.get("/api/status")
-async def get_status(backend: BackendDep) -> dict[str, object]:
-    """Get current backend and camera status."""
+@router.get("/api/backend/status")
+async def get_backend_status(backend: BackendDep) -> BackendStatusSnapshot:
+    """Get current structured backend and camera status."""
     try:
-        backend_status = backend.get_status()
-        return {**backend_status, "timestamp": time.time()}
+        return backend.get_status_snapshot()
     except Exception as exc:
         logger.error("Failed to get backend status", error=str(exc))
-        return {
-            "status": "error",
-            "message": f"Failed to get backend status: {exc}",
-            "timestamp": time.time(),
-        }
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to get backend status: {exc}",
+        ) from exc
 
 
-@router.get("/api/connect")
-async def connect_camera(backend: BackendDep) -> dict[str, object]:
-    """Start the backend service."""
-    try:
-        if backend.start_backend():
-            logger.info("Backend service started via API")
-            return {
-                "status": "connected",
-                "message": "Backend service started successfully",
-                "timestamp": time.time(),
-            }
+@router.post("/api/backend/start")
+async def start_backend(backend: BackendDep) -> dict[str, object]:
+    """Start the backend service if it is currently stopped."""
+    initial_state = backend.get_backend_state()
+    if initial_state != BackendLifecycleState.STOPPED.value:
+        return LifecycleCommandResponse(
+            backend_state=initial_state,
+            detail="Backend already active",
+            timestamp=time.time(),
+        ).model_dump()
 
-        return {
-            "status": "error",
-            "message": "Failed to start backend service",
-            "timestamp": time.time(),
-        }
-    except Exception as exc:
-        logger.error("Backend startup error", error=str(exc))
-        return {
-            "status": "error",
-            "message": f"Backend startup error: {exc}",
-            "timestamp": time.time(),
-        }
+    if not backend.start_backend():
+        raise HTTPException(status_code=503, detail="Failed to start backend service")
+
+    logger.info("Backend service started via API")
+    return LifecycleCommandResponse(
+        backend_state=backend.get_backend_state(),
+        detail="Backend started",
+        timestamp=time.time(),
+    ).model_dump()
+
+
+@router.post("/api/backend/recover")
+async def recover_backend(backend: BackendDep) -> dict[str, object]:
+    """Request an immediate recovery attempt when the backend is unhealthy."""
+    state = backend.get_backend_state()
+    if state == BackendLifecycleState.RUNNING.value:
+        return LifecycleCommandResponse(
+            backend_state=state,
+            detail="Backend already running",
+            timestamp=time.time(),
+        ).model_dump()
+
+    if state in {
+        BackendLifecycleState.STOPPED.value,
+        BackendLifecycleState.STARTING.value,
+        BackendLifecycleState.STOPPING.value,
+    }:
+        raise HTTPException(
+            status_code=409,
+            detail=f"Cannot recover backend while {state}",
+        )
+
+    if not backend.request_recovery():
+        raise HTTPException(status_code=409, detail="Recovery request rejected")
+
+    return LifecycleCommandResponse(
+        backend_state=backend.get_backend_state(),
+        detail="Recovery requested",
+        timestamp=time.time(),
+    ).model_dump()
+
+
+@router.post("/api/backend/stop")
+async def stop_backend(backend: BackendDep) -> dict[str, object]:
+    """Stop the backend service."""
+    if backend.get_backend_state() == BackendLifecycleState.STOPPED.value:
+        return LifecycleCommandResponse(
+            backend_state=BackendLifecycleState.STOPPED.value,
+            detail="Backend already stopped",
+            timestamp=time.time(),
+        ).model_dump()
+
+    backend.stop_backend()
+    return LifecycleCommandResponse(
+        backend_state=backend.get_backend_state(),
+        detail="Backend stopped",
+        timestamp=time.time(),
+    ).model_dump()
 
 
 @router.get("/api/latest-frame")
 async def get_latest_frame(backend: BackendDep) -> Response:
-    """Get the latest frame from the backend service."""
+    """Get the latest frame from the in-memory buffer, including stale frames."""
     try:
-        if not backend.is_started():
-            raise HTTPException(status_code=400, detail="Backend service not started")
-
         frame_data = backend.get_latest_frame_with_metadata()
         if frame_data is None:
             raise HTTPException(status_code=503, detail="No frame available")
@@ -86,6 +130,8 @@ async def get_latest_frame(backend: BackendDep) -> Response:
         current_time = time.time()
         frame_timestamp = frame_metadata.get("timestamp", 0)
         frame_age_seconds = current_time - frame_timestamp if frame_timestamp > 0 else 0
+        status = backend.get_status_snapshot()
+        frame_is_live = status["capture"]["frame_is_live"]
 
         return Response(
             content=frame_bytes,
@@ -96,6 +142,7 @@ async def get_latest_frame(backend: BackendDep) -> Response:
                 "Expires": "0",
                 "X-Frame-Timestamp": str(frame_timestamp),
                 "X-Frame-Age-Seconds": str(round(frame_age_seconds, 2)),
+                "X-Frame-Is-Live": str(frame_is_live).lower(),
             },
         )
     except HTTPException:
@@ -103,7 +150,8 @@ async def get_latest_frame(backend: BackendDep) -> Response:
     except Exception as exc:
         logger.error("Frame retrieval failed", error=str(exc))
         raise HTTPException(
-            status_code=500, detail=f"Frame retrieval failed: {exc}"
+            status_code=500,
+            detail=f"Frame retrieval failed: {exc}",
         ) from exc
 
 
@@ -114,8 +162,8 @@ async def create_snapshot(
 ) -> dict[str, object]:
     """Persist the latest buffered frame to disk."""
     try:
-        if not backend.is_started() and not backend.start_backend():
-            raise HTTPException(status_code=503, detail="Backend service not available")
+        if backend.get_backend_state() == BackendLifecycleState.STOPPED.value:
+            raise HTTPException(status_code=503, detail="Backend service not running")
 
         frame_data = backend.get_latest_frame_with_metadata()
         if frame_data is None:
@@ -161,7 +209,8 @@ async def create_snapshot(
     except Exception as exc:
         logger.error("Snapshot save failed", error=str(exc))
         raise HTTPException(
-            status_code=500, detail=f"Snapshot save failed: {exc}"
+            status_code=500,
+            detail=f"Snapshot save failed: {exc}",
         ) from exc
 
 
@@ -169,18 +218,13 @@ async def create_snapshot(
 async def get_frame_info(backend: BackendDep) -> dict[str, object]:
     """Get information about the latest frame and backend status."""
     try:
-        if not backend.is_started():
-            raise HTTPException(status_code=400, detail="Backend service not started")
-
         return {
             "has_frame": backend.get_frame_metadata() is not None,
             "frame_metadata": backend.get_frame_metadata(),
             "current_settings": backend.get_current_settings(),
-            "backend_status": backend.get_status(),
+            "backend_status": backend.get_status_snapshot(),
             "timestamp": time.time(),
         }
-    except HTTPException:
-        raise
     except Exception as exc:
         logger.error("Frame info failed", error=str(exc))
         raise HTTPException(
@@ -193,19 +237,15 @@ async def get_frame_info(backend: BackendDep) -> dict[str, object]:
 async def bootstrap(backend: BackendDep) -> dict[str, object]:
     """Bootstrap endpoint for initial page load and camera capabilities."""
     try:
-        if not backend.is_started() and not backend.start_backend():
-            raise HTTPException(status_code=400, detail="Backend service not available")
-
+        status = backend.get_status_snapshot()
         return {
-            "current_settings": backend.get_current_settings(),
-            "status": backend.get_status(),
+            "current_settings": status["settings"]["current_settings"],
+            "status": status,
             "capabilities": backend.get_control_capabilities(),
             "stream_url": "/stream.mjpg",
             "telemetry_url": "/api/telemetry",
             "timestamp": time.time(),
         }
-    except HTTPException:
-        raise
     except Exception as exc:
         logger.error("Bootstrap failed", error=str(exc))
         raise HTTPException(status_code=500, detail=f"Bootstrap failed: {exc}") from exc
@@ -219,8 +259,8 @@ async def update_settings(
 ) -> dict[str, object]:
     """Queue validated settings updates and notify stream listeners."""
     try:
-        if not backend.is_started():
-            raise HTTPException(status_code=400, detail="Backend service not started")
+        if backend.get_backend_state() != BackendLifecycleState.RUNNING.value:
+            raise HTTPException(status_code=400, detail="Backend service not running")
 
         data = await request.json()
         valid_settings = validate_settings_payload(
@@ -244,5 +284,6 @@ async def update_settings(
     except Exception as exc:
         logger.error("Settings update failed", error=str(exc))
         raise HTTPException(
-            status_code=500, detail=f"Settings update failed: {exc}"
+            status_code=500,
+            detail=f"Settings update failed: {exc}",
         ) from exc

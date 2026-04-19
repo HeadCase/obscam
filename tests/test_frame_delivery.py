@@ -20,8 +20,11 @@ class DummyCamera:
     def disconnect(self) -> None:
         return None
 
+    def interrupt_capture(self) -> None:
+        return None
+
     def get_status(self) -> dict[str, object]:
-        return {"status": "connected"}
+        return {"status": "connected", "camera_model": "Dummy Camera"}
 
     def capture_frame(self) -> bytes | None:
         return b"dummy-frame"
@@ -153,7 +156,6 @@ def test_latest_frame_response_uses_one_atomic_snapshot(
     tmp_path: Path,
 ) -> None:
     service = CameraBackendService(DummyCamera(), tmp_path)
-    service._started = True
     service.frame_buffer.update_frame(
         b"first-frame",
         {"timestamp": 1.0, "exposure_ms": 100.0, "capture_duration_ms": 100.0},
@@ -168,19 +170,18 @@ def test_latest_frame_response_uses_one_atomic_snapshot(
     assert response.body == b"latest-frame"
     assert response.headers["x-frame-timestamp"] == "5.0"
     assert response.headers["x-frame-age-seconds"]
+    assert response.headers["x-frame-is-live"] == "false"
 
 
 def test_telemetry_initial_snapshot_uses_existing_frame(tmp_path: Path) -> None:
     async def scenario() -> None:
         service = CameraBackendService(DummyCamera(), tmp_path)
-        service._started = True
         service.frame_buffer.update_frame(
             b"latest-frame",
             {"timestamp": 7.0, "exposure_ms": 300.0, "capture_duration_ms": 300.0},
         )
         runtime = ApiRuntimeState()
         runtime.backend = service
-        runtime.settings_version = 4
 
         response = await stream_routes.telemetry_sse(service, runtime)
         body_iterator = cast(
@@ -194,6 +195,8 @@ def test_telemetry_initial_snapshot_uses_existing_frame(tmp_path: Path) -> None:
         assert payload["has_frame"] is True
         assert payload["timestamp"] == 7.0
         assert payload["capture_ms"] == 300.0
+        assert payload["backend_state"] == "stopped"
+        assert payload["frame_is_live"] is False
         assert "settings_version" not in payload
 
     asyncio.run(scenario())
@@ -208,6 +211,9 @@ def test_capture_loop_records_measured_capture_duration(monkeypatch) -> None:
             return True
 
         def disconnect(self) -> None:
+            return None
+
+        def interrupt_capture(self) -> None:
             return None
 
         def get_status(self) -> dict[str, object]:

@@ -65,13 +65,18 @@ class TimedCamera:
         }
         self._connected = False
         self._frame_index = 0
+        self._capture_interrupt = threading.Event()
 
     def connect(self) -> bool:
         self._connected = True
         return True
 
     def disconnect(self) -> None:
+        self.interrupt_capture()
         self._connected = False
+
+    def interrupt_capture(self) -> None:
+        self._capture_interrupt.set()
 
     def get_status(self) -> dict[str, object]:
         with self._lock:
@@ -90,7 +95,9 @@ class TimedCamera:
             exposure_ms = float(self._settings["exposure_ms"])
             gain = int(self._settings["gain"])
 
-        time.sleep(exposure_ms / 1000.0)
+        self._capture_interrupt.clear()
+        if self._capture_interrupt.wait(timeout=exposure_ms / 1000.0):
+            return None
 
         with self._lock:
             self._frame_index += 1

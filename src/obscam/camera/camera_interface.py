@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
-"""Camera interface protocol defining the contract for all camera
-implementations."""
+"""Camera interface protocol defining the contract for all camera implementations."""
 
 from typing import Any, Protocol, TypedDict
 
@@ -20,7 +19,7 @@ class CameraInterface(Protocol):
         """Connect to the camera hardware.
 
         Returns:
-            True if connection successful, False otherwise
+            True if connection successful, False otherwise.
         """
         ...
 
@@ -28,11 +27,15 @@ class CameraInterface(Protocol):
         """Disconnect from the camera hardware."""
         ...
 
+    def interrupt_capture(self) -> None:
+        """Interrupt an in-progress capture if the backend is stopping."""
+        ...
+
     def get_status(self) -> dict[str, Any]:
         """Get current camera status including connection state and settings.
 
         Returns:
-            Dictionary containing camera status information
+            Dictionary containing camera status information.
         """
         ...
 
@@ -40,7 +43,7 @@ class CameraInterface(Protocol):
         """Capture a single frame and return as JPEG bytes.
 
         Returns:
-            JPEG bytes of captured frame, or None if capture failed
+            JPEG bytes of captured frame, or None if capture failed.
         """
         ...
 
@@ -48,10 +51,10 @@ class CameraInterface(Protocol):
         """Update camera settings for the next capture.
 
         Args:
-            **settings: Camera settings (exposure_ms, gain)
+            **settings: Camera settings such as exposure_ms and gain.
 
         Returns:
-            True if settings updated successfully, False otherwise
+            True if settings updated successfully, False otherwise.
         """
         ...
 
@@ -59,7 +62,7 @@ class CameraInterface(Protocol):
         """Get the current camera settings.
 
         Returns:
-            Dictionary of current camera settings
+            Dictionary of current camera settings.
         """
         ...
 
@@ -67,6 +70,6 @@ class CameraInterface(Protocol):
         """Get camera control capabilities and ranges.
 
         Returns:
-            Dictionary containing control limits for exposure, gain, white balance, etc.
+            Dictionary containing control limits for exposure and gain.
         """
         ...

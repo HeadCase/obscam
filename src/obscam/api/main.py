@@ -82,9 +82,11 @@ def start_server() -> None:
         logger.info("  - Main page: http://localhost:8000/")
         logger.info("  - Latest frame: http://localhost:8000/api/latest-frame")
         logger.info("  - Update settings: POST http://localhost:8000/api/settings")
-        logger.info("  - Status: http://localhost:8000/api/status")
+        logger.info("  - Status: http://localhost:8000/api/backend/status")
     else:
-        logger.warning("Backend service failed to start. Use /api/connect to retry.")
+        logger.warning(
+            "Backend service failed to start. Use /api/backend/start to retry."
+        )
 
     logger.info("Starting web server on port 8000...")
     logger.info("Press Ctrl+C to stop")

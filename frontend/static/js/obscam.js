@@ -39,15 +39,19 @@ function obsCam() {
         if (response.ok) {
           this.buildControlScales(data.capabilities);
           this.syncSettingsFromServer(data.current_settings);
-          this.connected = true;
-          this.connectionStatus = "Connected";
           this.controlsReady = true;
+
+          const backendState = data.status?.backend?.state || "stopped";
+          this.connected = backendState === "running";
+          this.connectionStatus = backendState;
 
           // Start SSE telemetry
           this.startTelemetry();
 
-          // Auto-start streaming
-          setTimeout(() => this.startStream(), 500);
+          // Auto-start streaming only when the backend is already running
+          if (backendState === "running") {
+            setTimeout(() => this.startStream(), 500);
+          }
         } else {
           throw new Error(data.detail || "Bootstrap failed");
         }
@@ -228,7 +232,8 @@ function obsCam() {
 
     updateTelemetry(data) {
       this.telemetry.fps = data.fps;
-      this.telemetry.cameraStatus = data.has_frame ? "Active" : "Idle";
+      this.telemetry.cameraStatus = data.backend_state || (data.has_frame ? "Active" : "Idle");
+      this.connectionStatus = data.backend_state || this.connectionStatus;
 
       // Calculate frame age
       if (data.timestamp) {
@@ -274,7 +279,7 @@ function obsCam() {
     handleStreamLoad() {
       console.log("MJPEG stream loaded successfully");
       if (this.streaming) {
-        this.connectionStatus = "Live";
+        this.connectionStatus = "running";
         this.connected = true;
       }
     },

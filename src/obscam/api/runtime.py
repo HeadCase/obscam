@@ -3,7 +3,7 @@
 import asyncio
 import time
 from collections import deque
-from typing import Any, cast
+from typing import cast
 
 from fastapi import FastAPI
 
@@ -48,9 +48,14 @@ class FrameDeliveryNotifier:
         if loop is None:
             return
 
-        published_at = time.time()
+        published_at = snapshot.metadata.get("timestamp")
+        if not isinstance(published_at, int | float):
+            return
+
         loop.call_soon_threadsafe(
-            self._schedule_frame_update, snapshot.generation, published_at
+            self._schedule_frame_update,
+            snapshot.generation,
+            float(published_at),
         )
 
     def publish_settings(self, current_settings_version: int) -> None:
@@ -153,6 +158,7 @@ class ApiRuntimeState:
         if self.backend is None:
             self.backend = get_backend_service()
             self.backend.frame_buffer.on_new_frame = self.on_new_frame
+            self.backend.on_state_change = self.on_backend_state_change
         return self.backend
 
     def bind_notifier_to_current_loop(self) -> None:
@@ -176,21 +182,34 @@ class ApiRuntimeState:
         self.delivery_notifier.publish_settings(self.settings_version)
         return self.settings_version
 
+    def on_backend_state_change(self) -> None:
+        """Wake listeners when lifecycle state changes without a new frame."""
+        self.publish_settings_update()
+
     def build_telemetry_payload(
         self,
+        backend: CameraBackendService,
         snapshot: FrameSnapshot | None,
-        current_settings: dict[str, Any],
         *,
         include_settings_version: bool,
     ) -> dict[str, object]:
-        """Build a telemetry payload from the latest snapshot and settings."""
+        """Build a telemetry payload from the latest snapshot and backend status."""
         metadata = snapshot.metadata if snapshot is not None else {}
+        status = backend.get_status_snapshot()
+        capture_status = status["capture"]
+        backend_status = status["backend"]
+        settings_status = status["settings"]
+
         payload: dict[str, object] = {
-            "timestamp": metadata.get("timestamp"),
+            "timestamp": capture_status["frame_timestamp"],
             "capture_ms": metadata.get("capture_duration_ms"),
-            "has_frame": snapshot is not None,
+            "has_frame": capture_status["has_frame"],
             "fps": self.delivery_notifier.estimate_fps(),
-            "settings": current_settings,
+            "settings": settings_status["current_settings"],
+            "backend_state": backend_status["state"],
+            "last_error": backend_status["last_error"],
+            "frame_age_seconds": capture_status["frame_age_seconds"],
+            "frame_is_live": capture_status["frame_is_live"],
         }
         if include_settings_version:
             payload["settings_version"] = self.settings_version

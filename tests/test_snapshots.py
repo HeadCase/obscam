@@ -6,7 +6,7 @@ from fastapi import HTTPException
 
 from obscam.api.routers import camera as camera_routes
 from obscam.api.schemas import SnapshotRequest
-from obscam.core.backend_service import CameraBackendService
+from obscam.core.backend_service import BackendLifecycleState, CameraBackendService
 from obscam.core.snapshot_service import (
     resolve_snapshot_directory,
     sanitize_filename_prefix,
@@ -18,6 +18,9 @@ class DummyCamera:
         return True
 
     def disconnect(self) -> None:
+        return None
+
+    def interrupt_capture(self) -> None:
         return None
 
     def get_status(self) -> dict[str, object]:
@@ -50,23 +53,16 @@ class FakeFrameBuffer:
 class FakeBackend:
     def __init__(
         self,
-        started: bool = True,
+        *,
+        state: str = BackendLifecycleState.RUNNING.value,
         frame_data: tuple[bytes, dict[str, object]] | None = None,
-        start_result: bool = True,
     ) -> None:
-        self.started = started
+        self.state = state
         self.frame_data = frame_data
-        self.start_result = start_result
         self.frame_buffer = FakeFrameBuffer()
 
-    def is_started(self) -> bool:
-        return self.started
-
-    def start_backend(self) -> bool:
-        if self.start_result:
-            self.started = True
-            return True
-        return False
+    def get_backend_state(self) -> str:
+        return self.state
 
     def get_latest_frame_with_metadata(self) -> tuple[bytes, dict[str, object]] | None:
         return self.frame_data
@@ -87,7 +83,6 @@ def _typed_backend(fake_backend: FakeBackend) -> CameraBackendService:
 
 def test_get_latest_frame_with_metadata_returns_none_when_buffer_empty(tmp_path: Path):
     service = CameraBackendService(DummyCamera(), tmp_path)
-    service._started = True
 
     assert service.get_latest_frame_with_metadata() is None
 
@@ -126,7 +121,10 @@ def test_snapshot_endpoint_saves_file_and_returns_metadata(
             {"timestamp": 1234.5, "exposure_ms": 200.0, "gain": 250},
         ),
     )
-    fake_backend = FakeBackend(started=True, frame_data=frame_data)
+    fake_backend = FakeBackend(
+        state=BackendLifecycleState.RUNNING.value,
+        frame_data=frame_data,
+    )
     monkeypatch.setattr(camera_routes, "ASSETS_DIR", tmp_path / "assets")
 
     payload = cast(
@@ -150,8 +148,11 @@ def test_snapshot_endpoint_saves_file_and_returns_metadata(
     assert payload["current_settings"] == {"exposure_ms": 200.0, "gain": 250}
 
 
-def test_snapshot_endpoint_returns_503_when_backend_unavailable() -> None:
-    fake_backend = FakeBackend(started=False, frame_data=None, start_result=False)
+def test_snapshot_endpoint_returns_503_when_backend_stopped() -> None:
+    fake_backend = FakeBackend(
+        state=BackendLifecycleState.STOPPED.value,
+        frame_data=None,
+    )
 
     try:
         asyncio.run(
@@ -162,15 +163,18 @@ def test_snapshot_endpoint_returns_503_when_backend_unavailable() -> None:
         )
     except HTTPException as exc:
         assert exc.status_code == 503
-        assert exc.detail == "Backend service not available"
+        assert exc.detail == "Backend service not running"
     else:
-        raise AssertionError("Expected backend-unavailable snapshot to fail")
+        raise AssertionError("Expected stopped-backend snapshot to fail")
 
 
 def test_snapshot_endpoint_returns_503_when_no_frame_available(
     tmp_path: Path, monkeypatch
 ) -> None:
-    fake_backend = FakeBackend(started=True, frame_data=None)
+    fake_backend = FakeBackend(
+        state=BackendLifecycleState.RUNNING.value,
+        frame_data=None,
+    )
     monkeypatch.setattr(camera_routes, "ASSETS_DIR", tmp_path / "assets")
 
     try:
@@ -193,7 +197,10 @@ def test_snapshot_endpoint_creates_assets_subdirectories(
     frame_data = cast(
         tuple[bytes, dict[str, object]], (b"jpeg-bytes", {"timestamp": 1234.5})
     )
-    fake_backend = FakeBackend(started=True, frame_data=frame_data)
+    fake_backend = FakeBackend(
+        state=BackendLifecycleState.RUNNING.value,
+        frame_data=frame_data,
+    )
     monkeypatch.setattr(camera_routes, "ASSETS_DIR", tmp_path / "assets")
 
     payload = cast(

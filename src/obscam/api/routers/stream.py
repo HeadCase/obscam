@@ -62,10 +62,9 @@ async def telemetry_sse(
 
     async def generate_telemetry():
         snapshot = backend.frame_buffer.get_latest_snapshot()
-        settings = backend.get_current_settings() or {}
         initial_payload = runtime.build_telemetry_payload(
+            backend,
             snapshot,
-            settings,
             include_settings_version=False,
         )
         last_generation = snapshot.generation if snapshot is not None else 0
@@ -75,7 +74,6 @@ async def telemetry_sse(
 
         while True:
             snapshot = backend.frame_buffer.get_latest_snapshot()
-            settings = backend.get_current_settings() or {}
             current_generation = snapshot.generation if snapshot is not None else 0
 
             if (
@@ -89,8 +87,8 @@ async def telemetry_sse(
                 continue
 
             payload = runtime.build_telemetry_payload(
+                backend,
                 snapshot,
-                settings,
                 include_settings_version=True,
             )
             last_generation = current_generation

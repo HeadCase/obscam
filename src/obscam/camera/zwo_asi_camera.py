@@ -137,12 +137,7 @@ class ZwoAsiCamera(CameraInterface):
     def disconnect(self) -> None:
         """Disconnect from the camera."""
         if self.camera:
-            try:
-                self.camera.stop_video_capture()
-                self.camera.stop_exposure()
-            except asi.ZWO_Error:
-                pass
-
+            self.interrupt_capture()
             self.camera = None
             self.camera_info = {}
             self.is_initialized = False
@@ -151,6 +146,18 @@ class ZwoAsiCamera(CameraInterface):
             self._last_frame_signature = None
             self._duplicate_frame_streak = 0
             print("Camera disconnected")
+
+    @override
+    def interrupt_capture(self) -> None:
+        """Interrupt any in-progress SDK capture operation."""
+        if self.camera is None:
+            return
+
+        try:
+            self.camera.stop_video_capture()
+            self.camera.stop_exposure()
+        except asi.ZWO_Error:
+            pass
 
     @override
     def get_status(self) -> dict[str, Any]:
