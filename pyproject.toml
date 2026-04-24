@@ -1,22 +1,13 @@
 [project]
 name = "obscam"
-version = "0.2.0"
+version = "0.0.1"
 description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.12"
-dependencies = [
-  "fastapi>=0.116.1",
-  "uvicorn>=0.30.0",
-  "jinja2>=3.1.0",
-  "zwoasi>=0.2.0",
-  "pillow>=10.0.0",
-  "numpy>=2.2.6",
-  "loguru>=0.7.0",
-  "pydantic>=2.11.9",
-]
+dependencies = ["zwoasi>=0.2.0"]
 
 [project.scripts]
-obscam = "obscam:main"
+obscam = "obscam.main:main"
 
 [build-system]
 requires = ["uv_build>=0.8.11,<0.9.0"]
@@ -24,24 +15,20 @@ build-backend = "uv_build"
 
 [dependency-groups]
 dev = [
-    "deptry>=0.23.1",
-    "ipdb>=0.13.13",
-    "ipython>=9.4.0",
-    "pre-commit>=4.2.0",
-    "pytest>=8.4.1",
-    "ruff>=0.12.10",
-    "ty>=0.0.1a16",
+  "deptry>=0.23.1",
+  "ipdb>=0.13.13",
+  "ipython>=9.4.0",
+  "pre-commit>=4.2.0",
+  # "pytest>=8.4.1",
+  "ruff>=0.12.10",
+  "ty>=0.0.1a16",
 ]
 
 [tool.ruff]
 target-version = "py312"
 line-length = 88
-src = ["src", "tests"]
-extend-exclude = [
-  ".venv",
-  "assets",
-  "logs",
-]
+src = ["src"]              #, "tests"]
+extend-exclude = [".venv"]
 
 [tool.ruff.format]
 docstring-code-format = true
@@ -57,5 +44,4 @@ python = "./.venv"
 
 [tool.deptry]
 known_first_party = ["obscam"]
-extend_exclude = ["backend/.venv", "frontend", "logs"]
-per_rule_ignores = { DEP002 = ["jinja2"] }
+extend_exclude = []

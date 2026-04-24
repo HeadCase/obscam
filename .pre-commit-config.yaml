@@ -14,13 +14,13 @@ repos:
         types_or: [python]
       - id: ruff-format
         name: ruff format
-        entry: uv run ruff format --check src tests
+        entry: uv run ruff format --check src 
         language: system
         pass_filenames: false
         types_or: [python]
       - id: ruff-check
         name: ruff check
-        entry: uv run ruff check src tests
+        entry: uv run ruff check src 
         language: system
         types: [python]
         pass_filenames: false
