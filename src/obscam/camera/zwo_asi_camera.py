@@ -20,6 +20,7 @@ DEFAULT_VIDEO_MODE_THRESHOLD_MS = 200.0
 DEFAULT_VIDEO_CAPTURE_TIMEOUT_PADDING_MS = 500
 FRAME_SIGNATURE_SAMPLE_SIZE = 2048
 PERFORMANCE_LOG_EVERY_N_FRAMES = 120
+REQUIRED_CAMERA_MODEL = "ASI662MC"
 
 
 class ZwoAsiCamera(CameraInterface):
@@ -85,12 +86,13 @@ class ZwoAsiCamera(CameraInterface):
             cameras_found = asi.list_cameras()
             print(f"Found {num_cameras} camera(s): {cameras_found}")
 
-            # Look for ASI662MC specifically, otherwise use first camera
-            camera_id = 0
-            for i, camera_name in enumerate(cameras_found):
-                if "ASI662MC" in camera_name:
-                    camera_id = i
-                    break
+            camera_id = self._find_required_camera_id(cameras_found)
+            if camera_id is None:
+                print(
+                    f"Required ZWO camera {REQUIRED_CAMERA_MODEL} not found; "
+                    "refusing to connect to another camera"
+                )
+                return False
 
             self.camera = asi.Camera(camera_id)
             self.camera_info = self.camera.get_camera_property()
@@ -106,6 +108,13 @@ class ZwoAsiCamera(CameraInterface):
         except Exception as e:
             print(f"Failed to connect to camera: {e}")
             return False
+
+    def _find_required_camera_id(self, cameras_found: list[str]) -> int | None:
+        """Return the required camera index, or None if it is absent."""
+        for i, camera_name in enumerate(cameras_found):
+            if REQUIRED_CAMERA_MODEL in camera_name:
+                return i
+        return None
 
     def _configure_camera(self) -> None:
         """Minimal camera configuration."""

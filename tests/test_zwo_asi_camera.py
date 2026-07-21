@@ -1,6 +1,7 @@
 import threading
 
 import numpy as np
+import pytest
 import zwoasi as asi  # pyright: ignore[reportMissingTypeStubs]
 
 from obscam.camera.zwo_asi_camera import ZwoAsiCamera
@@ -36,6 +37,28 @@ class FakeAsiCamera:
     def stop_exposure(self) -> None:
         self.calls.append("stop_exposure")
 
+    def disable_dark_subtract(self) -> None:
+        self.calls.append("disable_dark_subtract")
+
+    def get_camera_property(self) -> dict[str, int | str]:
+        self.calls.append("get_camera_property")
+        return {"Name": "ZWO ASI662MC", "MaxWidth": 2, "MaxHeight": 2}
+
+
+def _build_disconnected_camera() -> ZwoAsiCamera:
+    camera = object.__new__(ZwoAsiCamera)
+    camera.camera_info = {}
+    camera.camera = None
+    camera.is_initialized = False
+    camera.settings_lock = threading.Lock()
+    camera.current_capture_mode = ""
+    camera.video_mode_threshold_ms = 200.0
+    camera.current_settings = {"exposure_ms": 200.0, "gain": 250}
+    camera._capture_count = 0
+    camera._last_frame_signature = None
+    camera._duplicate_frame_streak = 0
+    return camera
+
 
 def _build_camera(exposure_ms: float, fake_sdk_camera: FakeAsiCamera) -> ZwoAsiCamera:
     camera = object.__new__(ZwoAsiCamera)
@@ -50,6 +73,52 @@ def _build_camera(exposure_ms: float, fake_sdk_camera: FakeAsiCamera) -> ZwoAsiC
     camera._last_frame_signature = None
     camera._duplicate_frame_streak = 0
     return camera
+
+
+def test_zwo_asi_camera_refuses_to_connect_when_required_camera_is_absent(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    camera_ids_opened: list[int] = []
+    camera = _build_disconnected_camera()
+
+    def open_camera(camera_id: int) -> FakeAsiCamera:
+        camera_ids_opened.append(camera_id)
+        return FakeAsiCamera()
+
+    monkeypatch.setattr(asi, "get_num_cameras", lambda: 1)
+    monkeypatch.setattr(asi, "list_cameras", lambda: ["ZWO ASI120MM Mini"])
+    monkeypatch.setattr(asi, "Camera", open_camera)
+
+    assert camera.connect() is False
+    assert camera_ids_opened == []
+    assert camera.camera is None
+    assert camera.is_initialized is False
+
+
+def test_zwo_asi_camera_connects_to_required_camera_when_not_first(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    camera_ids_opened: list[int] = []
+    fake_sdk_camera = FakeAsiCamera()
+    camera = _build_disconnected_camera()
+
+    def open_camera(camera_id: int) -> FakeAsiCamera:
+        camera_ids_opened.append(camera_id)
+        return fake_sdk_camera
+
+    monkeypatch.setattr(asi, "get_num_cameras", lambda: 2)
+    monkeypatch.setattr(
+        asi,
+        "list_cameras",
+        lambda: ["ZWO ASI120MM Mini", "ZWO ASI662MC"],
+    )
+    monkeypatch.setattr(asi, "Camera", open_camera)
+
+    assert camera.connect() is True
+    assert camera_ids_opened == [1]
+    assert camera.camera is fake_sdk_camera
+    assert camera.is_initialized is True
+    assert "get_camera_property" in fake_sdk_camera.calls
 
 
 def test_zwo_asi_camera_uses_video_mode_for_short_exposures() -> None:
