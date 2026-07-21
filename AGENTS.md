@@ -1,5 +1,21 @@
 # AGENTS.md - Working Rules for obscam
 
+## Agent skills
+
+### Issue tracker
+
+Issues are tracked in the Greg Headley team's ObsCam project in Linear. See
+`docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+The tracker uses the canonical five-role triage vocabulary. See
+`docs/agents/triage-labels.md`.
+
+### Domain docs
+
+This is a single-context repository. See `docs/agents/domain.md`.
+
 ## Decision Policy
 
 - Always propose before implementing.
