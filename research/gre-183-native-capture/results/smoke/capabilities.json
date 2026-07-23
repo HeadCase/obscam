@@ -1,0 +1,23 @@
+{
+  "camera_name": "ZWO ASI662MC",
+  "sdk_version": "1, 38, 0, 0",
+  "width": 1920,
+  "height": 1080,
+  "supported_formats": [
+    "RAW8",
+    "RGB24",
+    "Y8"
+  ],
+  "bandwidth": {
+    "minimum": 40,
+    "maximum": 100,
+    "default": 50,
+    "writable": true
+  },
+  "high_speed": {
+    "minimum": 0,
+    "maximum": 1,
+    "default": 0,
+    "writable": true
+  }
+}
