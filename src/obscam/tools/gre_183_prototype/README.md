@@ -51,3 +51,10 @@ same SDK and system zlib libraries directly.
 The benchmark does not stop Allsky, rclone, or WireGuard and does not power-cycle
 USB hubs. A camera or hub disconnect stops the matrix. Quiet-baseline service
 changes and physical USB topology changes require operator coordination.
+
+The Python path selects the ASI662MC from non-opening camera-property discovery
+before constructing an SDK camera handle; it never probes the production
+ASI178MC by opening it. C and Rust likewise inspect properties first and open
+only an exact ASI662MC model match. While a runner is active, the orchestrator
+checks the ASI178MC's sysfs USB identity every 100 ms and terminates the runner
+immediately if that production device disappears.

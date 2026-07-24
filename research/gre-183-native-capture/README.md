@@ -91,6 +91,8 @@ adapter decision.
 1. Restore both cameras and connect the ASI662MC so SDK discovery reports USB 3
    host negotiation; record the resulting live topology.
 2. Confirm the ASI178MC/Allsky path remains stable while the ASI662MC is tested.
+   The resumed harness must retain its non-opening model selection and 100 ms
+   ASI178MC sysfs sentinel; a production-camera disappearance aborts the cell.
 3. Resume a short bandwidth/high-speed sweep first. Do not proceed to the full
    matrix if either camera resets or disappears.
 4. Complete representative exposures, repeated finalist cells, setting-change

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import ctypes
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from typing import Protocol, cast
 
 import zwoasi as asi  # pyright: ignore[reportMissingTypeStubs]
@@ -79,15 +79,26 @@ def _sdk_version(library_path: str) -> str:
     return raw_version.decode("ascii")
 
 
+def required_camera_index(camera_names: Sequence[str], required_model: str) -> int:
+    """Select one camera by model without opening any candidate camera."""
+    matches = [
+        index
+        for index, camera_name in enumerate(camera_names)
+        if required_model in camera_name
+    ]
+    if not matches:
+        raise RuntimeError(f"required camera {required_model} not found")
+    if len(matches) > 1:
+        raise RuntimeError(
+            f"required camera model {required_model} is not a unique hardware identity"
+        )
+    return matches[0]
+
+
 def _find_camera(required_model: str) -> ZwoCamera:
-    for camera_index in range(asi.get_num_cameras()):
-        camera = cast(ZwoCamera, asi.Camera(camera_index))
-        camera_property = camera.get_camera_property()
-        camera_name = _text(camera_property.get("Name"), "camera name")
-        if required_model in camera_name:
-            return camera
-        camera.close()
-    raise RuntimeError(f"required camera {required_model} not found")
+    camera_names = asi.list_cameras()
+    camera_index = required_camera_index(camera_names, required_model)
+    return cast(ZwoCamera, asi.Camera(camera_index))
 
 
 def _control_by_type(

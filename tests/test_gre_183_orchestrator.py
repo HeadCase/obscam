@@ -11,13 +11,17 @@ from obscam.tools.gre_183_prototype.contract import (
     Scenario,
 )
 from obscam.tools.gre_183_prototype.orchestrator import (
+    ProtectedUsbDevice,
+    ProtectedUsbDeviceError,
     ResourceSample,
     artifact_path,
     is_recoverable_camera_error,
     parse_process_stat,
     parse_process_status,
+    run_monitored,
     runner_command,
     summarize_resources,
+    usb_device_present,
 )
 
 
@@ -105,6 +109,27 @@ def test_camera_start_errors_are_recoverable(error: str) -> None:
 
 def test_invalid_runner_output_is_not_a_recoverable_camera_error() -> None:
     assert not is_recoverable_camera_error("runner emitted invalid result")
+
+
+def test_usb_device_presence_reads_identity_from_sysfs(tmp_path: Path) -> None:
+    device_directory = tmp_path / "1-2"
+    device_directory.mkdir()
+    (device_directory / "idVendor").write_text("03c3\n")
+    (device_directory / "idProduct").write_text("178a\n")
+    allsky_camera = ProtectedUsbDevice("03c3", "178a", "ASI178MC")
+
+    assert usb_device_present(allsky_camera, sysfs_root=tmp_path)
+
+
+def test_runner_refuses_to_start_without_protected_camera(tmp_path: Path) -> None:
+    allsky_camera = ProtectedUsbDevice("03c3", "178a", "ASI178MC")
+
+    with pytest.raises(ProtectedUsbDeviceError, match="refusing to start"):
+        run_monitored(
+            ["command-must-not-start"],
+            protected_devices=(allsky_camera,),
+            usb_sysfs_root=tmp_path,
+        )
 
 
 def test_summarize_resources_reports_observed_peaks() -> None:

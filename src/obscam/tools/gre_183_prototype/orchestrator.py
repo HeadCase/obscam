@@ -9,6 +9,7 @@ import shutil
 import subprocess
 import sys
 import time
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -85,6 +86,27 @@ class RunnerExecutionError(RuntimeError):
     """Raised when a native or Python benchmark subprocess fails."""
 
 
+class ProtectedUsbDeviceError(RunnerExecutionError):
+    """Raised when a production USB device disappears during a benchmark."""
+
+
+@dataclass(frozen=True, slots=True)
+class ProtectedUsbDevice:
+    """USB identity that must remain enumerated throughout every cell."""
+
+    vendor_id: str
+    product_id: str
+    name: str
+
+
+PRODUCTION_ALLSKY_CAMERA = ProtectedUsbDevice(
+    vendor_id="03c3",
+    product_id="178a",
+    name="ZWO ASI178MC",
+)
+DEFAULT_PROTECTED_USB_DEVICES = (PRODUCTION_ALLSKY_CAMERA,)
+
+
 def is_recoverable_camera_error(error: str) -> bool:
     """Return whether a runner failure may be transient USB re-enumeration."""
     recoverable_markers = (
@@ -100,6 +122,32 @@ def _read_text(path: Path) -> str | None:
         return path.read_text().strip()
     except OSError:
         return None
+
+
+def usb_device_present(
+    device: ProtectedUsbDevice,
+    *,
+    sysfs_root: Path = Path("/sys/bus/usb/devices"),
+) -> bool:
+    """Check USB enumeration through sysfs without transacting with the device."""
+    for device_directory in sysfs_root.iterdir():
+        vendor_id = _read_text(device_directory / "idVendor")
+        product_id = _read_text(device_directory / "idProduct")
+        if vendor_id == device.vendor_id and product_id == device.product_id:
+            return True
+    return False
+
+
+def _missing_protected_devices(
+    protected_devices: tuple[ProtectedUsbDevice, ...],
+    *,
+    sysfs_root: Path,
+) -> list[ProtectedUsbDevice]:
+    return [
+        device
+        for device in protected_devices
+        if not usb_device_present(device, sysfs_root=sysfs_root)
+    ]
 
 
 def _memory_available_bytes() -> int | None:
@@ -334,9 +382,22 @@ def runner_command(
 
 
 def run_monitored(
-    command: list[str], *, sample_interval_s: float = 1.0
+    command: list[str],
+    *,
+    sample_interval_s: float = 1.0,
+    protected_devices: tuple[ProtectedUsbDevice, ...] = DEFAULT_PROTECTED_USB_DEVICES,
+    usb_sysfs_root: Path = Path("/sys/bus/usb/devices"),
 ) -> tuple[CaptureResult, ResourceSummary]:
     """Execute one runner while sampling CPU, RSS, and temperature."""
+    missing_before_start = _missing_protected_devices(
+        protected_devices,
+        sysfs_root=usb_sysfs_root,
+    )
+    if missing_before_start:
+        missing_names = ", ".join(device.name for device in missing_before_start)
+        raise ProtectedUsbDeviceError(
+            f"refusing to start because protected device is absent: {missing_names}"
+        )
     process = subprocess.Popen(
         command,
         stdout=subprocess.PIPE,
@@ -345,12 +406,41 @@ def run_monitored(
     )
     started_at = time.perf_counter()
     samples: list[ResourceSample] = []
+    next_sample_at = started_at
+    sentinel_interval_s = min(0.1, sample_interval_s)
     while process.poll() is None:
-        sample = _sample_process(process.pid, started_at)
-        if sample is not None:
-            samples.append(sample)
-        time.sleep(sample_interval_s)
+        missing_devices = _missing_protected_devices(
+            protected_devices,
+            sysfs_root=usb_sysfs_root,
+        )
+        if missing_devices:
+            process.terminate()
+            try:
+                process.communicate(timeout=5)
+            except subprocess.TimeoutExpired:
+                process.kill()
+                process.communicate()
+            missing_names = ", ".join(device.name for device in missing_devices)
+            raise ProtectedUsbDeviceError(
+                f"aborted runner because protected device disappeared: {missing_names}"
+            )
+        current_time = time.perf_counter()
+        if current_time >= next_sample_at:
+            sample = _sample_process(process.pid, started_at)
+            if sample is not None:
+                samples.append(sample)
+            next_sample_at = current_time + sample_interval_s
+        time.sleep(sentinel_interval_s)
     stdout, stderr = process.communicate()
+    missing_after_stop = _missing_protected_devices(
+        protected_devices,
+        sysfs_root=usb_sysfs_root,
+    )
+    if missing_after_stop:
+        missing_names = ", ".join(device.name for device in missing_after_stop)
+        raise ProtectedUsbDeviceError(
+            f"protected device disappeared as runner exited: {missing_names}"
+        )
     if process.returncode != 0:
         raise RunnerExecutionError(
             f"runner exited {process.returncode}: {stderr.strip()}"
