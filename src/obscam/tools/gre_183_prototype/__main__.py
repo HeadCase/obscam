@@ -7,11 +7,15 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from obscam.tools.gre_183_prototype.contract import (
+    AcquisitionMode,
     ImageFormat,
     RunnerKind,
     Scenario,
 )
-from obscam.tools.gre_183_prototype.matrix import build_screening_matrix
+from obscam.tools.gre_183_prototype.matrix import (
+    build_mode_overlap_matrix,
+    build_screening_matrix,
+)
 from obscam.tools.gre_183_prototype.orchestrator import (
     DEFAULT_BUILD_DIRECTORY,
     DEFAULT_SDK_INCLUDE,
@@ -51,6 +55,9 @@ def _add_scenario_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--duration-s", type=float, required=True)
     parser.add_argument("--warmup-frames", type=int, default=5)
     parser.add_argument("--timeout-ms", type=int, required=True)
+    parser.add_argument("--transition-from-exposure-us", type=int)
+    parser.add_argument("--transition-after-ms", type=float)
+    parser.add_argument("--mode", type=AcquisitionMode, default=AcquisitionMode.VIDEO)
 
 
 def parse_args() -> argparse.Namespace:
@@ -114,6 +121,29 @@ def parse_args() -> argparse.Namespace:
     screen_parser.add_argument(
         "--output", type=Path, default=_default_output_directory()
     )
+
+    mode_parser = subparsers.add_parser("mode-screen")
+    mode_parser.add_argument(
+        "--exposures-ms",
+        type=float,
+        nargs="+",
+        default=[10, 25, 50, 100, 200, 500, 1000, 2000, 5000, 10000, 30000],
+    )
+    mode_parser.add_argument("--format", type=ImageFormat, default=ImageFormat.RAW8)
+    mode_parser.add_argument("--gain", type=int, default=0)
+    mode_parser.add_argument("--high-speed", type=int, choices=(0, 1), default=0)
+    mode_parser.add_argument("--bandwidth", type=int, default=50)
+    mode_parser.add_argument(
+        "--modes",
+        type=AcquisitionMode,
+        nargs="+",
+        default=list(AcquisitionMode),
+    )
+    mode_parser.add_argument(
+        "--build-directory", type=Path, default=DEFAULT_BUILD_DIRECTORY
+    )
+    mode_parser.add_argument("--sdk-include", type=Path, default=DEFAULT_SDK_INCLUDE)
+    mode_parser.add_argument("--output", type=Path, default=_default_output_directory())
     return parser.parse_args()
 
 
@@ -139,6 +169,9 @@ def _scenario_from_args(args: argparse.Namespace) -> Scenario:
         duration_s=args.duration_s,
         warmup_frames=args.warmup_frames,
         timeout_ms=args.timeout_ms,
+        transition_from_exposure_us=args.transition_from_exposure_us,
+        transition_after_ms=args.transition_after_ms,
+        acquisition_mode=args.mode,
     )
 
 
@@ -206,6 +239,27 @@ def main() -> None:
             build_directory=args.build_directory,
             output_directory=args.output,
             sample_interval_s=args.sample_interval_s,
+        )
+        return
+
+    if args.command == "mode-screen":
+        runners = [RunnerKind.NATIVE_C]
+        _ensure_built(runners, args.build_directory, args.sdk_include)
+        write_capabilities(capabilities, args.output)
+        scenarios = build_mode_overlap_matrix(
+            exposures_ms=args.exposures_ms,
+            image_format=args.format,
+            gain=args.gain,
+            high_speed=args.high_speed,
+            bandwidth=args.bandwidth,
+            modes=args.modes,
+        )
+        _run_matrix(
+            runners,
+            scenarios,
+            build_directory=args.build_directory,
+            output_directory=args.output,
+            sample_interval_s=1.0,
         )
         return
 

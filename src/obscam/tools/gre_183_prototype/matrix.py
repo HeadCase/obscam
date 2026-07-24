@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Iterable
 
 from obscam.tools.gre_183_prototype.contract import (
+    AcquisitionMode,
     CameraCapabilities,
     ImageFormat,
     Scenario,
@@ -13,6 +14,38 @@ from obscam.tools.gre_183_prototype.contract import (
 DEFAULT_EXPOSURES_MS = (10.0, 25.0, 50.0, 100.0, 200.0, 1000.0)
 DEFAULT_GAIN = 250
 DEFAULT_WARMUP_FRAMES = 5
+
+
+def build_mode_overlap_matrix(
+    *,
+    exposures_ms: Iterable[float],
+    image_format: ImageFormat = ImageFormat.RAW8,
+    gain: int = 0,
+    high_speed: int = 0,
+    bandwidth: int = 50,
+    modes: Iterable[AcquisitionMode] = tuple(AcquisitionMode),
+) -> list[Scenario]:
+    """Build matched video/snapshot cells without assuming a mode crossover."""
+    scenarios: list[Scenario] = []
+    for exposure_ms in exposures_ms:
+        exposure_us = int(exposure_ms * 1000)
+        duration_s = max(5.0, (exposure_ms / 1000) * 3.2)
+        timeout_ms = max(500, int((exposure_ms * 2) + 500))
+        for acquisition_mode in modes:
+            scenarios.append(
+                Scenario(
+                    image_format=image_format,
+                    exposure_us=exposure_us,
+                    gain=gain,
+                    high_speed=high_speed,
+                    bandwidth=bandwidth,
+                    duration_s=duration_s,
+                    warmup_frames=1,
+                    timeout_ms=timeout_ms,
+                    acquisition_mode=acquisition_mode,
+                )
+            )
+    return scenarios
 
 
 def _control_values(minimum: int, default: int, maximum: int) -> list[int]:

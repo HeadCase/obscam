@@ -1,0 +1,1514 @@
+{
+  "result": {
+    "schema_version": 1,
+    "runner": "native-c",
+    "scenario": {
+      "image_format": "RAW8",
+      "exposure_us": 30000000,
+      "gain": 100,
+      "high_speed": 0,
+      "bandwidth": 50,
+      "duration_s": 96.0,
+      "warmup_frames": 1,
+      "timeout_ms": 60500,
+      "acquisition_mode": "video",
+      "transition_from_exposure_us": null,
+      "transition_after_ms": null,
+      "width": 1920,
+      "height": 1080
+    },
+    "sdk_version": "1, 38, 0, 0",
+    "camera_name": "ZWO ASI662MC",
+    "elapsed_s": 120.123725688,
+    "frames": 4,
+    "unique_frames": 1,
+    "adjacent_duplicates": 3,
+    "cadence_fps": 0.033299,
+    "unique_cadence_fps": 0.00832475,
+    "sdk_dropped_start": 0,
+    "sdk_dropped_end": 0,
+    "sdk_dropped_delta": 0,
+    "capture_errors": 0,
+    "corrupt_frames": 0,
+    "pipeline_drops": 0,
+    "buffer_allocations": 1,
+    "buffer_allocation_bytes": 2073728,
+    "downstream_copy_bytes": 0,
+    "crc32_last": 3509465221,
+    "capture_call_ms": {
+      "count": 4,
+      "minimum_ms": 30021.940371,
+      "mean_ms": 30028.22762075,
+      "p50_ms": 30029.4057225,
+      "p95_ms": 30031.8428753,
+      "p99_ms": 30032.09550866,
+      "maximum_ms": 30032.158667
+    },
+    "inter_frame_ms": {
+      "count": 3,
+      "minimum_ms": 30032.006204,
+      "mean_ms": 30033.287747667,
+      "p50_ms": 30033.747464,
+      "p95_ms": 30034.0733639,
+      "p99_ms": 30034.10233278,
+      "maximum_ms": 30034.109575
+    },
+    "unique_inter_frame_ms": {
+      "count": 0,
+      "minimum_ms": null,
+      "mean_ms": null,
+      "p50_ms": null,
+      "p95_ms": null,
+      "p99_ms": null,
+      "maximum_ms": null
+    },
+    "transition": null,
+    "frame_signal": {
+      "minimum": 255,
+      "maximum": 255,
+      "mean": 255.0,
+      "zero_fraction": 0.0,
+      "saturated_fraction": 1.0
+    },
+    "notes": [
+      "caller-owned guarded SDK frame buffer reused for the complete run",
+      "timing arrays preallocated before capture",
+      "last-frame signal summary computed after timed capture"
+    ]
+  },
+  "resources": {
+    "samples": [
+      {
+        "elapsed_s": 0.0011656759998004418,
+        "user_cpu_s": 0.0,
+        "system_cpu_s": 0.0,
+        "rss_bytes": 1314816,
+        "high_water_rss_bytes": 1314816,
+        "temperature_c": 61.835,
+        "system_load_1m": 0.5185546875
+      },
+      {
+        "elapsed_s": 1.0103419179995399,
+        "user_cpu_s": 0.03,
+        "system_cpu_s": 0.03,
+        "rss_bytes": 12189696,
+        "high_water_rss_bytes": 12189696,
+        "temperature_c": 62.322,
+        "system_load_1m": 0.55712890625
+      },
+      {
+        "elapsed_s": 2.0195285490008246,
+        "user_cpu_s": 0.03,
+        "system_cpu_s": 0.04,
+        "rss_bytes": 12189696,
+        "high_water_rss_bytes": 12189696,
+        "temperature_c": 62.809,
+        "system_load_1m": 0.55712890625
+      },
+      {
+        "elapsed_s": 3.0285641259997647,
+        "user_cpu_s": 0.03,
+        "system_cpu_s": 0.04,
+        "rss_bytes": 12189696,
+        "high_water_rss_bytes": 12189696,
+        "temperature_c": 62.809,
+        "system_load_1m": 0.55712890625
+      },
+      {
+        "elapsed_s": 4.037619462000293,
+        "user_cpu_s": 0.03,
+        "system_cpu_s": 0.04,
+        "rss_bytes": 12189696,
+        "high_water_rss_bytes": 12189696,
+        "temperature_c": 62.322,
+        "system_load_1m": 0.55712890625
+      },
+      {
+        "elapsed_s": 5.048905890000242,
+        "user_cpu_s": 0.03,
+        "system_cpu_s": 0.04,
+        "rss_bytes": 12189696,
+        "high_water_rss_bytes": 12189696,
+        "temperature_c": 62.322,
+        "system_load_1m": 0.55712890625
+      },
+      {
+        "elapsed_s": 6.066743134000717,
+        "user_cpu_s": 0.04,
+        "system_cpu_s": 0.04,
+        "rss_bytes": 12189696,
+        "high_water_rss_bytes": 12189696,
+        "temperature_c": 62.322,
+        "system_load_1m": 0.51220703125
+      },
+      {
+        "elapsed_s": 7.085179057999994,
+        "user_cpu_s": 0.04,
+        "system_cpu_s": 0.05,
+        "rss_bytes": 12189696,
+        "high_water_rss_bytes": 12189696,
+        "temperature_c": 62.809,
+        "system_load_1m": 0.51220703125
+      },
+      {
+        "elapsed_s": 8.104524566999316,
+        "user_cpu_s": 0.04,
+        "system_cpu_s": 0.05,
+        "rss_bytes": 12189696,
+        "high_water_rss_bytes": 12189696,
+        "temperature_c": 61.835,
+        "system_load_1m": 0.51220703125
+      },
+      {
+        "elapsed_s": 9.114684930000294,
+        "user_cpu_s": 0.04,
+        "system_cpu_s": 0.06,
+        "rss_bytes": 12189696,
+        "high_water_rss_bytes": 12189696,
+        "temperature_c": 62.809,
+        "system_load_1m": 0.51220703125
+      },
+      {
+        "elapsed_s": 10.123888670999804,
+        "user_cpu_s": 0.04,
+        "system_cpu_s": 0.06,
+        "rss_bytes": 12189696,
+        "high_water_rss_bytes": 12189696,
+        "temperature_c": 63.296,
+        "system_load_1m": 0.51220703125
+      },
+      {
+        "elapsed_s": 11.133115431000988,
+        "user_cpu_s": 0.04,
+        "system_cpu_s": 0.06,
+        "rss_bytes": 12189696,
+        "high_water_rss_bytes": 12189696,
+        "temperature_c": 63.296,
+        "system_load_1m": 0.470703125
+      },
+      {
+        "elapsed_s": 12.142398338999556,
+        "user_cpu_s": 0.04,
+        "system_cpu_s": 0.06,
+        "rss_bytes": 12189696,
+        "high_water_rss_bytes": 12189696,
+        "temperature_c": 62.809,
+        "system_load_1m": 0.470703125
+      },
+      {
+        "elapsed_s": 13.15781273200082,
+        "user_cpu_s": 0.04,
+        "system_cpu_s": 0.06,
+        "rss_bytes": 12189696,
+        "high_water_rss_bytes": 12189696,
+        "temperature_c": 63.296,
+        "system_load_1m": 0.470703125
+      },
+      {
+        "elapsed_s": 14.17060881299949,
+        "user_cpu_s": 0.04,
+        "system_cpu_s": 0.07,
+        "rss_bytes": 12189696,
+        "high_water_rss_bytes": 12189696,
+        "temperature_c": 62.809,
+        "system_load_1m": 0.470703125
+      },
+      {
+        "elapsed_s": 15.179762055000538,
+        "user_cpu_s": 0.04,
+        "system_cpu_s": 0.07,
+        "rss_bytes": 12189696,
+        "high_water_rss_bytes": 12189696,
+        "temperature_c": 63.296,
+        "system_load_1m": 0.470703125
+      },
+      {
+        "elapsed_s": 16.189162738999585,
+        "user_cpu_s": 0.04,
+        "system_cpu_s": 0.07,
+        "rss_bytes": 12189696,
+        "high_water_rss_bytes": 12189696,
+        "temperature_c": 62.809,
+        "system_load_1m": 0.4326171875
+      },
+      {
+        "elapsed_s": 17.201732063000236,
+        "user_cpu_s": 0.04,
+        "system_cpu_s": 0.07,
+        "rss_bytes": 12189696,
+        "high_water_rss_bytes": 12189696,
+        "temperature_c": 63.783,
+        "system_load_1m": 0.4326171875
+      },
+      {
+        "elapsed_s": 18.213014916000247,
+        "user_cpu_s": 0.04,
+        "system_cpu_s": 0.08,
+        "rss_bytes": 12189696,
+        "high_water_rss_bytes": 12189696,
+        "temperature_c": 63.783,
+        "system_load_1m": 0.4326171875
+      },
+      {
+        "elapsed_s": 19.225281113000165,
+        "user_cpu_s": 0.04,
+        "system_cpu_s": 0.08,
+        "rss_bytes": 12189696,
+        "high_water_rss_bytes": 12189696,
+        "temperature_c": 63.296,
+        "system_load_1m": 0.4326171875
+      },
+      {
+        "elapsed_s": 20.234419927999625,
+        "user_cpu_s": 0.04,
+        "system_cpu_s": 0.08,
+        "rss_bytes": 12189696,
+        "high_water_rss_bytes": 12189696,
+        "temperature_c": 63.296,
+        "system_load_1m": 0.4326171875
+      },
+      {
+        "elapsed_s": 21.243736223999804,
+        "user_cpu_s": 0.04,
+        "system_cpu_s": 0.09,
+        "rss_bytes": 12189696,
+        "high_water_rss_bytes": 12189696,
+        "temperature_c": 62.809,
+        "system_load_1m": 0.39794921875
+      },
+      {
+        "elapsed_s": 22.252996057000928,
+        "user_cpu_s": 0.04,
+        "system_cpu_s": 0.09,
+        "rss_bytes": 12189696,
+        "high_water_rss_bytes": 12189696,
+        "temperature_c": 62.809,
+        "system_load_1m": 0.39794921875
+      },
+      {
+        "elapsed_s": 23.262160557000243,
+        "user_cpu_s": 0.04,
+        "system_cpu_s": 0.09,
+        "rss_bytes": 12189696,
+        "high_water_rss_bytes": 12189696,
+        "temperature_c": 62.809,
+        "system_load_1m": 0.39794921875
+      },
+      {
+        "elapsed_s": 24.276519180000832,
+        "user_cpu_s": 0.04,
+        "system_cpu_s": 0.09,
+        "rss_bytes": 12189696,
+        "high_water_rss_bytes": 12189696,
+        "temperature_c": 62.809,
+        "system_load_1m": 0.39794921875
+      },
+      {
+        "elapsed_s": 25.294635735001066,
+        "user_cpu_s": 0.04,
+        "system_cpu_s": 0.1,
+        "rss_bytes": 12189696,
+        "high_water_rss_bytes": 12189696,
+        "temperature_c": 61.835,
+        "system_load_1m": 0.39794921875
+      },
+      {
+        "elapsed_s": 26.312659068000357,
+        "user_cpu_s": 0.04,
+        "system_cpu_s": 0.1,
+        "rss_bytes": 12189696,
+        "high_water_rss_bytes": 12189696,
+        "temperature_c": 62.322,
+        "system_load_1m": 0.36572265625
+      },
+      {
+        "elapsed_s": 27.331695523000235,
+        "user_cpu_s": 0.04,
+        "system_cpu_s": 0.1,
+        "rss_bytes": 12189696,
+        "high_water_rss_bytes": 12189696,
+        "temperature_c": 62.322,
+        "system_load_1m": 0.36572265625
+      },
+      {
+        "elapsed_s": 28.34991650200027,
+        "user_cpu_s": 0.05,
+        "system_cpu_s": 0.11,
+        "rss_bytes": 12189696,
+        "high_water_rss_bytes": 12189696,
+        "temperature_c": 62.322,
+        "system_load_1m": 0.36572265625
+      },
+      {
+        "elapsed_s": 29.367932168999687,
+        "user_cpu_s": 0.05,
+        "system_cpu_s": 0.11,
+        "rss_bytes": 12189696,
+        "high_water_rss_bytes": 12189696,
+        "temperature_c": 61.835,
+        "system_load_1m": 0.36572265625
+      },
+      {
+        "elapsed_s": 30.38654242300072,
+        "user_cpu_s": 0.05,
+        "system_cpu_s": 0.11,
+        "rss_bytes": 12189696,
+        "high_water_rss_bytes": 12189696,
+        "temperature_c": 61.348,
+        "system_load_1m": 0.36572265625
+      },
+      {
+        "elapsed_s": 31.40469792099975,
+        "user_cpu_s": 0.05,
+        "system_cpu_s": 0.13,
+        "rss_bytes": 18407424,
+        "high_water_rss_bytes": 18407424,
+        "temperature_c": 61.835,
+        "system_load_1m": 0.33642578125
+      },
+      {
+        "elapsed_s": 32.42317112099954,
+        "user_cpu_s": 0.06,
+        "system_cpu_s": 0.13,
+        "rss_bytes": 18407424,
+        "high_water_rss_bytes": 18407424,
+        "temperature_c": 60.861,
+        "system_load_1m": 0.33642578125
+      },
+      {
+        "elapsed_s": 33.4414448589996,
+        "user_cpu_s": 0.06,
+        "system_cpu_s": 0.14,
+        "rss_bytes": 18407424,
+        "high_water_rss_bytes": 18407424,
+        "temperature_c": 60.861,
+        "system_load_1m": 0.33642578125
+      },
+      {
+        "elapsed_s": 34.45978322600058,
+        "user_cpu_s": 0.06,
+        "system_cpu_s": 0.14,
+        "rss_bytes": 18407424,
+        "high_water_rss_bytes": 18407424,
+        "temperature_c": 61.348,
+        "system_load_1m": 0.33642578125
+      },
+      {
+        "elapsed_s": 35.47791941000105,
+        "user_cpu_s": 0.06,
+        "system_cpu_s": 0.15,
+        "rss_bytes": 18407424,
+        "high_water_rss_bytes": 18407424,
+        "temperature_c": 62.809,
+        "system_load_1m": 0.30908203125
+      },
+      {
+        "elapsed_s": 36.495937539000806,
+        "user_cpu_s": 0.06,
+        "system_cpu_s": 0.15,
+        "rss_bytes": 18407424,
+        "high_water_rss_bytes": 18407424,
+        "temperature_c": 62.322,
+        "system_load_1m": 0.30908203125
+      },
+      {
+        "elapsed_s": 37.51463479099948,
+        "user_cpu_s": 0.06,
+        "system_cpu_s": 0.15,
+        "rss_bytes": 18407424,
+        "high_water_rss_bytes": 18407424,
+        "temperature_c": 61.348,
+        "system_load_1m": 0.30908203125
+      },
+      {
+        "elapsed_s": 38.53296397300073,
+        "user_cpu_s": 0.06,
+        "system_cpu_s": 0.16,
+        "rss_bytes": 18407424,
+        "high_water_rss_bytes": 18407424,
+        "temperature_c": 61.348,
+        "system_load_1m": 0.30908203125
+      },
+      {
+        "elapsed_s": 39.55081502900066,
+        "user_cpu_s": 0.06,
+        "system_cpu_s": 0.16,
+        "rss_bytes": 18407424,
+        "high_water_rss_bytes": 18407424,
+        "temperature_c": 61.348,
+        "system_load_1m": 0.30908203125
+      },
+      {
+        "elapsed_s": 40.56967233599971,
+        "user_cpu_s": 0.06,
+        "system_cpu_s": 0.16,
+        "rss_bytes": 18407424,
+        "high_water_rss_bytes": 18407424,
+        "temperature_c": 62.322,
+        "system_load_1m": 0.36474609375
+      },
+      {
+        "elapsed_s": 41.585077857000215,
+        "user_cpu_s": 0.06,
+        "system_cpu_s": 0.17,
+        "rss_bytes": 18407424,
+        "high_water_rss_bytes": 18407424,
+        "temperature_c": 61.835,
+        "system_load_1m": 0.36474609375
+      },
+      {
+        "elapsed_s": 42.59486329500032,
+        "user_cpu_s": 0.06,
+        "system_cpu_s": 0.17,
+        "rss_bytes": 18407424,
+        "high_water_rss_bytes": 18407424,
+        "temperature_c": 63.296,
+        "system_load_1m": 0.36474609375
+      },
+      {
+        "elapsed_s": 43.6044625859995,
+        "user_cpu_s": 0.06,
+        "system_cpu_s": 0.17,
+        "rss_bytes": 18407424,
+        "high_water_rss_bytes": 18407424,
+        "temperature_c": 62.322,
+        "system_load_1m": 0.36474609375
+      },
+      {
+        "elapsed_s": 44.61396158199932,
+        "user_cpu_s": 0.06,
+        "system_cpu_s": 0.17,
+        "rss_bytes": 18407424,
+        "high_water_rss_bytes": 18407424,
+        "temperature_c": 63.296,
+        "system_load_1m": 0.36474609375
+      },
+      {
+        "elapsed_s": 45.62325935800072,
+        "user_cpu_s": 0.06,
+        "system_cpu_s": 0.18,
+        "rss_bytes": 18407424,
+        "high_water_rss_bytes": 18407424,
+        "temperature_c": 62.322,
+        "system_load_1m": 0.33544921875
+      },
+      {
+        "elapsed_s": 46.64254954900025,
+        "user_cpu_s": 0.06,
+        "system_cpu_s": 0.18,
+        "rss_bytes": 18407424,
+        "high_water_rss_bytes": 18407424,
+        "temperature_c": 63.296,
+        "system_load_1m": 0.33544921875
+      },
+      {
+        "elapsed_s": 47.65986451699973,
+        "user_cpu_s": 0.07,
+        "system_cpu_s": 0.18,
+        "rss_bytes": 18407424,
+        "high_water_rss_bytes": 18407424,
+        "temperature_c": 62.809,
+        "system_load_1m": 0.33544921875
+      },
+      {
+        "elapsed_s": 48.67796681099935,
+        "user_cpu_s": 0.07,
+        "system_cpu_s": 0.18,
+        "rss_bytes": 18407424,
+        "high_water_rss_bytes": 18407424,
+        "temperature_c": 60.861,
+        "system_load_1m": 0.33544921875
+      },
+      {
+        "elapsed_s": 49.696212048000234,
+        "user_cpu_s": 0.07,
+        "system_cpu_s": 0.19,
+        "rss_bytes": 18407424,
+        "high_water_rss_bytes": 18407424,
+        "temperature_c": 62.322,
+        "system_load_1m": 0.33544921875
+      },
+      {
+        "elapsed_s": 50.71443354400071,
+        "user_cpu_s": 0.07,
+        "system_cpu_s": 0.19,
+        "rss_bytes": 18407424,
+        "high_water_rss_bytes": 18407424,
+        "temperature_c": 61.348,
+        "system_load_1m": 0.30810546875
+      },
+      {
+        "elapsed_s": 51.73256839399983,
+        "user_cpu_s": 0.07,
+        "system_cpu_s": 0.19,
+        "rss_bytes": 18407424,
+        "high_water_rss_bytes": 18407424,
+        "temperature_c": 61.835,
+        "system_load_1m": 0.30810546875
+      },
+      {
+        "elapsed_s": 52.7507837789999,
+        "user_cpu_s": 0.07,
+        "system_cpu_s": 0.19,
+        "rss_bytes": 18407424,
+        "high_water_rss_bytes": 18407424,
+        "temperature_c": 61.835,
+        "system_load_1m": 0.30810546875
+      },
+      {
+        "elapsed_s": 53.768904758000645,
+        "user_cpu_s": 0.07,
+        "system_cpu_s": 0.2,
+        "rss_bytes": 18407424,
+        "high_water_rss_bytes": 18407424,
+        "temperature_c": 61.835,
+        "system_load_1m": 0.30810546875
+      },
+      {
+        "elapsed_s": 54.787144902000364,
+        "user_cpu_s": 0.08,
+        "system_cpu_s": 0.2,
+        "rss_bytes": 18407424,
+        "high_water_rss_bytes": 18407424,
+        "temperature_c": 61.348,
+        "system_load_1m": 0.30810546875
+      },
+      {
+        "elapsed_s": 55.805172251999466,
+        "user_cpu_s": 0.08,
+        "system_cpu_s": 0.2,
+        "rss_bytes": 18407424,
+        "high_water_rss_bytes": 18407424,
+        "temperature_c": 61.835,
+        "system_load_1m": 0.283203125
+      },
+      {
+        "elapsed_s": 56.82315645400013,
+        "user_cpu_s": 0.08,
+        "system_cpu_s": 0.21,
+        "rss_bytes": 18407424,
+        "high_water_rss_bytes": 18407424,
+        "temperature_c": 61.348,
+        "system_load_1m": 0.283203125
+      },
+      {
+        "elapsed_s": 57.839965388000564,
+        "user_cpu_s": 0.08,
+        "system_cpu_s": 0.21,
+        "rss_bytes": 18407424,
+        "high_water_rss_bytes": 18407424,
+        "temperature_c": 61.835,
+        "system_load_1m": 0.283203125
+      },
+      {
+        "elapsed_s": 58.849536808000266,
+        "user_cpu_s": 0.08,
+        "system_cpu_s": 0.21,
+        "rss_bytes": 18407424,
+        "high_water_rss_bytes": 18407424,
+        "temperature_c": 61.835,
+        "system_load_1m": 0.283203125
+      },
+      {
+        "elapsed_s": 59.858860878000996,
+        "user_cpu_s": 0.08,
+        "system_cpu_s": 0.21,
+        "rss_bytes": 18407424,
+        "high_water_rss_bytes": 18407424,
+        "temperature_c": 61.835,
+        "system_load_1m": 0.283203125
+      },
+      {
+        "elapsed_s": 60.86829509600102,
+        "user_cpu_s": 0.08,
+        "system_cpu_s": 0.22,
+        "rss_bytes": 20516864,
+        "high_water_rss_bytes": 20516864,
+        "temperature_c": 61.835,
+        "system_load_1m": 0.26025390625
+      },
+      {
+        "elapsed_s": 61.877482907999365,
+        "user_cpu_s": 0.08,
+        "system_cpu_s": 0.22,
+        "rss_bytes": 20516864,
+        "high_water_rss_bytes": 20516864,
+        "temperature_c": 62.809,
+        "system_load_1m": 0.26025390625
+      },
+      {
+        "elapsed_s": 62.88984252699993,
+        "user_cpu_s": 0.08,
+        "system_cpu_s": 0.22,
+        "rss_bytes": 20516864,
+        "high_water_rss_bytes": 20516864,
+        "temperature_c": 62.322,
+        "system_load_1m": 0.26025390625
+      },
+      {
+        "elapsed_s": 63.90808050399937,
+        "user_cpu_s": 0.09,
+        "system_cpu_s": 0.22,
+        "rss_bytes": 20516864,
+        "high_water_rss_bytes": 20516864,
+        "temperature_c": 61.348,
+        "system_load_1m": 0.26025390625
+      },
+      {
+        "elapsed_s": 64.92602646500018,
+        "user_cpu_s": 0.09,
+        "system_cpu_s": 0.23,
+        "rss_bytes": 20516864,
+        "high_water_rss_bytes": 20516864,
+        "temperature_c": 61.348,
+        "system_load_1m": 0.26025390625
+      },
+      {
+        "elapsed_s": 65.94415849799952,
+        "user_cpu_s": 0.09,
+        "system_cpu_s": 0.23,
+        "rss_bytes": 20516864,
+        "high_water_rss_bytes": 20516864,
+        "temperature_c": 62.809,
+        "system_load_1m": 0.31982421875
+      },
+      {
+        "elapsed_s": 66.96227797599931,
+        "user_cpu_s": 0.09,
+        "system_cpu_s": 0.24,
+        "rss_bytes": 20516864,
+        "high_water_rss_bytes": 20516864,
+        "temperature_c": 61.348,
+        "system_load_1m": 0.31982421875
+      },
+      {
+        "elapsed_s": 67.98099837500013,
+        "user_cpu_s": 0.09,
+        "system_cpu_s": 0.24,
+        "rss_bytes": 20516864,
+        "high_water_rss_bytes": 20516864,
+        "temperature_c": 61.348,
+        "system_load_1m": 0.31982421875
+      },
+      {
+        "elapsed_s": 68.99885352199999,
+        "user_cpu_s": 0.09,
+        "system_cpu_s": 0.25,
+        "rss_bytes": 20516864,
+        "high_water_rss_bytes": 20516864,
+        "temperature_c": 60.861,
+        "system_load_1m": 0.31982421875
+      },
+      {
+        "elapsed_s": 70.01698475800004,
+        "user_cpu_s": 0.09,
+        "system_cpu_s": 0.25,
+        "rss_bytes": 20516864,
+        "high_water_rss_bytes": 20516864,
+        "temperature_c": 61.835,
+        "system_load_1m": 0.31982421875
+      },
+      {
+        "elapsed_s": 71.03489529299986,
+        "user_cpu_s": 0.09,
+        "system_cpu_s": 0.26,
+        "rss_bytes": 20516864,
+        "high_water_rss_bytes": 20516864,
+        "temperature_c": 60.861,
+        "system_load_1m": 0.2939453125
+      },
+      {
+        "elapsed_s": 72.05370726500041,
+        "user_cpu_s": 0.09,
+        "system_cpu_s": 0.26,
+        "rss_bytes": 20516864,
+        "high_water_rss_bytes": 20516864,
+        "temperature_c": 61.835,
+        "system_load_1m": 0.2939453125
+      },
+      {
+        "elapsed_s": 73.07265453199943,
+        "user_cpu_s": 0.09,
+        "system_cpu_s": 0.27,
+        "rss_bytes": 20516864,
+        "high_water_rss_bytes": 20516864,
+        "temperature_c": 61.348,
+        "system_load_1m": 0.2939453125
+      },
+      {
+        "elapsed_s": 74.09027127300033,
+        "user_cpu_s": 0.09,
+        "system_cpu_s": 0.27,
+        "rss_bytes": 20516864,
+        "high_water_rss_bytes": 20516864,
+        "temperature_c": 60.861,
+        "system_load_1m": 0.2939453125
+      },
+      {
+        "elapsed_s": 75.10799014199984,
+        "user_cpu_s": 0.09,
+        "system_cpu_s": 0.27,
+        "rss_bytes": 20516864,
+        "high_water_rss_bytes": 20516864,
+        "temperature_c": 61.348,
+        "system_load_1m": 0.2939453125
+      },
+      {
+        "elapsed_s": 76.1257346780003,
+        "user_cpu_s": 0.09,
+        "system_cpu_s": 0.28,
+        "rss_bytes": 20516864,
+        "high_water_rss_bytes": 20516864,
+        "temperature_c": 61.835,
+        "system_load_1m": 0.3505859375
+      },
+      {
+        "elapsed_s": 77.14063062700006,
+        "user_cpu_s": 0.09,
+        "system_cpu_s": 0.28,
+        "rss_bytes": 20516864,
+        "high_water_rss_bytes": 20516864,
+        "temperature_c": 61.348,
+        "system_load_1m": 0.3505859375
+      },
+      {
+        "elapsed_s": 78.15113500100051,
+        "user_cpu_s": 0.09,
+        "system_cpu_s": 0.28,
+        "rss_bytes": 20516864,
+        "high_water_rss_bytes": 20516864,
+        "temperature_c": 60.861,
+        "system_load_1m": 0.3505859375
+      },
+      {
+        "elapsed_s": 79.16418563200023,
+        "user_cpu_s": 0.09,
+        "system_cpu_s": 0.28,
+        "rss_bytes": 20516864,
+        "high_water_rss_bytes": 20516864,
+        "temperature_c": 61.348,
+        "system_load_1m": 0.3505859375
+      },
+      {
+        "elapsed_s": 80.17700270900059,
+        "user_cpu_s": 0.09,
+        "system_cpu_s": 0.28,
+        "rss_bytes": 20516864,
+        "high_water_rss_bytes": 20516864,
+        "temperature_c": 62.322,
+        "system_load_1m": 0.3505859375
+      },
+      {
+        "elapsed_s": 81.18999935800093,
+        "user_cpu_s": 0.09,
+        "system_cpu_s": 0.29,
+        "rss_bytes": 20516864,
+        "high_water_rss_bytes": 20516864,
+        "temperature_c": 63.296,
+        "system_load_1m": 0.322265625
+      },
+      {
+        "elapsed_s": 82.20267569499993,
+        "user_cpu_s": 0.09,
+        "system_cpu_s": 0.29,
+        "rss_bytes": 20516864,
+        "high_water_rss_bytes": 20516864,
+        "temperature_c": 63.296,
+        "system_load_1m": 0.322265625
+      },
+      {
+        "elapsed_s": 83.21235737300049,
+        "user_cpu_s": 0.09,
+        "system_cpu_s": 0.29,
+        "rss_bytes": 20516864,
+        "high_water_rss_bytes": 20516864,
+        "temperature_c": 62.809,
+        "system_load_1m": 0.322265625
+      },
+      {
+        "elapsed_s": 84.22189942099976,
+        "user_cpu_s": 0.09,
+        "system_cpu_s": 0.29,
+        "rss_bytes": 20516864,
+        "high_water_rss_bytes": 20516864,
+        "temperature_c": 63.296,
+        "system_load_1m": 0.322265625
+      },
+      {
+        "elapsed_s": 85.23457390600015,
+        "user_cpu_s": 0.09,
+        "system_cpu_s": 0.3,
+        "rss_bytes": 20516864,
+        "high_water_rss_bytes": 20516864,
+        "temperature_c": 62.322,
+        "system_load_1m": 0.322265625
+      },
+      {
+        "elapsed_s": 86.24374482799976,
+        "user_cpu_s": 0.1,
+        "system_cpu_s": 0.3,
+        "rss_bytes": 20516864,
+        "high_water_rss_bytes": 20516864,
+        "temperature_c": 62.322,
+        "system_load_1m": 0.29638671875
+      },
+      {
+        "elapsed_s": 87.25551230199926,
+        "user_cpu_s": 0.1,
+        "system_cpu_s": 0.3,
+        "rss_bytes": 20516864,
+        "high_water_rss_bytes": 20516864,
+        "temperature_c": 62.322,
+        "system_load_1m": 0.29638671875
+      },
+      {
+        "elapsed_s": 88.26757657000053,
+        "user_cpu_s": 0.1,
+        "system_cpu_s": 0.3,
+        "rss_bytes": 20516864,
+        "high_water_rss_bytes": 20516864,
+        "temperature_c": 62.322,
+        "system_load_1m": 0.29638671875
+      },
+      {
+        "elapsed_s": 89.28083392100052,
+        "user_cpu_s": 0.1,
+        "system_cpu_s": 0.3,
+        "rss_bytes": 20516864,
+        "high_water_rss_bytes": 20516864,
+        "temperature_c": 61.835,
+        "system_load_1m": 0.29638671875
+      },
+      {
+        "elapsed_s": 90.29003076799927,
+        "user_cpu_s": 0.1,
+        "system_cpu_s": 0.3,
+        "rss_bytes": 20516864,
+        "high_water_rss_bytes": 20516864,
+        "temperature_c": 61.835,
+        "system_load_1m": 0.29638671875
+      },
+      {
+        "elapsed_s": 91.29925531899971,
+        "user_cpu_s": 0.11,
+        "system_cpu_s": 0.3,
+        "rss_bytes": 20516864,
+        "high_water_rss_bytes": 20516864,
+        "temperature_c": 61.835,
+        "system_load_1m": 0.35302734375
+      },
+      {
+        "elapsed_s": 92.31008152300092,
+        "user_cpu_s": 0.12,
+        "system_cpu_s": 0.3,
+        "rss_bytes": 20516864,
+        "high_water_rss_bytes": 20516864,
+        "temperature_c": 63.296,
+        "system_load_1m": 0.35302734375
+      },
+      {
+        "elapsed_s": 93.3217555350002,
+        "user_cpu_s": 0.12,
+        "system_cpu_s": 0.3,
+        "rss_bytes": 20516864,
+        "high_water_rss_bytes": 20516864,
+        "temperature_c": 63.783,
+        "system_load_1m": 0.35302734375
+      },
+      {
+        "elapsed_s": 94.33714316300029,
+        "user_cpu_s": 0.12,
+        "system_cpu_s": 0.31,
+        "rss_bytes": 20516864,
+        "high_water_rss_bytes": 20516864,
+        "temperature_c": 64.27,
+        "system_load_1m": 0.35302734375
+      },
+      {
+        "elapsed_s": 95.346240881001,
+        "user_cpu_s": 0.12,
+        "system_cpu_s": 0.31,
+        "rss_bytes": 20516864,
+        "high_water_rss_bytes": 20516864,
+        "temperature_c": 62.322,
+        "system_load_1m": 0.35302734375
+      },
+      {
+        "elapsed_s": 96.35522878600023,
+        "user_cpu_s": 0.12,
+        "system_cpu_s": 0.31,
+        "rss_bytes": 20516864,
+        "high_water_rss_bytes": 20516864,
+        "temperature_c": 62.322,
+        "system_load_1m": 0.32470703125
+      },
+      {
+        "elapsed_s": 97.36432713300019,
+        "user_cpu_s": 0.12,
+        "system_cpu_s": 0.31,
+        "rss_bytes": 20516864,
+        "high_water_rss_bytes": 20516864,
+        "temperature_c": 62.322,
+        "system_load_1m": 0.32470703125
+      },
+      {
+        "elapsed_s": 98.37884863900035,
+        "user_cpu_s": 0.13,
+        "system_cpu_s": 0.31,
+        "rss_bytes": 20516864,
+        "high_water_rss_bytes": 20516864,
+        "temperature_c": 63.296,
+        "system_load_1m": 0.32470703125
+      },
+      {
+        "elapsed_s": 99.39666311800102,
+        "user_cpu_s": 0.13,
+        "system_cpu_s": 0.32,
+        "rss_bytes": 20516864,
+        "high_water_rss_bytes": 20516864,
+        "temperature_c": 62.809,
+        "system_load_1m": 0.32470703125
+      },
+      {
+        "elapsed_s": 100.4145461700009,
+        "user_cpu_s": 0.13,
+        "system_cpu_s": 0.32,
+        "rss_bytes": 20516864,
+        "high_water_rss_bytes": 20516864,
+        "temperature_c": 61.348,
+        "system_load_1m": 0.32470703125
+      },
+      {
+        "elapsed_s": 101.43283290299951,
+        "user_cpu_s": 0.13,
+        "system_cpu_s": 0.32,
+        "rss_bytes": 20516864,
+        "high_water_rss_bytes": 20516864,
+        "temperature_c": 62.809,
+        "system_load_1m": 0.29833984375
+      },
+      {
+        "elapsed_s": 102.44714370700058,
+        "user_cpu_s": 0.13,
+        "system_cpu_s": 0.32,
+        "rss_bytes": 20516864,
+        "high_water_rss_bytes": 20516864,
+        "temperature_c": 63.296,
+        "system_load_1m": 0.29833984375
+      },
+      {
+        "elapsed_s": 103.45605266699931,
+        "user_cpu_s": 0.13,
+        "system_cpu_s": 0.32,
+        "rss_bytes": 20516864,
+        "high_water_rss_bytes": 20516864,
+        "temperature_c": 62.809,
+        "system_load_1m": 0.29833984375
+      },
+      {
+        "elapsed_s": 104.46505829300077,
+        "user_cpu_s": 0.13,
+        "system_cpu_s": 0.32,
+        "rss_bytes": 20516864,
+        "high_water_rss_bytes": 20516864,
+        "temperature_c": 63.296,
+        "system_load_1m": 0.29833984375
+      },
+      {
+        "elapsed_s": 105.4737560880003,
+        "user_cpu_s": 0.13,
+        "system_cpu_s": 0.33,
+        "rss_bytes": 20516864,
+        "high_water_rss_bytes": 20516864,
+        "temperature_c": 62.322,
+        "system_load_1m": 0.29833984375
+      },
+      {
+        "elapsed_s": 106.48260364099951,
+        "user_cpu_s": 0.13,
+        "system_cpu_s": 0.33,
+        "rss_bytes": 20516864,
+        "high_water_rss_bytes": 20516864,
+        "temperature_c": 62.809,
+        "system_load_1m": 0.2744140625
+      },
+      {
+        "elapsed_s": 107.5001073809999,
+        "user_cpu_s": 0.14,
+        "system_cpu_s": 0.33,
+        "rss_bytes": 20516864,
+        "high_water_rss_bytes": 20516864,
+        "temperature_c": 62.809,
+        "system_load_1m": 0.2744140625
+      },
+      {
+        "elapsed_s": 108.51780780400077,
+        "user_cpu_s": 0.14,
+        "system_cpu_s": 0.33,
+        "rss_bytes": 20516864,
+        "high_water_rss_bytes": 20516864,
+        "temperature_c": 62.322,
+        "system_load_1m": 0.2744140625
+      },
+      {
+        "elapsed_s": 109.53552739299994,
+        "user_cpu_s": 0.14,
+        "system_cpu_s": 0.33,
+        "rss_bytes": 20516864,
+        "high_water_rss_bytes": 20516864,
+        "temperature_c": 61.348,
+        "system_load_1m": 0.2744140625
+      },
+      {
+        "elapsed_s": 110.55363610899985,
+        "user_cpu_s": 0.14,
+        "system_cpu_s": 0.34,
+        "rss_bytes": 20516864,
+        "high_water_rss_bytes": 20516864,
+        "temperature_c": 61.835,
+        "system_load_1m": 0.251953125
+      },
+      {
+        "elapsed_s": 111.57134930999928,
+        "user_cpu_s": 0.14,
+        "system_cpu_s": 0.34,
+        "rss_bytes": 20516864,
+        "high_water_rss_bytes": 20516864,
+        "temperature_c": 62.322,
+        "system_load_1m": 0.251953125
+      },
+      {
+        "elapsed_s": 112.58724528499988,
+        "user_cpu_s": 0.14,
+        "system_cpu_s": 0.34,
+        "rss_bytes": 20516864,
+        "high_water_rss_bytes": 20516864,
+        "temperature_c": 61.835,
+        "system_load_1m": 0.251953125
+      },
+      {
+        "elapsed_s": 113.59664255499956,
+        "user_cpu_s": 0.14,
+        "system_cpu_s": 0.34,
+        "rss_bytes": 20516864,
+        "high_water_rss_bytes": 20516864,
+        "temperature_c": 61.348,
+        "system_load_1m": 0.251953125
+      },
+      {
+        "elapsed_s": 114.605887179001,
+        "user_cpu_s": 0.14,
+        "system_cpu_s": 0.35,
+        "rss_bytes": 20516864,
+        "high_water_rss_bytes": 20516864,
+        "temperature_c": 62.322,
+        "system_load_1m": 0.251953125
+      },
+      {
+        "elapsed_s": 115.61518396800057,
+        "user_cpu_s": 0.14,
+        "system_cpu_s": 0.35,
+        "rss_bytes": 20516864,
+        "high_water_rss_bytes": 20516864,
+        "temperature_c": 63.296,
+        "system_load_1m": 0.2314453125
+      },
+      {
+        "elapsed_s": 116.62450355300098,
+        "user_cpu_s": 0.14,
+        "system_cpu_s": 0.35,
+        "rss_bytes": 20516864,
+        "high_water_rss_bytes": 20516864,
+        "temperature_c": 62.809,
+        "system_load_1m": 0.2314453125
+      },
+      {
+        "elapsed_s": 117.63772758800042,
+        "user_cpu_s": 0.14,
+        "system_cpu_s": 0.35,
+        "rss_bytes": 20516864,
+        "high_water_rss_bytes": 20516864,
+        "temperature_c": 62.322,
+        "system_load_1m": 0.2314453125
+      },
+      {
+        "elapsed_s": 118.65585006199944,
+        "user_cpu_s": 0.14,
+        "system_cpu_s": 0.36,
+        "rss_bytes": 20516864,
+        "high_water_rss_bytes": 20516864,
+        "temperature_c": 62.322,
+        "system_load_1m": 0.2314453125
+      },
+      {
+        "elapsed_s": 119.67395985199983,
+        "user_cpu_s": 0.14,
+        "system_cpu_s": 0.36,
+        "rss_bytes": 20516864,
+        "high_water_rss_bytes": 20516864,
+        "temperature_c": 60.861,
+        "system_load_1m": 0.2314453125
+      },
+      {
+        "elapsed_s": 120.69222521399934,
+        "user_cpu_s": 0.14,
+        "system_cpu_s": 0.37,
+        "rss_bytes": 20516864,
+        "high_water_rss_bytes": 20516864,
+        "temperature_c": 60.861,
+        "system_load_1m": 0.212890625
+      },
+      {
+        "elapsed_s": 121.71051603900014,
+        "user_cpu_s": 0.15,
+        "system_cpu_s": 0.37,
+        "rss_bytes": 20516864,
+        "high_water_rss_bytes": 20516864,
+        "temperature_c": 61.348,
+        "system_load_1m": 0.212890625
+      },
+      {
+        "elapsed_s": 122.72876801200073,
+        "user_cpu_s": 0.15,
+        "system_cpu_s": 0.38,
+        "rss_bytes": 20516864,
+        "high_water_rss_bytes": 20516864,
+        "temperature_c": 61.348,
+        "system_load_1m": 0.212890625
+      },
+      {
+        "elapsed_s": 123.74687420900045,
+        "user_cpu_s": 0.15,
+        "system_cpu_s": 0.38,
+        "rss_bytes": 20516864,
+        "high_water_rss_bytes": 20516864,
+        "temperature_c": 62.322,
+        "system_load_1m": 0.212890625
+      },
+      {
+        "elapsed_s": 124.76515431100052,
+        "user_cpu_s": 0.15,
+        "system_cpu_s": 0.39,
+        "rss_bytes": 20516864,
+        "high_water_rss_bytes": 20516864,
+        "temperature_c": 61.835,
+        "system_load_1m": 0.212890625
+      },
+      {
+        "elapsed_s": 125.78360219000024,
+        "user_cpu_s": 0.16,
+        "system_cpu_s": 0.39,
+        "rss_bytes": 20516864,
+        "high_water_rss_bytes": 20516864,
+        "temperature_c": 60.861,
+        "system_load_1m": 0.19580078125
+      },
+      {
+        "elapsed_s": 126.80229697399955,
+        "user_cpu_s": 0.16,
+        "system_cpu_s": 0.39,
+        "rss_bytes": 20516864,
+        "high_water_rss_bytes": 20516864,
+        "temperature_c": 61.835,
+        "system_load_1m": 0.19580078125
+      },
+      {
+        "elapsed_s": 127.8127807159999,
+        "user_cpu_s": 0.16,
+        "system_cpu_s": 0.4,
+        "rss_bytes": 20516864,
+        "high_water_rss_bytes": 20516864,
+        "temperature_c": 62.322,
+        "system_load_1m": 0.19580078125
+      },
+      {
+        "elapsed_s": 128.82209202299964,
+        "user_cpu_s": 0.16,
+        "system_cpu_s": 0.4,
+        "rss_bytes": 20516864,
+        "high_water_rss_bytes": 20516864,
+        "temperature_c": 62.809,
+        "system_load_1m": 0.19580078125
+      },
+      {
+        "elapsed_s": 129.83153560699975,
+        "user_cpu_s": 0.16,
+        "system_cpu_s": 0.4,
+        "rss_bytes": 20516864,
+        "high_water_rss_bytes": 20516864,
+        "temperature_c": 62.322,
+        "system_load_1m": 0.19580078125
+      },
+      {
+        "elapsed_s": 130.84070554500067,
+        "user_cpu_s": 0.16,
+        "system_cpu_s": 0.4,
+        "rss_bytes": 20516864,
+        "high_water_rss_bytes": 20516864,
+        "temperature_c": 63.783,
+        "system_load_1m": 0.1796875
+      },
+      {
+        "elapsed_s": 131.8498065750009,
+        "user_cpu_s": 0.16,
+        "system_cpu_s": 0.4,
+        "rss_bytes": 20516864,
+        "high_water_rss_bytes": 20516864,
+        "temperature_c": 62.322,
+        "system_load_1m": 0.1796875
+      },
+      {
+        "elapsed_s": 132.86806465900008,
+        "user_cpu_s": 0.16,
+        "system_cpu_s": 0.4,
+        "rss_bytes": 20516864,
+        "high_water_rss_bytes": 20516864,
+        "temperature_c": 62.322,
+        "system_load_1m": 0.1796875
+      },
+      {
+        "elapsed_s": 133.8862282810005,
+        "user_cpu_s": 0.16,
+        "system_cpu_s": 0.41,
+        "rss_bytes": 20516864,
+        "high_water_rss_bytes": 20516864,
+        "temperature_c": 62.322,
+        "system_load_1m": 0.1796875
+      },
+      {
+        "elapsed_s": 134.90526474699982,
+        "user_cpu_s": 0.16,
+        "system_cpu_s": 0.41,
+        "rss_bytes": 20516864,
+        "high_water_rss_bytes": 20516864,
+        "temperature_c": 61.348,
+        "system_load_1m": 0.1796875
+      },
+      {
+        "elapsed_s": 135.9234147570005,
+        "user_cpu_s": 0.16,
+        "system_cpu_s": 0.42,
+        "rss_bytes": 20516864,
+        "high_water_rss_bytes": 20516864,
+        "temperature_c": 61.835,
+        "system_load_1m": 0.1650390625
+      },
+      {
+        "elapsed_s": 136.94153836000078,
+        "user_cpu_s": 0.16,
+        "system_cpu_s": 0.42,
+        "rss_bytes": 20516864,
+        "high_water_rss_bytes": 20516864,
+        "temperature_c": 61.348,
+        "system_load_1m": 0.1650390625
+      },
+      {
+        "elapsed_s": 137.95993438699952,
+        "user_cpu_s": 0.16,
+        "system_cpu_s": 0.42,
+        "rss_bytes": 20516864,
+        "high_water_rss_bytes": 20516864,
+        "temperature_c": 61.835,
+        "system_load_1m": 0.1650390625
+      },
+      {
+        "elapsed_s": 138.97846517200014,
+        "user_cpu_s": 0.16,
+        "system_cpu_s": 0.43,
+        "rss_bytes": 20516864,
+        "high_water_rss_bytes": 20516864,
+        "temperature_c": 61.835,
+        "system_load_1m": 0.1650390625
+      },
+      {
+        "elapsed_s": 139.9965735349997,
+        "user_cpu_s": 0.16,
+        "system_cpu_s": 0.43,
+        "rss_bytes": 20516864,
+        "high_water_rss_bytes": 20516864,
+        "temperature_c": 61.348,
+        "system_load_1m": 0.1650390625
+      },
+      {
+        "elapsed_s": 141.01428440000018,
+        "user_cpu_s": 0.16,
+        "system_cpu_s": 0.44,
+        "rss_bytes": 20516864,
+        "high_water_rss_bytes": 20516864,
+        "temperature_c": 60.861,
+        "system_load_1m": 0.1513671875
+      },
+      {
+        "elapsed_s": 142.03203572799976,
+        "user_cpu_s": 0.17,
+        "system_cpu_s": 0.44,
+        "rss_bytes": 20516864,
+        "high_water_rss_bytes": 20516864,
+        "temperature_c": 61.348,
+        "system_load_1m": 0.1513671875
+      },
+      {
+        "elapsed_s": 143.05023275699932,
+        "user_cpu_s": 0.17,
+        "system_cpu_s": 0.44,
+        "rss_bytes": 20516864,
+        "high_water_rss_bytes": 20516864,
+        "temperature_c": 61.835,
+        "system_load_1m": 0.1513671875
+      },
+      {
+        "elapsed_s": 144.0685300059995,
+        "user_cpu_s": 0.17,
+        "system_cpu_s": 0.44,
+        "rss_bytes": 20516864,
+        "high_water_rss_bytes": 20516864,
+        "temperature_c": 61.348,
+        "system_load_1m": 0.1513671875
+      },
+      {
+        "elapsed_s": 145.08639298100024,
+        "user_cpu_s": 0.17,
+        "system_cpu_s": 0.45,
+        "rss_bytes": 20516864,
+        "high_water_rss_bytes": 20516864,
+        "temperature_c": 61.835,
+        "system_load_1m": 0.1513671875
+      },
+      {
+        "elapsed_s": 146.10264276599992,
+        "user_cpu_s": 0.17,
+        "system_cpu_s": 0.45,
+        "rss_bytes": 20516864,
+        "high_water_rss_bytes": 20516864,
+        "temperature_c": 61.835,
+        "system_load_1m": 0.13916015625
+      },
+      {
+        "elapsed_s": 147.11187677700036,
+        "user_cpu_s": 0.17,
+        "system_cpu_s": 0.45,
+        "rss_bytes": 20516864,
+        "high_water_rss_bytes": 20516864,
+        "temperature_c": 63.296,
+        "system_load_1m": 0.13916015625
+      },
+      {
+        "elapsed_s": 148.12112212000102,
+        "user_cpu_s": 0.17,
+        "system_cpu_s": 0.46,
+        "rss_bytes": 20516864,
+        "high_water_rss_bytes": 20516864,
+        "temperature_c": 61.835,
+        "system_load_1m": 0.13916015625
+      },
+      {
+        "elapsed_s": 149.13023248299942,
+        "user_cpu_s": 0.17,
+        "system_cpu_s": 0.46,
+        "rss_bytes": 20516864,
+        "high_water_rss_bytes": 20516864,
+        "temperature_c": 62.322,
+        "system_load_1m": 0.13916015625
+      },
+      {
+        "elapsed_s": 150.1395312149998,
+        "user_cpu_s": 0.17,
+        "system_cpu_s": 0.46,
+        "rss_bytes": 20516864,
+        "high_water_rss_bytes": 20516864,
+        "temperature_c": 62.809,
+        "system_load_1m": 0.13916015625
+      }
+    ],
+    "peak_rss_bytes": 20516864,
+    "peak_high_water_rss_bytes": 20516864,
+    "peak_temperature_c": 64.27,
+    "observed_cpu_s": 0.63
+  },
+  "host_before": {
+    "captured_at": "2026-07-24T13:41:12.312435Z",
+    "machine": "aarch64",
+    "kernel": "6.12.93+rpt-rpi-v8",
+    "load_average": [
+      0.5185546875,
+      0.4716796875,
+      0.455078125
+    ],
+    "memory_available_bytes": 3521323008,
+    "temperature_c": 61.835,
+    "throttled": "throttled=0x0",
+    "cpu_frequency_khz": {
+      "cpu0": 1800000,
+      "cpu1": 1800000,
+      "cpu2": 1800000,
+      "cpu3": 1800000
+    },
+    "usb_devices": "Bus 002 Device 004: ID 03c3:662b ZWO ASI662MC\nBus 002 Device 003: ID 174c:3074 ASMedia Technology Inc. ASM1074 SuperSpeed hub\nBus 002 Device 002: ID 174c:3074 ASMedia Technology Inc. ASM1074 SuperSpeed hub\nBus 002 Device 001: ID 1d6b:0003 Linux Foundation 3.0 root hub\nBus 001 Device 006: ID 03c3:178a ZWO ASI178MC\nBus 001 Device 004: ID 174c:2074 ASMedia Technology Inc. ASM1074 High-Speed hub\nBus 001 Device 003: ID 174c:2074 ASMedia Technology Inc. ASM1074 High-Speed hub\nBus 001 Device 002: ID 2109:3431 VIA Labs, Inc. Hub\nBus 001 Device 001: ID 1d6b:0002 Linux Foundation 2.0 root hub",
+    "usb_tree": "/:  Bus 02.Port 1: Dev 1, Class=root_hub, Driver=xhci_hcd/4p, 5000M\n    |__ Port 1: Dev 2, If 0, Class=Hub, Driver=hub/4p, 5000M\n        |__ Port 2: Dev 3, If 0, Class=Hub, Driver=hub/4p, 5000M\n    |__ Port 2: Dev 4, If 0, Class=Vendor Specific Class, Driver=, 5000M\n/:  Bus 01.Port 1: Dev 1, Class=root_hub, Driver=xhci_hcd/1p, 480M\n    |__ Port 1: Dev 2, If 0, Class=Hub, Driver=hub/4p, 480M\n        |__ Port 1: Dev 3, If 0, Class=Hub, Driver=hub/4p, 480M\n            |__ Port 2: Dev 4, If 0, Class=Hub, Driver=hub/4p, 480M\n            |__ Port 4: Dev 6, If 0, Class=Vendor Specific Class, Driver=usbfs, 480M",
+    "kernel_usb_log": "Jul 24 14:25:00 allsky kernel: usb 2-2: reset SuperSpeed USB device number 4 using xhci_hcd\nJul 24 14:25:00 allsky kernel: usb 2-2: reset SuperSpeed USB device number 4 using xhci_hcd\nJul 24 14:25:00 allsky kernel: usb 2-2: reset SuperSpeed USB device number 4 using xhci_hcd\nJul 24 14:25:01 allsky kernel: usb 2-2: reset SuperSpeed USB device number 4 using xhci_hcd\nJul 24 14:25:03 allsky kernel: usb 2-2: reset SuperSpeed USB device number 4 using xhci_hcd\nJul 24 14:25:09 allsky kernel: usb 2-2: reset SuperSpeed USB device number 4 using xhci_hcd\nJul 24 14:25:09 allsky kernel: usb 2-2: reset SuperSpeed USB device number 4 using xhci_hcd\nJul 24 14:25:10 allsky kernel: usb 2-2: reset SuperSpeed USB device number 4 using xhci_hcd\nJul 24 14:25:10 allsky kernel: usb 2-2: reset SuperSpeed USB device number 4 using xhci_hcd\nJul 24 14:25:10 allsky kernel: usb 2-2: reset SuperSpeed USB device number 4 using xhci_hcd\nJul 24 14:25:10 allsky kernel: usb 2-2: reset SuperSpeed USB device number 4 using xhci_hcd\nJul 24 14:25:11 allsky kernel: usb 2-2: reset SuperSpeed USB device number 4 using xhci_hcd\nJul 24 14:25:11 allsky kernel: usb 2-2: reset SuperSpeed USB device number 4 using xhci_hcd\nJul 24 14:25:11 allsky kernel: usb 2-2: reset SuperSpeed USB device number 4 using xhci_hcd\nJul 24 14:25:12 allsky kernel: usb 2-2: reset SuperSpeed USB device number 4 using xhci_hcd\nJul 24 14:25:12 allsky kernel: usb 2-2: reset SuperSpeed USB device number 4 using xhci_hcd\nJul 24 14:25:12 allsky kernel: usb 2-2: reset SuperSpeed USB device number 4 using xhci_hcd\nJul 24 14:25:13 allsky kernel: usb 2-2: reset SuperSpeed USB device number 4 using xhci_hcd\nJul 24 14:25:13 allsky kernel: usb 2-2: reset SuperSpeed USB device number 4 using xhci_hcd\nJul 24 14:25:13 allsky kernel: usb 2-2: reset SuperSpeed USB device number 4 using xhci_hcd\nJul 24 14:25:13 allsky kernel: usb 2-2: reset SuperSpeed USB device number 4 using xhci_hcd\nJul 24 14:25:14 allsky kernel: usb 2-2: reset SuperSpeed USB device number 4 using xhci_hcd\nJul 24 14:25:14 allsky kernel: usb 2-2: reset SuperSpeed USB device number 4 using xhci_hcd\nJul 24 14:25:15 allsky kernel: usb 2-2: reset SuperSpeed USB device number 4 using xhci_hcd\nJul 24 14:25:21 allsky kernel: usb 2-2: reset SuperSpeed USB device number 4 using xhci_hcd\nJul 24 14:25:22 allsky kernel: usb 2-2: reset SuperSpeed USB device number 4 using xhci_hcd\nJul 24 14:25:22 allsky kernel: usb 2-2: reset SuperSpeed USB device number 4 using xhci_hcd\nJul 24 14:25:22 allsky kernel: usb 2-2: reset SuperSpeed USB device number 4 using xhci_hcd\nJul 24 14:25:23 allsky kernel: usb 2-2: reset SuperSpeed USB device number 4 using xhci_hcd\nJul 24 14:25:23 allsky kernel: usb 2-2: reset SuperSpeed USB device number 4 using xhci_hcd\nJul 24 14:25:23 allsky kernel: usb 2-2: reset SuperSpeed USB device number 4 using xhci_hcd\nJul 24 14:25:24 allsky kernel: usb 2-2: reset SuperSpeed USB device number 4 using xhci_hcd\nJul 24 14:25:24 allsky kernel: usb 2-2: reset SuperSpeed USB device number 4 using xhci_hcd\nJul 24 14:25:25 allsky kernel: usb 2-2: reset SuperSpeed USB device number 4 using xhci_hcd\nJul 24 14:25:25 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:25:25 allsky kernel: usb 2-2: reset SuperSpeed USB device number 4 using xhci_hcd\nJul 24 14:25:25 allsky kernel: usb 2-2: reset SuperSpeed USB device number 4 using xhci_hcd\nJul 24 14:25:26 allsky kernel: usb 2-2: reset SuperSpeed USB device number 4 using xhci_hcd\nJul 24 14:25:26 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:25:26 allsky kernel: usb 2-2: reset SuperSpeed USB device number 4 using xhci_hcd\nJul 24 14:25:26 allsky kernel: usb 2-2: reset SuperSpeed USB device number 4 using xhci_hcd\nJul 24 14:25:27 allsky kernel: usb 2-2: reset SuperSpeed USB device number 4 using xhci_hcd\nJul 24 14:25:27 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:25:28 allsky kernel: usb 2-2: reset SuperSpeed USB device number 4 using xhci_hcd\nJul 24 14:25:28 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:25:29 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:25:30 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:25:30 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:25:34 allsky kernel: usb 2-2: reset SuperSpeed USB device number 4 using xhci_hcd\nJul 24 14:25:34 allsky kernel: usb 2-2: reset SuperSpeed USB device number 4 using xhci_hcd\nJul 24 14:25:35 allsky kernel: usb 2-2: reset SuperSpeed USB device number 4 using xhci_hcd\nJul 24 14:25:35 allsky kernel: usb 2-2: reset SuperSpeed USB device number 4 using xhci_hcd\nJul 24 14:25:36 allsky kernel: usb 2-2: reset SuperSpeed USB device number 4 using xhci_hcd\nJul 24 14:25:36 allsky kernel: usb 2-2: reset SuperSpeed USB device number 4 using xhci_hcd\nJul 24 14:25:36 allsky kernel: usb 2-2: reset SuperSpeed USB device number 4 using xhci_hcd\nJul 24 14:25:37 allsky kernel: usb 2-2: reset SuperSpeed USB device number 4 using xhci_hcd\nJul 24 14:25:37 allsky kernel: usb 2-2: reset SuperSpeed USB device number 4 using xhci_hcd\nJul 24 14:25:38 allsky kernel: usb 2-2: reset SuperSpeed USB device number 4 using xhci_hcd\nJul 24 14:25:38 allsky kernel: usb 2-2: reset SuperSpeed USB device number 4 using xhci_hcd\nJul 24 14:25:39 allsky kernel: usb 2-2: reset SuperSpeed USB device number 4 using xhci_hcd\nJul 24 14:25:39 allsky kernel: usb 2-2: reset SuperSpeed USB device number 4 using xhci_hcd\nJul 24 14:25:40 allsky kernel: usb 2-2: reset SuperSpeed USB device number 4 using xhci_hcd\nJul 24 14:25:48 allsky kernel: usb 2-2: reset SuperSpeed USB device number 4 using xhci_hcd\nJul 24 14:25:48 allsky kernel: usb 2-2: reset SuperSpeed USB device number 4 using xhci_hcd\nJul 24 14:25:49 allsky kernel: usb 2-2: reset SuperSpeed USB device number 4 using xhci_hcd\nJul 24 14:25:50 allsky kernel: usb 2-2: reset SuperSpeed USB device number 4 using xhci_hcd\nJul 24 14:25:51 allsky kernel: usb 2-2: reset SuperSpeed USB device number 4 using xhci_hcd\nJul 24 14:25:51 allsky kernel: usb 2-2: reset SuperSpeed USB device number 4 using xhci_hcd\nJul 24 14:25:52 allsky kernel: usb 2-2: reset SuperSpeed USB device number 4 using xhci_hcd\nJul 24 14:25:53 allsky kernel: usb 2-2: reset SuperSpeed USB device number 4 using xhci_hcd\nJul 24 14:25:54 allsky kernel: usb 2-2: reset SuperSpeed USB device number 4 using xhci_hcd\nJul 24 14:26:02 allsky kernel: usb 2-2: reset SuperSpeed USB device number 4 using xhci_hcd\nJul 24 14:26:04 allsky kernel: usb 2-2: reset SuperSpeed USB device number 4 using xhci_hcd\nJul 24 14:26:05 allsky kernel: usb 2-2: reset SuperSpeed USB device number 4 using xhci_hcd\nJul 24 14:26:06 allsky kernel: usb 2-2: reset SuperSpeed USB device number 4 using xhci_hcd\nJul 24 14:26:07 allsky kernel: usb 2-2: reset SuperSpeed USB device number 4 using xhci_hcd\nJul 24 14:26:10 allsky kernel: usb 2-2: reset SuperSpeed USB device number 4 using xhci_hcd\nJul 24 14:26:21 allsky kernel: usb 2-2: reset SuperSpeed USB device number 4 using xhci_hcd\nJul 24 14:26:23 allsky kernel: usb 2-2: reset SuperSpeed USB device number 4 using xhci_hcd\nJul 24 14:26:25 allsky kernel: usb 2-2: reset SuperSpeed USB device number 4 using xhci_hcd\nJul 24 14:26:28 allsky kernel: usb 2-2: reset SuperSpeed USB device number 4 using xhci_hcd\nJul 24 14:26:30 allsky kernel: usb 2-2: reset SuperSpeed USB device number 4 using xhci_hcd\nJul 24 14:26:31 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:26:32 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:26:33 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:26:34 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:26:35 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:26:36 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:26:37 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:26:38 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:26:39 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:26:40 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:26:41 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:26:42 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:26:43 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:26:43 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:26:44 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:26:45 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:26:57 allsky kernel: usb 2-2: reset SuperSpeed USB device number 4 using xhci_hcd\nJul 24 14:27:02 allsky kernel: usb 2-2: reset SuperSpeed USB device number 4 using xhci_hcd\nJul 24 14:27:07 allsky kernel: usb 2-2: reset SuperSpeed USB device number 4 using xhci_hcd\nJul 24 14:27:12 allsky kernel: usb 2-2: reset SuperSpeed USB device number 4 using xhci_hcd\nJul 24 14:27:18 allsky kernel: usb 2-2: reset SuperSpeed USB device number 4 using xhci_hcd\nJul 24 14:27:24 allsky kernel: usb 2-2: reset SuperSpeed USB device number 4 using xhci_hcd\nJul 24 14:27:46 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:27:47 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:27:48 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:27:49 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:27:50 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:27:51 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:27:52 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:27:53 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:27:54 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:27:55 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:27:56 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:27:57 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:27:57 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:27:58 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:27:59 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:28:00 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:28:15 allsky kernel: usb 2-2: reset SuperSpeed USB device number 4 using xhci_hcd\nJul 24 14:28:25 allsky kernel: usb 2-2: reset SuperSpeed USB device number 4 using xhci_hcd\nJul 24 14:28:35 allsky kernel: usb 2-2: reset SuperSpeed USB device number 4 using xhci_hcd\nJul 24 14:28:46 allsky kernel: usb 2-2: reset SuperSpeed USB device number 4 using xhci_hcd\nJul 24 14:28:56 allsky kernel: usb 2-2: reset SuperSpeed USB device number 4 using xhci_hcd\nJul 24 14:29:01 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:29:02 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:29:03 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:29:04 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:29:05 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:29:06 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:29:07 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:29:07 allsky kernel: usb 2-2: reset SuperSpeed USB device number 4 using xhci_hcd\nJul 24 14:29:08 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:29:09 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:29:10 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:29:11 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:29:11 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:29:12 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:29:13 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:29:14 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:29:15 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:30:16 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:30:17 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:30:18 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:30:19 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:30:20 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:30:21 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:30:22 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:30:23 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:30:24 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:30:24 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:30:25 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:30:26 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:30:27 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:30:28 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:30:29 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:30:30 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:31:31 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:31:32 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:31:33 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:31:34 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:31:35 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:31:36 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:31:37 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:31:38 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:31:38 allsky kernel: usb 2-2: reset SuperSpeed USB device number 4 using xhci_hcd\nJul 24 14:31:39 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:31:39 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:31:40 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:31:41 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:31:42 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:31:43 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:31:44 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:31:45 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:32:09 allsky kernel: usb 2-2: reset SuperSpeed USB device number 4 using xhci_hcd\nJul 24 14:32:39 allsky kernel: usb 2-2: reset SuperSpeed USB device number 4 using xhci_hcd\nJul 24 14:32:46 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:32:47 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:32:48 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:32:49 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:32:50 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:32:51 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:32:52 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:32:52 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:32:53 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:32:54 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:32:55 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:32:56 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:32:57 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:32:58 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:32:59 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:33:00 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:33:09 allsky kernel: usb 2-2: reset SuperSpeed USB device number 4 using xhci_hcd\nJul 24 14:33:39 allsky kernel: usb 2-2: reset SuperSpeed USB device number 4 using xhci_hcd\nJul 24 14:34:01 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:34:02 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:34:03 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:34:04 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:34:05 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:34:05 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:34:06 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:34:07 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:34:08 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:34:09 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:34:10 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:34:11 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:34:12 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:34:13 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:34:14 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:34:15 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:35:15 allsky kernel: usb 1-1.1.4: usbfs: interface 0 claimed by usbfs while 'python3' sets config #1\nJul 24 14:35:16 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:35:17 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:35:17 allsky kernel: usb 2-2: reset SuperSpeed USB device number 4 using xhci_hcd\nJul 24 14:35:18 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:35:19 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:35:19 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:35:20 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:35:21 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:35:22 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:35:23 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:35:24 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:35:25 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:35:26 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:35:27 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:35:28 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:35:29 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:35:30 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:36:31 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:36:32 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:36:33 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:36:34 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:36:34 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:36:35 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:36:36 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:36:37 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:36:38 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:36:39 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:36:40 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:36:41 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:36:42 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:36:43 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:36:44 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:36:45 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:37:03 allsky kernel: usb 1-1.1.4: usbfs: interface 0 claimed by usbfs while 'python3' sets config #1\nJul 24 14:37:05 allsky kernel: usb 2-2: reset SuperSpeed USB device number 4 using xhci_hcd\nJul 24 14:37:06 allsky kernel: usb 2-2: reset SuperSpeed USB device number 4 using xhci_hcd\nJul 24 14:37:06 allsky kernel: usb 2-2: reset SuperSpeed USB device number 4 using xhci_hcd\nJul 24 14:37:06 allsky kernel: usb 2-2: reset SuperSpeed USB device number 4 using xhci_hcd\nJul 24 14:37:07 allsky kernel: usb 2-2: reset SuperSpeed USB device number 4 using xhci_hcd\nJul 24 14:37:07 allsky kernel: usb 2-2: reset SuperSpeed USB device number 4 using xhci_hcd\nJul 24 14:37:07 allsky kernel: usb 2-2: reset SuperSpeed USB device number 4 using xhci_hcd\nJul 24 14:37:08 allsky kernel: usb 2-2: reset SuperSpeed USB device number 4 using xhci_hcd\nJul 24 14:37:08 allsky kernel: usb 2-2: reset SuperSpeed USB device number 4 using xhci_hcd\nJul 24 14:37:08 allsky kernel: usb 2-2: reset SuperSpeed USB device number 4 using xhci_hcd\nJul 24 14:37:09 allsky kernel: usb 2-2: reset SuperSpeed USB device number 4 using xhci_hcd\nJul 24 14:37:46 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:37:47 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:37:48 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:37:48 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:37:49 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:37:50 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:37:51 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:37:52 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:37:53 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:37:54 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:38:09 allsky kernel: usb 1-1.1.4: usbfs: interface 0 claimed by usbfs while 'python3' sets config #1\nJul 24 14:38:11 allsky kernel: usb 2-2: reset SuperSpeed USB device number 4 using xhci_hcd\nJul 24 14:38:11 allsky kernel: usb 2-2: reset SuperSpeed USB device number 4 using xhci_hcd\nJul 24 14:38:55 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:38:56 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:38:57 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:38:58 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:38:59 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:39:00 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:39:01 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:39:02 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:39:02 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:39:03 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:40:04 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:40:05 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:40:06 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:40:07 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:40:08 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:40:09 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:40:10 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:40:11 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:40:12 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:40:13 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:40:14 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:40:15 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:40:15 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:40:16 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:40:17 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:40:18 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:40:51 allsky kernel: usb 1-1.1.4: usbfs: interface 0 claimed by usbfs while 'python3' sets config #1\nJul 24 14:40:52 allsky kernel: usb 2-2: reset SuperSpeed USB device number 4 using xhci_hcd\nJul 24 14:40:58 allsky kernel: usb 2-2: reset SuperSpeed USB device number 4 using xhci_hcd\nJul 24 14:41:04 allsky kernel: usb 2-2: reset SuperSpeed USB device number 4 using xhci_hcd",
+    "relevant_processes": [
+      "allsky.sh",
+      "kworker/0:0-wg-crypt-wg0",
+      "kworker/0:1-wg-crypt-wg0",
+      "kworker/0:2-wg-crypt-wg0",
+      "kworker/0:3-wg-crypt-wg0",
+      "kworker/1:0-wg-crypt-wg0",
+      "kworker/1:1-wg-crypt-wg0",
+      "kworker/1:2-wg-crypt-wg0",
+      "kworker/1:3-wg-crypt-wg0",
+      "kworker/1:4-wg-crypt-wg0",
+      "kworker/2:0-wg-crypt-wg0",
+      "kworker/2:1-wg-crypt-wg0",
+      "kworker/2:3-wg-crypt-wg0",
+      "kworker/3:0-wg-crypt-wg0",
+      "kworker/3:1-wg-crypt-wg0",
+      "kworker/3:2-wg-crypt-wg0",
+      "kworker/3:3-wg-crypt-wg0",
+      "kworker/R-wg-crypt-wg0",
+      "kworker/R-wg-crypt-wg1"
+    ]
+  },
+  "host_after": {
+    "captured_at": "2026-07-24T13:43:43.438561Z",
+    "machine": "aarch64",
+    "kernel": "6.12.93+rpt-rpi-v8",
+    "load_average": [
+      0.1279296875,
+      0.3369140625,
+      0.4072265625
+    ],
+    "memory_available_bytes": 3524939776,
+    "temperature_c": 62.809,
+    "throttled": "throttled=0x0",
+    "cpu_frequency_khz": {
+      "cpu0": 700000,
+      "cpu1": 700000,
+      "cpu2": 700000,
+      "cpu3": 700000
+    },
+    "usb_devices": "Bus 002 Device 004: ID 03c3:662b ZWO ASI662MC\nBus 002 Device 003: ID 174c:3074 ASMedia Technology Inc. ASM1074 SuperSpeed hub\nBus 002 Device 002: ID 174c:3074 ASMedia Technology Inc. ASM1074 SuperSpeed hub\nBus 002 Device 001: ID 1d6b:0003 Linux Foundation 3.0 root hub\nBus 001 Device 006: ID 03c3:178a ZWO ASI178MC\nBus 001 Device 004: ID 174c:2074 ASMedia Technology Inc. ASM1074 High-Speed hub\nBus 001 Device 003: ID 174c:2074 ASMedia Technology Inc. ASM1074 High-Speed hub\nBus 001 Device 002: ID 2109:3431 VIA Labs, Inc. Hub\nBus 001 Device 001: ID 1d6b:0002 Linux Foundation 2.0 root hub",
+    "usb_tree": "/:  Bus 02.Port 1: Dev 1, Class=root_hub, Driver=xhci_hcd/4p, 5000M\n    |__ Port 1: Dev 2, If 0, Class=Hub, Driver=hub/4p, 5000M\n        |__ Port 2: Dev 3, If 0, Class=Hub, Driver=hub/4p, 5000M\n    |__ Port 2: Dev 4, If 0, Class=Vendor Specific Class, Driver=, 5000M\n/:  Bus 01.Port 1: Dev 1, Class=root_hub, Driver=xhci_hcd/1p, 480M\n    |__ Port 1: Dev 2, If 0, Class=Hub, Driver=hub/4p, 480M\n        |__ Port 1: Dev 3, If 0, Class=Hub, Driver=hub/4p, 480M\n            |__ Port 2: Dev 4, If 0, Class=Hub, Driver=hub/4p, 480M\n            |__ Port 4: Dev 6, If 0, Class=Vendor Specific Class, Driver=usbfs, 480M",
+    "kernel_usb_log": "Jul 24 14:25:22 allsky kernel: usb 2-2: reset SuperSpeed USB device number 4 using xhci_hcd\nJul 24 14:25:23 allsky kernel: usb 2-2: reset SuperSpeed USB device number 4 using xhci_hcd\nJul 24 14:25:23 allsky kernel: usb 2-2: reset SuperSpeed USB device number 4 using xhci_hcd\nJul 24 14:25:23 allsky kernel: usb 2-2: reset SuperSpeed USB device number 4 using xhci_hcd\nJul 24 14:25:24 allsky kernel: usb 2-2: reset SuperSpeed USB device number 4 using xhci_hcd\nJul 24 14:25:24 allsky kernel: usb 2-2: reset SuperSpeed USB device number 4 using xhci_hcd\nJul 24 14:25:25 allsky kernel: usb 2-2: reset SuperSpeed USB device number 4 using xhci_hcd\nJul 24 14:25:25 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:25:25 allsky kernel: usb 2-2: reset SuperSpeed USB device number 4 using xhci_hcd\nJul 24 14:25:25 allsky kernel: usb 2-2: reset SuperSpeed USB device number 4 using xhci_hcd\nJul 24 14:25:26 allsky kernel: usb 2-2: reset SuperSpeed USB device number 4 using xhci_hcd\nJul 24 14:25:26 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:25:26 allsky kernel: usb 2-2: reset SuperSpeed USB device number 4 using xhci_hcd\nJul 24 14:25:26 allsky kernel: usb 2-2: reset SuperSpeed USB device number 4 using xhci_hcd\nJul 24 14:25:27 allsky kernel: usb 2-2: reset SuperSpeed USB device number 4 using xhci_hcd\nJul 24 14:25:27 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:25:28 allsky kernel: usb 2-2: reset SuperSpeed USB device number 4 using xhci_hcd\nJul 24 14:25:28 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:25:29 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:25:30 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:25:30 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:25:34 allsky kernel: usb 2-2: reset SuperSpeed USB device number 4 using xhci_hcd\nJul 24 14:25:34 allsky kernel: usb 2-2: reset SuperSpeed USB device number 4 using xhci_hcd\nJul 24 14:25:35 allsky kernel: usb 2-2: reset SuperSpeed USB device number 4 using xhci_hcd\nJul 24 14:25:35 allsky kernel: usb 2-2: reset SuperSpeed USB device number 4 using xhci_hcd\nJul 24 14:25:36 allsky kernel: usb 2-2: reset SuperSpeed USB device number 4 using xhci_hcd\nJul 24 14:25:36 allsky kernel: usb 2-2: reset SuperSpeed USB device number 4 using xhci_hcd\nJul 24 14:25:36 allsky kernel: usb 2-2: reset SuperSpeed USB device number 4 using xhci_hcd\nJul 24 14:25:37 allsky kernel: usb 2-2: reset SuperSpeed USB device number 4 using xhci_hcd\nJul 24 14:25:37 allsky kernel: usb 2-2: reset SuperSpeed USB device number 4 using xhci_hcd\nJul 24 14:25:38 allsky kernel: usb 2-2: reset SuperSpeed USB device number 4 using xhci_hcd\nJul 24 14:25:38 allsky kernel: usb 2-2: reset SuperSpeed USB device number 4 using xhci_hcd\nJul 24 14:25:39 allsky kernel: usb 2-2: reset SuperSpeed USB device number 4 using xhci_hcd\nJul 24 14:25:39 allsky kernel: usb 2-2: reset SuperSpeed USB device number 4 using xhci_hcd\nJul 24 14:25:40 allsky kernel: usb 2-2: reset SuperSpeed USB device number 4 using xhci_hcd\nJul 24 14:25:48 allsky kernel: usb 2-2: reset SuperSpeed USB device number 4 using xhci_hcd\nJul 24 14:25:48 allsky kernel: usb 2-2: reset SuperSpeed USB device number 4 using xhci_hcd\nJul 24 14:25:49 allsky kernel: usb 2-2: reset SuperSpeed USB device number 4 using xhci_hcd\nJul 24 14:25:50 allsky kernel: usb 2-2: reset SuperSpeed USB device number 4 using xhci_hcd\nJul 24 14:25:51 allsky kernel: usb 2-2: reset SuperSpeed USB device number 4 using xhci_hcd\nJul 24 14:25:51 allsky kernel: usb 2-2: reset SuperSpeed USB device number 4 using xhci_hcd\nJul 24 14:25:52 allsky kernel: usb 2-2: reset SuperSpeed USB device number 4 using xhci_hcd\nJul 24 14:25:53 allsky kernel: usb 2-2: reset SuperSpeed USB device number 4 using xhci_hcd\nJul 24 14:25:54 allsky kernel: usb 2-2: reset SuperSpeed USB device number 4 using xhci_hcd\nJul 24 14:26:02 allsky kernel: usb 2-2: reset SuperSpeed USB device number 4 using xhci_hcd\nJul 24 14:26:04 allsky kernel: usb 2-2: reset SuperSpeed USB device number 4 using xhci_hcd\nJul 24 14:26:05 allsky kernel: usb 2-2: reset SuperSpeed USB device number 4 using xhci_hcd\nJul 24 14:26:06 allsky kernel: usb 2-2: reset SuperSpeed USB device number 4 using xhci_hcd\nJul 24 14:26:07 allsky kernel: usb 2-2: reset SuperSpeed USB device number 4 using xhci_hcd\nJul 24 14:26:10 allsky kernel: usb 2-2: reset SuperSpeed USB device number 4 using xhci_hcd\nJul 24 14:26:21 allsky kernel: usb 2-2: reset SuperSpeed USB device number 4 using xhci_hcd\nJul 24 14:26:23 allsky kernel: usb 2-2: reset SuperSpeed USB device number 4 using xhci_hcd\nJul 24 14:26:25 allsky kernel: usb 2-2: reset SuperSpeed USB device number 4 using xhci_hcd\nJul 24 14:26:28 allsky kernel: usb 2-2: reset SuperSpeed USB device number 4 using xhci_hcd\nJul 24 14:26:30 allsky kernel: usb 2-2: reset SuperSpeed USB device number 4 using xhci_hcd\nJul 24 14:26:31 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:26:32 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:26:33 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:26:34 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:26:35 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:26:36 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:26:37 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:26:38 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:26:39 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:26:40 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:26:41 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:26:42 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:26:43 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:26:43 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:26:44 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:26:45 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:26:57 allsky kernel: usb 2-2: reset SuperSpeed USB device number 4 using xhci_hcd\nJul 24 14:27:02 allsky kernel: usb 2-2: reset SuperSpeed USB device number 4 using xhci_hcd\nJul 24 14:27:07 allsky kernel: usb 2-2: reset SuperSpeed USB device number 4 using xhci_hcd\nJul 24 14:27:12 allsky kernel: usb 2-2: reset SuperSpeed USB device number 4 using xhci_hcd\nJul 24 14:27:18 allsky kernel: usb 2-2: reset SuperSpeed USB device number 4 using xhci_hcd\nJul 24 14:27:24 allsky kernel: usb 2-2: reset SuperSpeed USB device number 4 using xhci_hcd\nJul 24 14:27:46 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:27:47 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:27:48 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:27:49 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:27:50 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:27:51 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:27:52 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:27:53 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:27:54 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:27:55 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:27:56 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:27:57 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:27:57 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:27:58 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:27:59 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:28:00 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:28:15 allsky kernel: usb 2-2: reset SuperSpeed USB device number 4 using xhci_hcd\nJul 24 14:28:25 allsky kernel: usb 2-2: reset SuperSpeed USB device number 4 using xhci_hcd\nJul 24 14:28:35 allsky kernel: usb 2-2: reset SuperSpeed USB device number 4 using xhci_hcd\nJul 24 14:28:46 allsky kernel: usb 2-2: reset SuperSpeed USB device number 4 using xhci_hcd\nJul 24 14:28:56 allsky kernel: usb 2-2: reset SuperSpeed USB device number 4 using xhci_hcd\nJul 24 14:29:01 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:29:02 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:29:03 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:29:04 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:29:05 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:29:06 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:29:07 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:29:07 allsky kernel: usb 2-2: reset SuperSpeed USB device number 4 using xhci_hcd\nJul 24 14:29:08 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:29:09 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:29:10 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:29:11 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:29:11 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:29:12 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:29:13 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:29:14 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:29:15 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:30:16 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:30:17 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:30:18 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:30:19 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:30:20 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:30:21 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:30:22 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:30:23 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:30:24 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:30:24 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:30:25 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:30:26 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:30:27 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:30:28 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:30:29 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:30:30 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:31:31 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:31:32 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:31:33 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:31:34 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:31:35 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:31:36 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:31:37 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:31:38 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:31:38 allsky kernel: usb 2-2: reset SuperSpeed USB device number 4 using xhci_hcd\nJul 24 14:31:39 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:31:39 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:31:40 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:31:41 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:31:42 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:31:43 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:31:44 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:31:45 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:32:09 allsky kernel: usb 2-2: reset SuperSpeed USB device number 4 using xhci_hcd\nJul 24 14:32:39 allsky kernel: usb 2-2: reset SuperSpeed USB device number 4 using xhci_hcd\nJul 24 14:32:46 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:32:47 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:32:48 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:32:49 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:32:50 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:32:51 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:32:52 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:32:52 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:32:53 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:32:54 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:32:55 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:32:56 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:32:57 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:32:58 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:32:59 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:33:00 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:33:09 allsky kernel: usb 2-2: reset SuperSpeed USB device number 4 using xhci_hcd\nJul 24 14:33:39 allsky kernel: usb 2-2: reset SuperSpeed USB device number 4 using xhci_hcd\nJul 24 14:34:01 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:34:02 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:34:03 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:34:04 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:34:05 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:34:05 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:34:06 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:34:07 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:34:08 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:34:09 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:34:10 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:34:11 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:34:12 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:34:13 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:34:14 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:34:15 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:35:15 allsky kernel: usb 1-1.1.4: usbfs: interface 0 claimed by usbfs while 'python3' sets config #1\nJul 24 14:35:16 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:35:17 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:35:17 allsky kernel: usb 2-2: reset SuperSpeed USB device number 4 using xhci_hcd\nJul 24 14:35:18 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:35:19 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:35:19 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:35:20 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:35:21 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:35:22 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:35:23 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:35:24 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:35:25 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:35:26 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:35:27 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:35:28 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:35:29 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:35:30 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:36:31 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:36:32 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:36:33 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:36:34 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:36:34 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:36:35 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:36:36 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:36:37 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:36:38 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:36:39 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:36:40 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:36:41 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:36:42 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:36:43 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:36:44 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:36:45 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:37:03 allsky kernel: usb 1-1.1.4: usbfs: interface 0 claimed by usbfs while 'python3' sets config #1\nJul 24 14:37:05 allsky kernel: usb 2-2: reset SuperSpeed USB device number 4 using xhci_hcd\nJul 24 14:37:06 allsky kernel: usb 2-2: reset SuperSpeed USB device number 4 using xhci_hcd\nJul 24 14:37:06 allsky kernel: usb 2-2: reset SuperSpeed USB device number 4 using xhci_hcd\nJul 24 14:37:06 allsky kernel: usb 2-2: reset SuperSpeed USB device number 4 using xhci_hcd\nJul 24 14:37:07 allsky kernel: usb 2-2: reset SuperSpeed USB device number 4 using xhci_hcd\nJul 24 14:37:07 allsky kernel: usb 2-2: reset SuperSpeed USB device number 4 using xhci_hcd\nJul 24 14:37:07 allsky kernel: usb 2-2: reset SuperSpeed USB device number 4 using xhci_hcd\nJul 24 14:37:08 allsky kernel: usb 2-2: reset SuperSpeed USB device number 4 using xhci_hcd\nJul 24 14:37:08 allsky kernel: usb 2-2: reset SuperSpeed USB device number 4 using xhci_hcd\nJul 24 14:37:08 allsky kernel: usb 2-2: reset SuperSpeed USB device number 4 using xhci_hcd\nJul 24 14:37:09 allsky kernel: usb 2-2: reset SuperSpeed USB device number 4 using xhci_hcd\nJul 24 14:37:46 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:37:47 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:37:48 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:37:48 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:37:49 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:37:50 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:37:51 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:37:52 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:37:53 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:37:54 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:38:09 allsky kernel: usb 1-1.1.4: usbfs: interface 0 claimed by usbfs while 'python3' sets config #1\nJul 24 14:38:11 allsky kernel: usb 2-2: reset SuperSpeed USB device number 4 using xhci_hcd\nJul 24 14:38:11 allsky kernel: usb 2-2: reset SuperSpeed USB device number 4 using xhci_hcd\nJul 24 14:38:55 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:38:56 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:38:57 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:38:58 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:38:59 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:39:00 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:39:01 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:39:02 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:39:02 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:39:03 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:40:04 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:40:05 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:40:06 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:40:07 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:40:08 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:40:09 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:40:10 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:40:11 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:40:12 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:40:13 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:40:14 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:40:15 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:40:15 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:40:16 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:40:17 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:40:18 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:40:51 allsky kernel: usb 1-1.1.4: usbfs: interface 0 claimed by usbfs while 'python3' sets config #1\nJul 24 14:40:52 allsky kernel: usb 2-2: reset SuperSpeed USB device number 4 using xhci_hcd\nJul 24 14:40:58 allsky kernel: usb 2-2: reset SuperSpeed USB device number 4 using xhci_hcd\nJul 24 14:41:04 allsky kernel: usb 2-2: reset SuperSpeed USB device number 4 using xhci_hcd\nJul 24 14:41:12 allsky kernel: usb 2-2: reset SuperSpeed USB device number 4 using xhci_hcd\nJul 24 14:41:19 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:41:20 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:41:21 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:41:22 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:41:23 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:41:24 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:41:25 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:41:26 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:41:27 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:41:28 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:42:28 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:42:29 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:42:30 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:42:31 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:42:32 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:42:33 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:42:34 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:42:35 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:42:36 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:42:37 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:42:38 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:42:39 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:42:40 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:42:41 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:42:42 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd\nJul 24 14:42:42 allsky kernel: usb 1-1.1.4: reset high-speed USB device number 6 using xhci_hcd",
+    "relevant_processes": [
+      "allsky.sh",
+      "kworker/0:0-wg-crypt-wg0",
+      "kworker/0:1-wg-crypt-wg0",
+      "kworker/0:2-wg-crypt-wg0",
+      "kworker/0:3-wg-crypt-wg0",
+      "kworker/1:0-wg-crypt-wg0",
+      "kworker/1:1-wg-crypt-wg0",
+      "kworker/1:2-wg-crypt-wg0",
+      "kworker/2:0-wg-crypt-wg0",
+      "kworker/2:2-wg-crypt-wg0",
+      "kworker/2:3-wg-crypt-wg0",
+      "kworker/3:0-wg-crypt-wg0",
+      "kworker/3:1-wg-crypt-wg0",
+      "kworker/3:2-wg-crypt-wg0",
+      "kworker/3:3-wg-crypt-wg0",
+      "kworker/R-wg-crypt-wg0",
+      "kworker/R-wg-crypt-wg1"
+    ]
+  },
+  "runner_attempts": 1,
+  "recoverable_start_errors": []
+}

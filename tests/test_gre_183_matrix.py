@@ -1,11 +1,15 @@
 """Unit coverage for the GRE-183 screening matrix."""
 
 from obscam.tools.gre_183_prototype.contract import (
+    AcquisitionMode,
     CameraCapabilities,
     ControlCapability,
     ImageFormat,
 )
-from obscam.tools.gre_183_prototype.matrix import build_screening_matrix
+from obscam.tools.gre_183_prototype.matrix import (
+    build_mode_overlap_matrix,
+    build_screening_matrix,
+)
 
 
 def make_capabilities() -> CameraCapabilities:
@@ -67,3 +71,16 @@ def test_screening_matrix_skips_unsupported_rgb24() -> None:
     )
 
     assert all(scenario.image_format is not ImageFormat.RGB24 for scenario in matrix)
+
+
+def test_mode_overlap_matrix_pairs_modes_without_a_crossover_assumption() -> None:
+    scenarios = build_mode_overlap_matrix(exposures_ms=[10.0, 1000.0])
+
+    assert [scenario.acquisition_mode for scenario in scenarios] == [
+        AcquisitionMode.VIDEO,
+        AcquisitionMode.SNAPSHOT,
+        AcquisitionMode.VIDEO,
+        AcquisitionMode.SNAPSHOT,
+    ]
+    assert [scenario.duration_s for scenario in scenarios] == [5.0, 5.0, 5.0, 5.0]
+    assert all(scenario.warmup_frames == 1 for scenario in scenarios)

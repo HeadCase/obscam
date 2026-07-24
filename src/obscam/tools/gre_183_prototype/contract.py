@@ -42,6 +42,13 @@ class RunnerKind(StrEnum):
     RUST_PIPELINE = "rust-pipeline"
 
 
+class AcquisitionMode(StrEnum):
+    """Native SDK acquisition regimes compared by GRE-183."""
+
+    VIDEO = "video"
+    SNAPSHOT = "snapshot"
+
+
 class Scenario(BaseModel):
     """One directly comparable full-frame benchmark scenario."""
 
@@ -55,8 +62,36 @@ class Scenario(BaseModel):
     duration_s: float = Field(gt=0)
     warmup_frames: int = Field(default=5, ge=0)
     timeout_ms: int = Field(ge=1)
+    acquisition_mode: AcquisitionMode = AcquisitionMode.VIDEO
+    transition_from_exposure_us: int | None = Field(default=None, ge=1)
+    transition_after_ms: float | None = Field(default=None, gt=0)
     width: Literal[1920] = FULL_FRAME_WIDTH
     height: Literal[1080] = FULL_FRAME_HEIGHT
+
+    @model_validator(mode="after")
+    def require_upward_exposure_transition(self) -> Scenario:
+        """Keep transition classification unambiguous for queued video frames."""
+        if (
+            self.transition_from_exposure_us is not None
+            and self.acquisition_mode is AcquisitionMode.VIDEO
+            and self.transition_after_ms is None
+            and self.transition_from_exposure_us >= self.exposure_us
+        ):
+            raise ValueError(
+                "transition_from_exposure_us must be lower than exposure_us"
+            )
+        if (
+            self.transition_after_ms is not None
+            and self.transition_from_exposure_us is None
+        ):
+            raise ValueError("transition_after_ms requires an exposure transition")
+        if (
+            self.acquisition_mode is AcquisitionMode.SNAPSHOT
+            and self.transition_from_exposure_us is not None
+            and self.transition_from_exposure_us == self.exposure_us
+        ):
+            raise ValueError("snapshot transition exposures must differ")
+        return self
 
     @property
     def buffer_bytes(self) -> int:
@@ -65,7 +100,7 @@ class Scenario(BaseModel):
 
     def runner_arguments(self) -> list[str]:
         """Render the common command-line arguments accepted by every runner."""
-        return [
+        arguments = [
             "--format",
             self.image_format.value,
             "--exposure-us",
@@ -83,6 +118,18 @@ class Scenario(BaseModel):
             "--timeout-ms",
             str(self.timeout_ms),
         ]
+        if self.transition_from_exposure_us is not None:
+            arguments.extend(
+                [
+                    "--transition-from-exposure-us",
+                    str(self.transition_from_exposure_us),
+                ]
+            )
+        if self.transition_after_ms is not None:
+            arguments.extend(["--transition-after-ms", str(self.transition_after_ms)])
+        if self.acquisition_mode is AcquisitionMode.SNAPSHOT:
+            arguments.extend(["--mode", self.acquisition_mode.value])
+        return arguments
 
 
 class ControlCapability(BaseModel):
@@ -129,6 +176,28 @@ class TimingSummary(BaseModel):
     maximum_ms: float | None
 
 
+class TransitionMetrics(BaseModel):
+    """Live exposure-change interruption measured by the native reference."""
+
+    from_exposure_us: int = Field(ge=1)
+    to_exposure_us: int = Field(ge=1)
+    setting_call_ms: float = Field(ge=0)
+    setting_to_first_new_frame_ms: float = Field(ge=0)
+    frames_before_first_new: int = Field(ge=0)
+    first_new_capture_call_ms: float = Field(ge=0)
+    classification_threshold_ms: float | None = Field(default=None, gt=0)
+
+
+class FrameSignalSummary(BaseModel):
+    """Untimed last-frame signal data used to classify clipping and staleness."""
+
+    minimum: int = Field(ge=0, le=255)
+    maximum: int = Field(ge=0, le=255)
+    mean: float = Field(ge=0, le=255)
+    zero_fraction: float = Field(ge=0, le=1)
+    saturated_fraction: float = Field(ge=0, le=1)
+
+
 class CaptureResult(BaseModel):
     """Common result emitted by every capture runner."""
 
@@ -156,6 +225,8 @@ class CaptureResult(BaseModel):
     capture_call_ms: TimingSummary
     inter_frame_ms: TimingSummary
     unique_inter_frame_ms: TimingSummary
+    transition: TransitionMetrics | None = None
+    frame_signal: FrameSignalSummary | None = None
     notes: list[str] = Field(default_factory=list)
 
     @model_validator(mode="after")
@@ -169,4 +240,13 @@ class CaptureResult(BaseModel):
             raise ValueError("sdk_dropped_delta does not match start/end counters")
         if self.buffer_allocation_bytes < self.scenario.buffer_bytes:
             raise ValueError("runner did not account for a complete frame buffer")
+        if self.transition is None:
+            if self.scenario.transition_from_exposure_us is not None:
+                raise ValueError("transition scenario is missing transition metrics")
+        elif (
+            self.scenario.transition_from_exposure_us
+            != self.transition.from_exposure_us
+            or self.scenario.exposure_us != self.transition.to_exposure_us
+        ):
+            raise ValueError("transition metrics do not match the scenario")
         return self

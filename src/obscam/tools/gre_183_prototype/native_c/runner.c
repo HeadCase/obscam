@@ -27,6 +27,10 @@ typedef struct {
     double duration_s;
     int warmup_frames;
     int timeout_ms;
+    bool snapshot_mode;
+    long transition_from_exposure_us;
+    bool has_transition;
+    double transition_after_ms;
     const char *camera_model;
 } Scenario;
 
@@ -40,7 +44,9 @@ static void usage(const char *program) {
     fprintf(stderr,
             "Usage: %s --format Y8|RAW8|RGB24 --exposure-us N --gain N "
             "--high-speed 0|1 --bandwidth N --duration-s N "
-            "--warmup-frames N --timeout-ms N [--camera-model NAME]\n",
+            "--warmup-frames N --timeout-ms N [--mode video|snapshot] "
+            "[--transition-from-exposure-us N] [--transition-after-ms N] "
+            "[--camera-model NAME]\n",
             program);
 }
 
@@ -95,6 +101,9 @@ static bool parse_args(int argc, char **argv, Scenario *scenario) {
     bool have_warmup = false;
     bool have_timeout = false;
     scenario->camera_model = "ASI662MC";
+    scenario->snapshot_mode = false;
+    scenario->has_transition = false;
+    scenario->transition_after_ms = 0.0;
 
     for (int index = 1; index < argc; index += 2) {
         if (index + 1 >= argc) {
@@ -127,6 +136,24 @@ static bool parse_args(int argc, char **argv, Scenario *scenario) {
             }
             scenario->timeout_ms = (int)parsed;
             have_timeout = true;
+        } else if (strcmp(option, "--mode") == 0) {
+            if (strcmp(value, "video") == 0) {
+                scenario->snapshot_mode = false;
+            } else if (strcmp(value, "snapshot") == 0) {
+                scenario->snapshot_mode = true;
+            } else {
+                return false;
+            }
+        } else if (strcmp(option, "--transition-from-exposure-us") == 0) {
+            if (!parse_long(value, &scenario->transition_from_exposure_us)) {
+                return false;
+            }
+            scenario->has_transition = true;
+        } else if (strcmp(option, "--transition-after-ms") == 0) {
+            if (!parse_double(value, &scenario->transition_after_ms) ||
+                scenario->transition_after_ms <= 0) {
+                return false;
+            }
         } else if (strcmp(option, "--camera-model") == 0) {
             scenario->camera_model = value;
         } else {
@@ -138,7 +165,14 @@ static bool parse_args(int argc, char **argv, Scenario *scenario) {
            have_gain && scenario->gain >= 0 && have_high_speed &&
            (scenario->high_speed == 0 || scenario->high_speed == 1) &&
            have_bandwidth && scenario->bandwidth >= 0 && have_duration &&
-           scenario->duration_s > 0 && have_warmup && have_timeout;
+           scenario->duration_s > 0 && have_warmup && have_timeout &&
+           (!scenario->has_transition ||
+            (scenario->transition_from_exposure_us > 0 &&
+             ((scenario->transition_after_ms > 0 &&
+               scenario->transition_from_exposure_us != scenario->exposure_us) ||
+              (scenario->transition_after_ms == 0 &&
+               !scenario->snapshot_mode &&
+               scenario->transition_from_exposure_us < scenario->exposure_us))));
 }
 
 static uint64_t monotonic_ns(void) {
@@ -154,6 +188,48 @@ static uint64_t monotonic_ns(void) {
     }
     return ((uint64_t)timestamp.tv_sec * 1000000000ULL) +
            (uint64_t)timestamp.tv_nsec;
+}
+
+static ASI_ERROR_CODE get_snapshot_frame(int camera_id,
+                                         unsigned char *frame_buffer,
+                                         long frame_bytes, int timeout_ms) {
+    ASI_ERROR_CODE result = ASIStartExposure(camera_id, ASI_FALSE);
+    if (result != ASI_SUCCESS) {
+        return result;
+    }
+    const uint64_t deadline_ns =
+        monotonic_ns() + ((uint64_t)timeout_ms * 1000000ULL);
+    ASI_EXPOSURE_STATUS status = ASI_EXP_WORKING;
+    const struct timespec poll_interval = {.tv_sec = 0, .tv_nsec = 1000000L};
+    while (status == ASI_EXP_WORKING && monotonic_ns() < deadline_ns) {
+        result = ASIGetExpStatus(camera_id, &status);
+        if (result != ASI_SUCCESS) {
+            (void)ASIStopExposure(camera_id);
+            return result;
+        }
+        if (status == ASI_EXP_WORKING) {
+            (void)nanosleep(&poll_interval, NULL);
+        }
+    }
+    if (status == ASI_EXP_WORKING) {
+        (void)ASIStopExposure(camera_id);
+        return ASI_ERROR_TIMEOUT;
+    }
+    if (status != ASI_EXP_SUCCESS) {
+        return ASI_ERROR_GENERAL_ERROR;
+    }
+    return ASIGetDataAfterExp(camera_id, frame_buffer, frame_bytes);
+}
+
+static ASI_ERROR_CODE get_frame(int camera_id, const Scenario *scenario,
+                                unsigned char *frame_buffer,
+                                long frame_bytes) {
+    if (scenario->snapshot_mode) {
+        return get_snapshot_frame(camera_id, frame_buffer, frame_bytes,
+                                  scenario->timeout_ms);
+    }
+    return ASIGetVideoData(camera_id, frame_buffer, frame_bytes,
+                           scenario->timeout_ms);
 }
 
 static bool timings_init(Timings *timings, size_t capacity) {
@@ -356,7 +432,10 @@ int main(int argc, char **argv) {
 
     (void)ASIStopVideoCapture(camera_id);
     (void)ASIStopExposure(camera_id);
-    if (ASISetControlValue(camera_id, ASI_EXPOSURE, scenario.exposure_us,
+    const long initial_exposure_us = scenario.has_transition
+                                         ? scenario.transition_from_exposure_us
+                                         : scenario.exposure_us;
+    if (ASISetControlValue(camera_id, ASI_EXPOSURE, initial_exposure_us,
                            ASI_FALSE) != ASI_SUCCESS ||
         ASISetControlValue(camera_id, ASI_GAIN, scenario.gain, ASI_FALSE) !=
             ASI_SUCCESS ||
@@ -377,23 +456,120 @@ int main(int argc, char **argv) {
         fprintf(stderr, "Could not configure full-frame SDK output\n");
         goto cleanup;
     }
-    if (ASIStartVideoCapture(camera_id) != ASI_SUCCESS) {
-        fprintf(stderr, "Could not start video capture\n");
-        goto cleanup;
+    if (!scenario.snapshot_mode) {
+        if (ASIStartVideoCapture(camera_id) != ASI_SUCCESS) {
+            fprintf(stderr, "Could not start video capture\n");
+            goto cleanup;
+        }
+        video_started = true;
     }
-    video_started = true;
 
     for (int index = 0; index < scenario.warmup_frames; ++index) {
-        if (ASIGetVideoData(camera_id, frame_buffer, (long)frame_bytes,
-                            scenario.timeout_ms) != ASI_SUCCESS) {
+        if (get_frame(camera_id, &scenario, frame_buffer, (long)frame_bytes) !=
+            ASI_SUCCESS) {
             fprintf(stderr, "Warm-up frame failed\n");
             goto cleanup;
         }
     }
 
+    double setting_call_ms = 0.0;
+    double setting_to_first_new_frame_ms = 0.0;
+    double first_new_capture_call_ms = 0.0;
+    double classification_threshold_ms = 0.0;
+    size_t frames_before_first_new = 0;
+    if (scenario.has_transition) {
+        if (scenario.transition_after_ms > 0) {
+            if (scenario.snapshot_mode &&
+                ASIStartExposure(camera_id, ASI_FALSE) != ASI_SUCCESS) {
+                fprintf(stderr, "Could not start interrupted exposure\n");
+                goto cleanup;
+            }
+            const uint64_t wait_ns =
+                (uint64_t)(scenario.transition_after_ms * 1e6);
+            const struct timespec wait_interval = {
+                .tv_sec = (time_t)(wait_ns / 1000000000ULL),
+                .tv_nsec = (long)(wait_ns % 1000000000ULL),
+            };
+            (void)nanosleep(&wait_interval, NULL);
+            const uint64_t setting_started_ns = monotonic_ns();
+            ASI_ERROR_CODE stop_result = ASI_SUCCESS;
+            if (scenario.snapshot_mode) {
+                stop_result = ASIStopExposure(camera_id);
+            } else {
+                stop_result = ASIStopVideoCapture(camera_id);
+                video_started = false;
+            }
+            if (stop_result != ASI_SUCCESS ||
+                ASISetControlValue(camera_id, ASI_EXPOSURE, scenario.exposure_us,
+                                   ASI_FALSE) != ASI_SUCCESS ||
+                (!scenario.snapshot_mode &&
+                 ASIStartVideoCapture(camera_id) != ASI_SUCCESS)) {
+                fprintf(stderr, "Could not cancel and reconfigure exposure\n");
+                goto cleanup;
+            }
+            if (!scenario.snapshot_mode) {
+                video_started = true;
+            }
+            const uint64_t setting_completed_ns = monotonic_ns();
+            setting_call_ms =
+                (double)(setting_completed_ns - setting_started_ns) / 1e6;
+            const uint64_t capture_started_ns = monotonic_ns();
+            if (get_frame(camera_id, &scenario, frame_buffer,
+                          (long)frame_bytes) != ASI_SUCCESS) {
+                fprintf(stderr, "Transition frame failed\n");
+                goto cleanup;
+            }
+            const uint64_t completion_ns = monotonic_ns();
+            first_new_capture_call_ms =
+                (double)(completion_ns - capture_started_ns) / 1e6;
+            setting_to_first_new_frame_ms =
+                (double)(completion_ns - setting_started_ns) / 1e6;
+        } else {
+            classification_threshold_ms =
+                ((double)scenario.transition_from_exposure_us +
+                 (double)scenario.exposure_us) /
+                2000.0;
+            const uint64_t setting_started_ns = monotonic_ns();
+            if (ASISetControlValue(camera_id, ASI_EXPOSURE,
+                                   scenario.exposure_us,
+                                   ASI_FALSE) != ASI_SUCCESS) {
+                fprintf(stderr, "Could not apply transition exposure\n");
+                goto cleanup;
+            }
+            const uint64_t setting_completed_ns = monotonic_ns();
+            setting_call_ms =
+                (double)(setting_completed_ns - setting_started_ns) / 1e6;
+            bool found_new_frame = false;
+            for (size_t attempt = 0; attempt < 64; ++attempt) {
+                const uint64_t capture_started_ns = monotonic_ns();
+                if (get_frame(camera_id, &scenario, frame_buffer,
+                              (long)frame_bytes) != ASI_SUCCESS) {
+                    fprintf(stderr, "Transition frame failed\n");
+                    goto cleanup;
+                }
+                const uint64_t completion_ns = monotonic_ns();
+                const double capture_ms =
+                    (double)(completion_ns - capture_started_ns) / 1e6;
+                if (capture_ms >= classification_threshold_ms) {
+                    first_new_capture_call_ms = capture_ms;
+                    setting_to_first_new_frame_ms =
+                        (double)(completion_ns - setting_started_ns) / 1e6;
+                    found_new_frame = true;
+                    break;
+                }
+                ++frames_before_first_new;
+            }
+            if (!found_new_frame) {
+                fprintf(stderr, "Could not classify first transitioned frame\n");
+                goto cleanup;
+            }
+        }
+    }
+
     int sdk_dropped_start = 0;
     int sdk_dropped_end = 0;
-    if (ASIGetDroppedFrames(camera_id, &sdk_dropped_start) != ASI_SUCCESS) {
+    if (!scenario.snapshot_mode &&
+        ASIGetDroppedFrames(camera_id, &sdk_dropped_start) != ASI_SUCCESS) {
         fprintf(stderr, "Could not read initial SDK drop counter\n");
         goto cleanup;
     }
@@ -413,8 +589,8 @@ int main(int argc, char **argv) {
 
     while (monotonic_ns() - measurement_started_ns < duration_ns) {
         const uint64_t capture_started_ns = monotonic_ns();
-        const ASI_ERROR_CODE capture_result = ASIGetVideoData(
-            camera_id, frame_buffer, (long)frame_bytes, scenario.timeout_ms);
+        const ASI_ERROR_CODE capture_result =
+            get_frame(camera_id, &scenario, frame_buffer, (long)frame_bytes);
         if (capture_result != ASI_SUCCESS) {
             ++capture_errors;
             continue;
@@ -454,7 +630,8 @@ int main(int argc, char **argv) {
         previous_unique_completion_ns = completion_ns;
     }
     measurement_ended_ns = monotonic_ns();
-    if (ASIGetDroppedFrames(camera_id, &sdk_dropped_end) != ASI_SUCCESS) {
+    if (!scenario.snapshot_mode &&
+        ASIGetDroppedFrames(camera_id, &sdk_dropped_end) != ASI_SUCCESS) {
         fprintf(stderr, "Could not read final SDK drop counter\n");
         goto cleanup;
     }
@@ -465,14 +642,44 @@ int main(int argc, char **argv) {
 
     const double elapsed_s =
         (double)(measurement_ended_ns - measurement_started_ns) / 1e9;
+    unsigned int signal_minimum = 255;
+    unsigned int signal_maximum = 0;
+    uint64_t signal_sum = 0;
+    size_t zero_pixels = 0;
+    size_t saturated_pixels = 0;
+    if (frames > 0) {
+        for (size_t index = 0; index < frame_bytes; ++index) {
+            const unsigned int value = frame_buffer[index];
+            if (value < signal_minimum) {
+                signal_minimum = value;
+            }
+            if (value > signal_maximum) {
+                signal_maximum = value;
+            }
+            signal_sum += value;
+            zero_pixels += value == 0;
+            saturated_pixels += value == 255;
+        }
+    }
     printf("{\"schema_version\":1,\"runner\":\"native-c\",\"scenario\":{");
     printf("\"image_format\":\"%s\",\"exposure_us\":%ld,\"gain\":%ld,",
            scenario.image_format, scenario.exposure_us, scenario.gain);
     printf("\"high_speed\":%ld,\"bandwidth\":%ld,\"duration_s\":%.9f,",
            scenario.high_speed, scenario.bandwidth, scenario.duration_s);
-    printf("\"warmup_frames\":%d,\"timeout_ms\":%d,\"width\":%d,"
-           "\"height\":%d},\"sdk_version\":",
-           scenario.warmup_frames, scenario.timeout_ms, FULL_WIDTH, FULL_HEIGHT);
+    printf("\"warmup_frames\":%d,\"timeout_ms\":%d,"
+           "\"acquisition_mode\":\"%s\",\"width\":%d,\"height\":%d",
+           scenario.warmup_frames, scenario.timeout_ms,
+           scenario.snapshot_mode ? "snapshot" : "video", FULL_WIDTH,
+           FULL_HEIGHT);
+    if (scenario.has_transition) {
+        printf(",\"transition_from_exposure_us\":%ld",
+               scenario.transition_from_exposure_us);
+        if (scenario.transition_after_ms > 0) {
+            printf(",\"transition_after_ms\":%.9f",
+                   scenario.transition_after_ms);
+        }
+    }
+    printf("},\"sdk_version\":");
     print_json_string(ASIGetSDKVersion());
     printf(",\"camera_name\":");
     print_json_string(camera_info.Name);
@@ -500,9 +707,39 @@ int main(int argc, char **argv) {
     print_timing_summary(&inter_frame_timings);
     printf(",\"unique_inter_frame_ms\":");
     print_timing_summary(&unique_inter_frame_timings);
+    printf(",\"transition\":");
+    if (scenario.has_transition) {
+        printf("{\"from_exposure_us\":%ld,\"to_exposure_us\":%ld,"
+               "\"setting_call_ms\":%.9f,"
+               "\"setting_to_first_new_frame_ms\":%.9f,"
+               "\"frames_before_first_new\":%zu,"
+               "\"first_new_capture_call_ms\":%.9f,"
+               "\"classification_threshold_ms\":",
+               scenario.transition_from_exposure_us, scenario.exposure_us,
+               setting_call_ms, setting_to_first_new_frame_ms,
+               frames_before_first_new, first_new_capture_call_ms);
+        if (scenario.transition_after_ms > 0) {
+            printf("null}");
+        } else {
+            printf("%.9f}", classification_threshold_ms);
+        }
+    } else {
+        printf("null");
+    }
+    printf(",\"frame_signal\":");
+    if (frames > 0) {
+        printf("{\"minimum\":%u,\"maximum\":%u,\"mean\":%.9f,"
+               "\"zero_fraction\":%.9f,\"saturated_fraction\":%.9f}",
+               signal_minimum, signal_maximum,
+               (double)signal_sum / (double)frame_bytes,
+               (double)zero_pixels / (double)frame_bytes,
+               (double)saturated_pixels / (double)frame_bytes);
+    } else {
+        printf("null");
+    }
     printf(",\"notes\":[\"caller-owned guarded SDK frame buffer reused for "
-           "the complete run\",\"timing arrays preallocated before "
-           "capture\"]}\n");
+           "the complete run\",\"timing arrays preallocated before capture\","
+           "\"last-frame signal summary computed after timed capture\"]}\n");
     exit_code = EXIT_SUCCESS;
 
 cleanup:

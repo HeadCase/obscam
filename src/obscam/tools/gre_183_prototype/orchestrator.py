@@ -16,6 +16,7 @@ from pathlib import Path
 from pydantic import BaseModel, Field
 
 from obscam.tools.gre_183_prototype.contract import (
+    AcquisitionMode,
     CameraCapabilities,
     CaptureResult,
     RunnerKind,
@@ -365,6 +366,16 @@ def runner_command(
     build_directory: Path = DEFAULT_BUILD_DIRECTORY,
 ) -> list[str]:
     """Return the command for one runner and common scenario."""
+    if (
+        scenario.transition_from_exposure_us is not None
+        and runner is not RunnerKind.NATIVE_C
+    ):
+        raise ValueError("live setting transitions are supported by native-c only")
+    if (
+        scenario.acquisition_mode is AcquisitionMode.SNAPSHOT
+        and runner is not RunnerKind.NATIVE_C
+    ):
+        raise ValueError("snapshot acquisition is supported by native-c only")
     arguments = scenario.runner_arguments()
     if runner is RunnerKind.PYTHON_ZWOASI:
         return [
@@ -495,10 +506,16 @@ def artifact_path(
     runner: RunnerKind, scenario: Scenario, output_directory: Path
 ) -> Path:
     """Return the stable result path for one runner/scenario pair."""
+    transition = ""
+    if scenario.transition_from_exposure_us is not None:
+        transition = f"{scenario.transition_from_exposure_us}to"
+    mode = ""
+    if scenario.acquisition_mode is AcquisitionMode.SNAPSHOT:
+        mode = "-snapshot"
     return output_directory / (
         f"{runner.value}-{scenario.image_format.value.lower()}-"
-        f"{scenario.exposure_us}us-hs{scenario.high_speed}-"
-        f"bw{scenario.bandwidth}.json"
+        f"{transition}{scenario.exposure_us}us-hs{scenario.high_speed}-"
+        f"bw{scenario.bandwidth}{mode}.json"
     )
 
 

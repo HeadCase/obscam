@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 
 from obscam.tools.gre_183_prototype.contract import (
+    AcquisitionMode,
     ImageFormat,
     RunnerKind,
     Scenario,
@@ -93,6 +94,34 @@ def test_artifact_path_is_stable_for_a_runner_scenario_pair() -> None:
     )
 
     assert output_path == Path("results/rust-pipeline-y8-10000us-hs1-bw80.json")
+
+
+def test_transition_artifact_path_includes_both_exposures() -> None:
+    scenario = make_scenario().model_copy(
+        update={"exposure_us": 100_000, "transition_from_exposure_us": 10_000}
+    )
+
+    output_path = artifact_path(RunnerKind.NATIVE_C, scenario, Path("results"))
+
+    assert output_path == Path("results/native-c-y8-10000to100000us-hs1-bw80.json")
+
+
+def test_transition_is_rejected_for_non_native_runner() -> None:
+    scenario = make_scenario().model_copy(
+        update={"exposure_us": 100_000, "transition_from_exposure_us": 10_000}
+    )
+
+    with pytest.raises(ValueError, match="native-c only"):
+        runner_command(RunnerKind.PYTHON_ZWOASI, scenario)
+
+
+def test_snapshot_is_rejected_for_non_native_runner() -> None:
+    scenario = make_scenario().model_copy(
+        update={"acquisition_mode": AcquisitionMode.SNAPSHOT}
+    )
+
+    with pytest.raises(ValueError, match="snapshot acquisition"):
+        runner_command(RunnerKind.RUST_PIPELINE, scenario)
 
 
 @pytest.mark.parametrize(
