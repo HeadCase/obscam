@@ -35,6 +35,32 @@ Frame envelopes carry both server monotonic and Unix timestamps; use monotonic
 time for server-stage durations and calibrated Unix time for cross-machine
 exposure-to-visible latency.
 
+## Hardware H.264 WebRTC smoke test
+
+The successful browser-delivery spike uses the checked-in `mediamtx.yml` with a
+standalone MediaMTX v1.18.2 binary. It intentionally binds isolated ports and
+must not be installed as a service. From the repository root, start the gateway:
+
+```bash
+mediamtx src/obscam/tools/gre_190_prototype/mediamtx.yml
+```
+
+In another shell, publish one hardware-encoded 1920x1080/10 fps test pattern:
+
+```bash
+ffmpeg -hide_banner -loglevel warning -re \
+  -f lavfi -i testsrc2=size=1920x1080:rate=10 \
+  -pix_fmt yuv420p -c:v h264_v4l2m2m -profile:v 578 \
+  -b:v 8M -g 10 -f rtsp -rtsp_transport tcp \
+  rtsp://127.0.0.1:18554/gre190
+```
+
+Open `http://PI_LAN_IP:18889/gre190/`. UDP ICE remains enabled, but TCP ICE on
+port 18190 is required for the tested WireGuard client topology. The MediaMTX
+API and metrics endpoints bind to loopback ports 19997 and 19998 respectively.
+This smoke test proves browser delivery and shared fan-out, not end-to-end
+latency; use timestamped browser instrumentation for latency evidence.
+
 ## Autonomous remote-browser run
 
 Start the server on the Pi, choose one run ID, then open URLs of this form on the

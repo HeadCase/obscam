@@ -58,6 +58,7 @@ def test_hardware_h264_command_forbids_software_fallback(tmp_path: Path) -> None
     arguments = scenario.ffmpeg_arguments(tmp_path / "probe.h264")
     assert scenario.frames == 20
     assert arguments[arguments.index("-c:v") + 1] == "h264_v4l2m2m"
+    assert arguments[arguments.index("-profile:v") + 1] == "578"
     assert "libx264" not in arguments
 
 

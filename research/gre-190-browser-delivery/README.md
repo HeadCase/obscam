@@ -53,6 +53,36 @@ A 30-second deterministic 1920x1080/10 fps run encoded 300/300 frames into an
 18,010,669-byte Annex-B H.264 stream. Temperature rose from 56.9 C to 60.8 C and
 `throttled=0x0` remained clear. A subsequent invocation of the codified gate
 encoded 20/20 full-resolution frames in two seconds. The prototype therefore
-uses FFmpeg only as a thin owner of the hardware encoder and retains GStreamer
-for H.264 parsing, RTP/WebRTC, and fMP4 packaging. Software H.264 remains
+uses FFmpeg only as a thin owner of the hardware encoder. Software H.264 remains
 forbidden.
+
+## Hardware H.264 WebRTC delivery over WireGuard
+
+A direct custom GStreamer `webrtcbin` sender was rejected after repeated browser
+negotiations produced no visible media. The useful negative evidence was that
+hand-written signaling and per-peer pipeline management added substantial
+diagnostic surface without proving delivery. The prototype then pivoted to an
+isolated MediaMTX v1.18.2 gateway; it was not installed as a service and did not
+modify the host's existing MediaMTX instance.
+
+The successful path was one FFmpeg `h264_v4l2m2m` hardware encode of a
+1920x1080/10 fps test pattern, published over loopback RTSP/TCP to MediaMTX and
+delivered as H.264 WebRTC/WHEP. Brave 149 and Safari 26.5.2 on the macOS laptop
+displayed the moving pattern concurrently through the WireGuard route. MediaMTX
+reported both peer connections established and reading the same H.264 track.
+
+UDP-only ICE did not establish across this client/VPN topology. Both successful
+sessions selected MediaMTX's TCP ICE candidate
+`host/tcp/192.168.1.200/18190`, with peer-reflexive client candidates on
+`10.164.190.3`. At the evidence snapshot the two sessions had sent 48,700 and
+24,628 RTP packets respectively, with zero outbound frames discarded. The
+shared path had zero inbound frame errors. Pi temperature was 56.9 C and
+`throttled=0x0`; MediaMTX used approximately 58 MiB RSS and 12.3% CPU, while
+FFmpeg used approximately 105 MiB RSS and 14.1% CPU.
+
+This proves browser compatibility, concurrent fan-out from one hardware encode,
+and the required VPN transport fallback. It does not yet provide
+exposure-end-to-visible latency: the gateway's built-in player has no frame
+generation timestamp or presentation telemetry. That measurement must use the
+instrumented browser harness with a timestamped camera source or equivalent
+end-to-end marker.

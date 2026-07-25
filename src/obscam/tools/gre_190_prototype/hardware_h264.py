@@ -43,6 +43,8 @@ class HardwareH264Scenario:
             "yuv420p",
             "-c:v",
             "h264_v4l2m2m",
+            "-profile:v",
+            "578",
             "-b:v",
             self.bitrate,
             "-g",
