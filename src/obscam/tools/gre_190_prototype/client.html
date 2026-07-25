@@ -1,0 +1,78 @@
+<!doctype html>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>GRE-190 browser presentation probe</title>
+<style>
+  body { margin: 0; color: #eee; background: #111; font: 14px system-ui; }
+  main { display: grid; gap: 12px; padding: 12px; }
+  img { width: min(100%, 1920px); background: #222; }
+  pre { white-space: pre-wrap; }
+</style>
+<main>
+  <div>
+    <button id="start-ws">Start JPEG/WebSocket</button>
+    <button id="start-mjpeg">Start MJPEG control</button>
+    <button id="stop">Stop</button>
+  </div>
+  <img id="view" width="1920" height="1080" alt="benchmark frame">
+  <pre id="metrics">idle</pre>
+</main>
+<script>
+const view = document.querySelector('#view');
+const metrics = document.querySelector('#metrics');
+const clientId = crypto.randomUUID();
+let socket;
+let lastUrl;
+let unique = 0;
+let lastGeneration = 0;
+let startedAt = performance.now();
+
+function show(path, generation, envelope, receive, decode, visible) {
+  if (generation !== lastGeneration) unique++;
+  lastGeneration = generation;
+  const elapsed = (visible - startedAt) / 1000;
+  metrics.textContent = JSON.stringify({path, generation, unique,
+    presented_fps: elapsed > 0 ? unique / elapsed : 0,
+    receive_to_visible_ms: visible - receive,
+    visibility: document.visibilityState}, null, 2);
+  fetch('/api/presentations', {method: 'POST', headers: {'content-type': 'application/json'},
+    body: JSON.stringify({schema_version: 1, client_id: clientId, path, generation,
+      browser_receive_ms: receive, decode_complete_ms: decode, visible_ms: visible,
+      server_encode_end_ns: envelope.encode_end_ns, clock_offset_ms: 0,
+      clock_uncertainty_ms: Number.MAX_SAFE_INTEGER,
+      visibility_state: document.visibilityState})});
+}
+
+document.querySelector('#start-ws').onclick = () => {
+  socket?.close();
+  view.removeAttribute('src');
+  unique = 0; lastGeneration = 0; startedAt = performance.now();
+  socket = new WebSocket(`${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/ws/jpeg`);
+  socket.binaryType = 'arraybuffer';
+  socket.onmessage = async event => {
+    const receive = performance.now();
+    const bytes = new Uint8Array(event.data);
+    const headerLength = new DataView(event.data).getUint32(0);
+    const envelope = JSON.parse(new TextDecoder().decode(bytes.slice(4, 4 + headerLength)));
+    const blob = new Blob([bytes.slice(4 + headerLength)], {type: 'image/jpeg'});
+    const bitmap = await createImageBitmap(blob);
+    const decode = performance.now();
+    const canvas = document.createElement('canvas');
+    canvas.width = bitmap.width; canvas.height = bitmap.height;
+    canvas.getContext('2d').drawImage(bitmap, 0, 0);
+    bitmap.close();
+    if (lastUrl) URL.revokeObjectURL(lastUrl);
+    lastUrl = canvas.toDataURL('image/jpeg', 0.92);
+    view.src = lastUrl;
+    requestAnimationFrame(() => show('jpeg-websocket', envelope.generation, envelope, receive, decode, performance.now()));
+  };
+};
+
+document.querySelector('#start-mjpeg').onclick = () => {
+  socket?.close(); unique = 0; lastGeneration = 0; startedAt = performance.now();
+  view.src = `/mjpeg?cache=${Date.now()}`;
+  metrics.textContent = 'MJPEG control running. Browser multipart presentation has no per-frame metadata API; use server delivery counters and visual generation IDs.';
+};
+document.querySelector('#stop').onclick = () => { socket?.close(); view.removeAttribute('src'); };
+</script>
+
