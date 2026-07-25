@@ -72,6 +72,53 @@ class BrowserPresentation(BaseModel):
         return self
 
 
+class ClockSample(BaseModel):
+    """One NTP-style browser/server clock calibration sample."""
+
+    browser_send_unix_ms: float = Field(gt=0)
+    server_receive_unix_ns: int = Field(gt=0)
+    server_send_unix_ns: int = Field(gt=0)
+    browser_receive_unix_ms: float = Field(gt=0)
+    offset_ms: float
+    uncertainty_ms: float = Field(ge=0)
+
+
+class BrowserRunReport(BaseModel):
+    """Complete autonomous result uploaded by one browser client."""
+
+    schema_version: Literal[1] = SCHEMA_VERSION
+    run_id: str = Field(pattern=r"^[A-Za-z0-9._-]{1,80}$")
+    client_id: str = Field(pattern=r"^[A-Za-z0-9._-]{1,80}$")
+    path: DeliveryPath
+    user_agent: str = Field(min_length=1, max_length=1024)
+    started_unix_ms: float = Field(gt=0)
+    completed_unix_ms: float = Field(gt=0)
+    requested_duration_s: float = Field(gt=0, le=3600)
+    received_frames: int = Field(ge=0)
+    unique_presented_frames: int = Field(ge=0)
+    skipped_generations: int = Field(ge=0)
+    reconnects: int = Field(ge=0)
+    hidden_events: int = Field(ge=0)
+    clock: ClockSample
+    presentations: list[BrowserPresentation] = Field(max_length=10000)
+    errors: list[str] = Field(default_factory=list, max_length=100)
+
+    @model_validator(mode="after")
+    def validate_run(self) -> BrowserRunReport:
+        """Reject inconsistent aggregate browser evidence."""
+        if self.completed_unix_ms < self.started_unix_ms:
+            raise ValueError("run completed before it started")
+        if self.unique_presented_frames > self.received_frames:
+            raise ValueError("presented frames cannot exceed received frames")
+        if len(self.presentations) != self.unique_presented_frames:
+            raise ValueError("presentation count does not match aggregate")
+        if any(event.client_id != self.client_id for event in self.presentations):
+            raise ValueError("presentation belongs to another client")
+        if any(event.path is not self.path for event in self.presentations):
+            raise ValueError("presentation path does not match run")
+        return self
+
+
 class PathCounters(BaseModel):
     """Latest-frame delivery counters for one path."""
 

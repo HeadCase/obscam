@@ -7,7 +7,13 @@ import asyncio
 import pytest
 from pydantic import ValidationError
 
-from obscam.tools.gre_190_prototype.contract import FrameEnvelope
+from obscam.tools.gre_190_prototype.contract import (
+    BrowserPresentation,
+    BrowserRunReport,
+    ClockSample,
+    DeliveryPath,
+    FrameEnvelope,
+)
 from obscam.tools.gre_190_prototype.latest import EncodedFrame, LatestFrameFanout
 
 
@@ -60,3 +66,43 @@ def test_fanout_rejects_non_increasing_generation() -> None:
             await fanout.publish(EncodedFrame(envelope(1), b"again"))
 
     asyncio.run(scenario())
+
+
+def test_browser_run_rejects_mismatched_presentation_count() -> None:
+    """A partial telemetry upload cannot masquerade as a complete run."""
+    event = BrowserPresentation(
+        client_id="safari-1",
+        path=DeliveryPath.JPEG_WEBSOCKET,
+        generation=1,
+        browser_receive_ms=1,
+        decode_complete_ms=2,
+        visible_ms=3,
+        server_encode_end_ns=1,
+        clock_offset_ms=0,
+        clock_uncertainty_ms=1,
+        visibility_state="visible",
+    )
+    with pytest.raises(ValidationError, match="presentation count"):
+        BrowserRunReport(
+            run_id="wireguard-1",
+            client_id="safari-1",
+            path=DeliveryPath.JPEG_WEBSOCKET,
+            user_agent="Safari",
+            started_unix_ms=1,
+            completed_unix_ms=2,
+            requested_duration_s=60,
+            received_frames=2,
+            unique_presented_frames=2,
+            skipped_generations=0,
+            reconnects=1,
+            hidden_events=0,
+            clock=ClockSample(
+                browser_send_unix_ms=1,
+                server_receive_unix_ns=1,
+                server_send_unix_ns=2,
+                browser_receive_unix_ms=2,
+                offset_ms=0,
+                uncertainty_ms=0.5,
+            ),
+            presentations=[event],
+        )

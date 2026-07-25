@@ -33,3 +33,20 @@ clock-offset calibration exchange must be completed before interpreting
 cross-machine exposure-to-visible latency. Receive-to-visible and unique visible
 cadence remain valid instrumentation checks.
 
+## Autonomous remote-browser run
+
+Start the server on the Pi, choose one run ID, then open URLs of this form on the
+remote laptop through WireGuard:
+
+```text
+http://PI_WIREGUARD_IP:8190/?auto=1&run=RUN_ID&client=safari-1&duration=60
+http://PI_WIREGUARD_IP:8190/?auto=1&run=RUN_ID&client=safari-2&duration=60
+http://PI_WIREGUARD_IP:8190/?auto=1&run=RUN_ID&client=chromium-1&duration=60
+http://PI_WIREGUARD_IP:8190/?auto=1&run=RUN_ID&client=chromium-2&duration=60
+```
+
+Keep every tab foreground-visible until it says `COMPLETE`. Each client performs
+nine clock-calibration samples, runs JPEG/WebSocket delivery, deliberately
+reconnects halfway through, and uploads one validated result. Inspect all stored
+clients at `GET /api/runs/RUN_ID`. Results are held only in memory and disappear
+when the prototype server stops.
