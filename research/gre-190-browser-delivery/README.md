@@ -38,3 +38,21 @@ The first run ID without the `-r2` suffix is invalid: Uvicorn lacked a WebSocket
 protocol dependency, and all clients correctly uploaded connection failures.
 The missing dependency was added before this successful run.
 
+## Hardware H.264 preflight
+
+The Pi exposes the Broadcom `bcm2835-codec-encode` V4L2 M2M device at
+`/dev/video11`. GStreamer's `v4l2h264enc` negotiated successfully but failed to
+start streaming for every tested I/O mode and resolution; the kernel reported
+`bcm2835_codec_start_streaming: Failed enabling i/p port, ret -3`. The failure
+also occurred at 640x480 and was not caused by memory pressure, codec ownership,
+or disabled firmware: H.264 was enabled, no process owned `/dev/video11`, and
+CMA had approximately 500 MiB free.
+
+FFmpeg's `h264_v4l2m2m` wrapper against the same `/dev/video11` hardware passed.
+A 30-second deterministic 1920x1080/10 fps run encoded 300/300 frames into an
+18,010,669-byte Annex-B H.264 stream. Temperature rose from 56.9 C to 60.8 C and
+`throttled=0x0` remained clear. A subsequent invocation of the codified gate
+encoded 20/20 full-resolution frames in two seconds. The prototype therefore
+uses FFmpeg only as a thin owner of the hardware encoder and retains GStreamer
+for H.264 parsing, RTP/WebRTC, and fMP4 packaging. Software H.264 remains
+forbidden.

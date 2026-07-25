@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from pathlib import Path
 
 import pytest
 from pydantic import ValidationError
@@ -14,6 +15,7 @@ from obscam.tools.gre_190_prototype.contract import (
     DeliveryPath,
     FrameEnvelope,
 )
+from obscam.tools.gre_190_prototype.hardware_h264 import HardwareH264Scenario
 from obscam.tools.gre_190_prototype.latest import EncodedFrame, LatestFrameFanout
 
 
@@ -22,9 +24,13 @@ def envelope(generation: int) -> FrameEnvelope:
     return FrameEnvelope(
         generation=generation,
         exposure_end_ns=1,
+        exposure_end_unix_ns=1,
         capture_complete_ns=2,
+        capture_complete_unix_ns=2,
         encode_start_ns=3,
+        encode_start_unix_ns=3,
         encode_end_ns=4,
+        encode_end_unix_ns=4,
         encoded_bytes=1,
     )
 
@@ -35,11 +41,24 @@ def test_frame_envelope_rejects_impossible_timeline() -> None:
         FrameEnvelope(
             generation=1,
             exposure_end_ns=2,
+            exposure_end_unix_ns=1,
             capture_complete_ns=1,
+            capture_complete_unix_ns=2,
             encode_start_ns=3,
+            encode_start_unix_ns=3,
             encode_end_ns=4,
+            encode_end_unix_ns=4,
             encoded_bytes=1,
         )
+
+
+def test_hardware_h264_command_forbids_software_fallback(tmp_path: Path) -> None:
+    """The gate must explicitly select the Pi V4L2 M2M encoder."""
+    scenario = HardwareH264Scenario(duration_s=2)
+    arguments = scenario.ffmpeg_arguments(tmp_path / "probe.h264")
+    assert scenario.frames == 20
+    assert arguments[arguments.index("-c:v") + 1] == "h264_v4l2m2m"
+    assert "libx264" not in arguments
 
 
 def test_fanout_returns_latest_generation_without_queueing() -> None:

@@ -47,18 +47,26 @@ class GeneratedJpegSource:
         while True:
             generation += 1
             exposure_end_ns = time.perf_counter_ns()
+            exposure_end_unix_ns = time.time_ns()
             capture_complete_ns = time.perf_counter_ns()
+            capture_complete_unix_ns = time.time_ns()
             encode_start_ns = time.perf_counter_ns()
+            encode_start_unix_ns = time.time_ns()
             payload = await asyncio.to_thread(
                 _encode_test_frame, generation, self._quality
             )
             encode_end_ns = time.perf_counter_ns()
+            encode_end_unix_ns = time.time_ns()
             envelope = FrameEnvelope(
                 generation=generation,
                 exposure_end_ns=exposure_end_ns,
+                exposure_end_unix_ns=exposure_end_unix_ns,
                 capture_complete_ns=capture_complete_ns,
+                capture_complete_unix_ns=capture_complete_unix_ns,
                 encode_start_ns=encode_start_ns,
+                encode_start_unix_ns=encode_start_unix_ns,
                 encode_end_ns=encode_end_ns,
+                encode_end_unix_ns=encode_end_unix_ns,
                 encoded_bytes=len(payload),
             )
             await self._fanout.publish(EncodedFrame(envelope, payload))

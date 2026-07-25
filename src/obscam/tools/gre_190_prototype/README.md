@@ -9,6 +9,7 @@ Run read-only capability inspection:
 
 ```bash
 python -m obscam.tools.gre_190_prototype preflight
+python -m obscam.tools.gre_190_prototype hardware-h264 --duration-s 30
 ```
 
 Run the deterministic full-resolution source and open port 8190 in actual Safari
@@ -29,9 +30,10 @@ current generation, so a slow client skips replaced frames without queueing or
 delaying any peer.
 
 Browser reports currently carry intentionally-invalid clock uncertainty. A
-clock-offset calibration exchange must be completed before interpreting
-cross-machine exposure-to-visible latency. Receive-to-visible and unique visible
-cadence remain valid instrumentation checks.
+clock-offset calibration exchange selects the lowest-uncertainty of nine samples.
+Frame envelopes carry both server monotonic and Unix timestamps; use monotonic
+time for server-stage durations and calibrated Unix time for cross-machine
+exposure-to-visible latency.
 
 ## Autonomous remote-browser run
 

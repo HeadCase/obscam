@@ -29,9 +29,13 @@ class FrameEnvelope(BaseModel):
     schema_version: Literal[1] = SCHEMA_VERSION
     generation: int = Field(ge=1)
     exposure_end_ns: int = Field(ge=0)
+    exposure_end_unix_ns: int = Field(gt=0)
     capture_complete_ns: int = Field(ge=0)
+    capture_complete_unix_ns: int = Field(gt=0)
     encode_start_ns: int = Field(ge=0)
+    encode_start_unix_ns: int = Field(gt=0)
     encode_end_ns: int = Field(ge=0)
+    encode_end_unix_ns: int = Field(gt=0)
     width: Literal[1920] = FULL_FRAME_WIDTH
     height: Literal[1080] = FULL_FRAME_HEIGHT
     encoded_bytes: int = Field(gt=0)
@@ -46,6 +50,13 @@ class FrameEnvelope(BaseModel):
             <= self.encode_end_ns
         ):
             raise ValueError("frame timestamps are not monotonic")
+        if not (
+            self.exposure_end_unix_ns
+            <= self.capture_complete_unix_ns
+            <= self.encode_start_unix_ns
+            <= self.encode_end_unix_ns
+        ):
+            raise ValueError("frame Unix timestamps are not monotonic")
         return self
 
 
