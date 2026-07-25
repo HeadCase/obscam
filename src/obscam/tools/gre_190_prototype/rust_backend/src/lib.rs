@@ -2,6 +2,7 @@
 
 pub mod camera;
 pub mod h264;
+pub mod jpeg;
 pub mod runtime;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

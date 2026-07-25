@@ -2,12 +2,14 @@
 
 use std::env;
 use std::io::{self, Write};
+use std::sync::mpsc::sync_channel;
 use std::sync::Arc;
 use std::thread;
 use std::time::{Duration, Instant};
 
 use gre_190_rust_backend::camera::{CameraOwner, RAW8_FRAME_BYTES};
 use gre_190_rust_backend::h264::H264Sink;
+use gre_190_rust_backend::jpeg::JpegSink;
 use gre_190_rust_backend::runtime::FrameHub;
 use gre_190_rust_backend::{BackendState, Consumer};
 
@@ -51,7 +53,27 @@ fn main() {
             .map(|value| value.parse::<u32>().expect("fps must be an integer"))
             .unwrap_or(20);
         let night_stretch = arguments.get(6).map(String::as_str) == Some("night");
-        h264_stream(duration_s, exposure_us, gain, fps, night_stretch);
+        run_stream(duration_s, exposure_us, gain, fps, night_stretch, false);
+        return;
+    }
+    if arguments.get(1).map(String::as_str) == Some("dual-stream") {
+        let duration_s = arguments
+            .get(2)
+            .map(|value| value.parse::<u64>().expect("duration must be seconds"))
+            .unwrap_or(60);
+        let exposure_us = arguments
+            .get(3)
+            .map(|value| value.parse::<i64>().expect("exposure must be microseconds"))
+            .unwrap_or(10_000);
+        let gain = arguments
+            .get(4)
+            .map(|value| value.parse::<i64>().expect("gain must be an integer"))
+            .unwrap_or(0);
+        let fps = arguments
+            .get(5)
+            .map(|value| value.parse::<u32>().expect("fps must be an integer"))
+            .unwrap_or(20);
+        run_stream(duration_s, exposure_us, gain, fps, false, true);
         return;
     }
     if arguments.get(1).map(String::as_str) == Some("sample") {
@@ -108,7 +130,14 @@ fn main() {
     }
 }
 
-fn h264_stream(duration_s: u64, exposure_us: i64, gain: i64, fps: u32, night_stretch: bool) {
+fn run_stream(
+    duration_s: u64,
+    exposure_us: i64,
+    gain: i64,
+    fps: u32,
+    night_stretch: bool,
+    emit_jpeg: bool,
+) {
     let camera =
         CameraOwner::open_exact("ZWO ASI662MC", "1d274e0920010900").expect("open exact ASI662MC");
     let bayer = camera
@@ -135,7 +164,36 @@ fn h264_stream(duration_s: u64, exposure_us: i64, gain: i64, fps: u32, night_str
         sink.finish()
     });
     let jpeg_hub = Arc::clone(&hub);
-    let jpeg = thread::spawn(move || jpeg_hub.consume(Consumer::Jpeg, |_bytes, _frame| Ok(())));
+    let jpeg = thread::spawn(move || -> Result<(), String> {
+        if !emit_jpeg {
+            return jpeg_hub.consume(Consumer::Jpeg, |_bytes, _frame| Ok(()));
+        }
+        let (mut sink, output) = JpegSink::new(bayer, 5)?;
+        let (metadata_sender, metadata_receiver) = sync_channel(1);
+        let packets = thread::spawn(move || -> Result<(), String> {
+            while let Ok((frame, encode_start_ns, encode_end_ns)) = metadata_receiver.recv() {
+                let payload = output
+                    .recv()
+                    .map_err(|_| "FFmpeg JPEG reader stopped unexpectedly".to_owned())??;
+                write_jpeg_packet(frame, exposure_us, encode_start_ns, encode_end_ns, &payload)?;
+            }
+            Ok(())
+        });
+        let result = jpeg_hub.consume(Consumer::Jpeg, |bytes, frame| {
+            let encode_start_ns = unix_ns()?;
+            sink.submit(bytes)?;
+            let encode_end_ns = unix_ns()?;
+            metadata_sender
+                .send((frame, encode_start_ns, encode_end_ns))
+                .map_err(|_| "JPEG packet writer stopped unexpectedly".to_owned())
+        });
+        drop(metadata_sender);
+        sink.finish()?;
+        packets
+            .join()
+            .map_err(|_| "JPEG packet writer panicked".to_owned())??;
+        result
+    });
     let started = Instant::now();
     while started.elapsed() < Duration::from_secs(duration_s) {
         hub.capture(|frame| video.capture_into(frame, timeout_ms))
@@ -148,7 +206,52 @@ fn h264_stream(duration_s: u64, exposure_us: i64, gain: i64, fps: u32, night_str
     jpeg.join()
         .expect("JPEG worker panicked")
         .expect("JPEG sink");
-    println!("{}", hub.render().expect("render frame hub"));
+    if emit_jpeg {
+        eprintln!("{}", hub.render().expect("render frame hub"));
+    } else {
+        println!("{}", hub.render().expect("render frame hub"));
+    }
+}
+
+fn unix_ns() -> Result<u64, String> {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|duration| duration.as_nanos() as u64)
+        .map_err(|_| "system clock is before Unix epoch".to_owned())
+}
+
+fn write_jpeg_packet(
+    frame: gre_190_rust_backend::FrameRef,
+    exposure_us: i64,
+    encode_start_ns: u64,
+    encode_end_ns: u64,
+    payload: &[u8],
+) -> Result<(), String> {
+    let exposure_end_ns = frame
+        .capture_complete_ns
+        .saturating_sub(exposure_us as u64 * 1_000);
+    let metadata = format!(
+        "{{\"schema_version\":1,\"generation\":{},\"exposure_end_ns\":{},\"exposure_end_unix_ns\":{},\"capture_complete_ns\":{},\"capture_complete_unix_ns\":{},\"encode_start_ns\":{},\"encode_start_unix_ns\":{},\"encode_end_ns\":{},\"encode_end_unix_ns\":{},\"width\":1920,\"height\":1080,\"encoded_bytes\":{}}}",
+        frame.generation,
+        exposure_end_ns,
+        exposure_end_ns,
+        frame.capture_complete_ns,
+        frame.capture_complete_ns,
+        encode_start_ns,
+        encode_start_ns,
+        encode_end_ns,
+        encode_end_ns,
+        payload.len()
+    );
+    let mut output = io::stdout().lock();
+    output
+        .write_all(b"GREJ")
+        .and_then(|_| output.write_all(&(metadata.len() as u32).to_be_bytes()))
+        .and_then(|_| output.write_all(metadata.as_bytes()))
+        .and_then(|_| output.write_all(&(payload.len() as u32).to_be_bytes()))
+        .and_then(|_| output.write_all(payload))
+        .and_then(|_| output.flush())
+        .map_err(|error| format!("could not emit JPEG packet: {error}"))
 }
 
 fn sample_signal(exposure_us: i64, gain: i64) {

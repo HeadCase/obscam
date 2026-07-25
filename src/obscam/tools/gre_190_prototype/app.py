@@ -19,15 +19,31 @@ from obscam.tools.gre_190_prototype.contract import (
 )
 from obscam.tools.gre_190_prototype.latest import LatestFrameFanout
 from obscam.tools.gre_190_prototype.preflight import inspect_capabilities
-from obscam.tools.gre_190_prototype.source import GeneratedJpegSource
+from obscam.tools.gre_190_prototype.source import GeneratedJpegSource, RustJpegSource
 
 BOUNDARY = b"gre190frame"
 
 
-def create_app(*, fps: float = 10, quality: int = 80) -> FastAPI:
-    """Create an isolated generated-source benchmark application."""
+def create_app(
+    *,
+    fps: float = 10,
+    quality: int = 80,
+    native: bool = False,
+    exposure_us: int = 10_000,
+    gain: int = 0,
+) -> FastAPI:
+    """Create an isolated generated or native-source benchmark application."""
     fanout = LatestFrameFanout()
-    source = GeneratedJpegSource(fanout, fps=fps, quality=quality)
+    source = (
+        RustJpegSource(
+            fanout,
+            exposure_us=exposure_us,
+            gain=gain,
+            fps=round(fps),
+        )
+        if native
+        else GeneratedJpegSource(fanout, fps=fps, quality=quality)
+    )
     presentations: list[BrowserPresentation] = []
     completed_runs: dict[str, dict[str, BrowserRunReport]] = {}
     counters = {"websocket_delivered": 0, "mjpeg_delivered": 0}

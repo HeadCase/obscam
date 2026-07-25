@@ -19,10 +19,20 @@ and Chromium browsers:
 python -m obscam.tools.gre_190_prototype serve --fps 10 --quality 80
 ```
 
-The generated source is only an instrumentation check. Final GRE-190 evidence
-must replace it with the GRE-183 native RAW8 latest-frame handoff and must run on
-the deployed Pi. Hardware H.264/WebRTC is a hard gate: preflight must report
-`h264_webrtc_ready: true`; software H.264 is not an acceptable substitute.
+The generated source is only an instrumentation check. For the native dual-path
+run, build the Rust backend, start MediaMTX as described below, then run:
+
+```bash
+cargo build --manifest-path \
+  src/obscam/tools/gre_190_prototype/rust_backend/Cargo.toml
+python -m obscam.tools.gre_190_prototype serve --native \
+  --fps 20 --exposure-us 10000 --gain 0
+```
+
+The Rust process exclusively owns the enrolled camera and fixed RAW8 buffer
+pool. It independently feeds hardware H.264/RTSP and software JPEG encoders;
+Python receives only framed, compressed JPEG packets and relays the newest one
+to browsers. Software H.264 is not an acceptable substitute.
 
 The WebSocket wire format is a four-byte network-order JSON length, the UTF-8
 `FrameEnvelope`, then one complete JPEG. Every client independently waits for the
@@ -31,9 +41,10 @@ delaying any peer.
 
 Browser reports currently carry intentionally-invalid clock uncertainty. A
 clock-offset calibration exchange selects the lowest-uncertainty of nine samples.
-Frame envelopes carry both server monotonic and Unix timestamps; use monotonic
-time for server-stage durations and calibrated Unix time for cross-machine
-exposure-to-visible latency.
+Frame envelopes carry calibrated Unix timestamps for the native prototype's
+cross-machine latency measurement. The duplicate `*_ns` fields retain the
+original generated-source contract shape; they must not be interpreted as a
+separate monotonic clock in native runs.
 
 ## Hardware H.264 WebRTC smoke test
 

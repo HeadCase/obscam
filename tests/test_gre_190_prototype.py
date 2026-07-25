@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import struct
 from pathlib import Path
 
 import pytest
@@ -17,6 +18,7 @@ from obscam.tools.gre_190_prototype.contract import (
 )
 from obscam.tools.gre_190_prototype.hardware_h264 import HardwareH264Scenario
 from obscam.tools.gre_190_prototype.latest import EncodedFrame, LatestFrameFanout
+from obscam.tools.gre_190_prototype.source import read_rust_jpeg_packet
 
 
 def envelope(generation: int) -> FrameEnvelope:
@@ -84,6 +86,33 @@ def test_fanout_rejects_non_increasing_generation() -> None:
         await fanout.publish(EncodedFrame(envelope(1), b"1"))
         with pytest.raises(ValueError, match="generations must increase"):
             await fanout.publish(EncodedFrame(envelope(1), b"again"))
+
+    asyncio.run(scenario())
+
+
+def test_rust_jpeg_packet_is_validated() -> None:
+    """The Python relay accepts only a self-consistent compressed packet."""
+
+    async def scenario() -> None:
+        reader = asyncio.StreamReader()
+        payload = b"\xff\xd8body\xff\xd9"
+        metadata = (
+            envelope(7)
+            .model_copy(update={"encoded_bytes": len(payload)})
+            .model_dump_json()
+            .encode()
+        )
+        reader.feed_data(
+            b"GREJ"
+            + struct.pack("!I", len(metadata))
+            + metadata
+            + struct.pack("!I", len(payload))
+            + payload
+        )
+        reader.feed_eof()
+        frame = await read_rust_jpeg_packet(reader)
+        assert frame.envelope.generation == 7
+        assert frame.payload == payload
 
     asyncio.run(scenario())
 

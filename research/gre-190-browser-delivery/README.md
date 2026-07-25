@@ -118,3 +118,49 @@ counters and zero frame errors.
 Closed-roof image cleanup is not part of GRE-190. Follow-up work is tracked in
 GRE-196 (monochrome/spatial denoise), GRE-197 (defective pixels), and GRE-198
 (temperature-aware dark correction).
+
+## Native dual-path browser run
+
+Run ID: `native-dual-20260726`
+
+The Rust owner simultaneously fed FFmpeg's hardware H.264 publisher and a
+single-thread, low-delay JPEG encoder from independent latest-frame leases. Its
+only Python-facing media interface was a bounded stream of compressed JPEG plus
+validated frame metadata; Python did not receive RAW8 frames or own capture.
+
+A five-second direct integration captured 470 generations, completed 79 H.264
+and 28 JPEG generations, and had zero buffer-pool starvation. All 28 emitted
+JPEG packets had valid start/end markers and strictly increasing generations.
+
+The same process then served a 30-second real-camera JPEG/WebSocket run to Brave
+149 and Safari 26.5.2 over WireGuard. Both clients stayed visible, presented
+every frame received, deliberately reconnected once, and reported no errors.
+
+| Client | Presented | Cadence | Skipped capture generations | Encode-to-visible p50/p95 | Decode p50 |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Brave | 203 | 6.77 fps | 2,380 | 165.1 / 364.2 ms | 8.0 ms |
+| Safari | 178 | 5.93 fps | 2,367 | 195.1 / 408.9 ms | 13.0 ms |
+
+Clock uncertainty was 19.5 ms in Brave and 13.0 ms in Safari. The high skipped
+generation counts are intentional latest-frame replacement against the camera's
+roughly 90 fps RAW8 cadence, not queued loss. This run demonstrates reliable
+isolation and reconnection, but it also shows that full-resolution software JPEG
+colour conversion on this Pi delivers only about 6--7 visible fps and materially
+higher latency than its browser decode time.
+
+### Decision
+
+Proceed with the Rust media backend as the production candidate: one exact
+camera owner, a fixed RAW8 pool, and independent bounded consumers. Use one
+hardware H.264 encode with MediaMTX WebRTC/WHEP fan-out as the primary monitoring
+path because it sustains substantially more native-camera generations and has
+already displayed concurrently in Brave and Safari over the required VPN TCP
+ICE fallback. Keep the compressed JPEG/WebSocket interface as the instrumented
+fallback and diagnostic path, not the default live view. Do not pursue the
+custom GStreamer WebRTC sender, software H.264, or per-client encoding.
+
+The remaining uncertainty is quantitative H.264 exposure-to-visible latency:
+the stock MediaMTX player exposes presentation callbacks but no source generation
+metadata. Production implementation should add a narrow telemetry correlation
+mechanism around the WHEP player and verify that metric without moving capture or
+raw frames back into Python.

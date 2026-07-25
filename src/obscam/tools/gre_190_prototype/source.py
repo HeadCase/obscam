@@ -4,8 +4,11 @@ from __future__ import annotations
 
 import asyncio
 import io
+import json
+import struct
 import time
 from dataclasses import dataclass
+from pathlib import Path
 
 from PIL import Image, ImageDraw
 
@@ -74,6 +77,75 @@ class GeneratedJpegSource:
             self.counters.encoded_bytes += len(payload)
             next_frame += self._period_s
             await asyncio.sleep(max(0, next_frame - time.perf_counter()))
+
+
+class RustJpegSource:
+    """Relay framed JPEG packets emitted by the native camera owner."""
+
+    def __init__(
+        self,
+        fanout: LatestFrameFanout,
+        *,
+        exposure_us: int,
+        gain: int,
+        fps: int,
+        binary: Path | None = None,
+    ) -> None:
+        self._fanout = fanout
+        self._exposure_us = exposure_us
+        self._gain = gain
+        self._fps = fps
+        self._binary = binary or (
+            Path(__file__).with_name("rust_backend")
+            / "target"
+            / "debug"
+            / "gre-190-rust-backend"
+        )
+        self.counters = SourceCounters()
+
+    async def run(self) -> None:
+        """Start the native owner and publish its compressed JPEG output."""
+        process = await asyncio.create_subprocess_exec(
+            self._binary,
+            "dual-stream",
+            "86400",
+            str(self._exposure_us),
+            str(self._gain),
+            str(self._fps),
+            stdout=asyncio.subprocess.PIPE,
+        )
+        assert process.stdout is not None
+        try:
+            while True:
+                frame = await read_rust_jpeg_packet(process.stdout)
+                await self._fanout.publish(frame)
+                self.counters.produced += 1
+                self.counters.encoded_bytes += len(frame.payload)
+        finally:
+            if process.returncode is None:
+                process.terminate()
+            await process.wait()
+
+
+async def read_rust_jpeg_packet(reader: asyncio.StreamReader) -> EncodedFrame:
+    """Read and validate one length-prefixed packet from the Rust backend."""
+    magic = await reader.readexactly(4)
+    if magic != b"GREJ":
+        raise ValueError("invalid Rust JPEG packet magic")
+    metadata_size = struct.unpack("!I", await reader.readexactly(4))[0]
+    if metadata_size > 64 * 1024:
+        raise ValueError("Rust JPEG metadata exceeds safety limit")
+    metadata = json.loads(await reader.readexactly(metadata_size))
+    payload_size = struct.unpack("!I", await reader.readexactly(4))[0]
+    if payload_size > 16 * 1024 * 1024:
+        raise ValueError("Rust JPEG payload exceeds safety limit")
+    payload = await reader.readexactly(payload_size)
+    envelope = FrameEnvelope.model_validate(metadata)
+    if envelope.encoded_bytes != payload_size:
+        raise ValueError("Rust JPEG payload length disagrees with metadata")
+    if not payload.startswith(b"\xff\xd8") or not payload.endswith(b"\xff\xd9"):
+        raise ValueError("Rust JPEG payload has invalid markers")
+    return EncodedFrame(envelope, payload)
 
 
 def _encode_test_frame(generation: int, quality: int) -> bytes:

@@ -53,3 +53,17 @@ GRE-190 finalist. The gateway requires a read timeout longer than the maximum
 exposure plus processing time. The H.264 worker consumes only its newest waiting
 generation, so a slower Bayer conversion or hardware encoder cannot queue stale
 camera frames or block the independent JPEG lease.
+
+Run both independent encoders and emit the JPEG branch on standard output:
+
+```bash
+cargo run --manifest-path \
+  src/obscam/tools/gre_190_prototype/rust_backend/Cargo.toml -- \
+  dual-stream 60 10000 0 20 > /tmp/gre190-jpeg-packets.bin
+```
+
+Each stdout packet is `GREJ`, a network-order 32-bit JSON metadata length, one
+validated `FrameEnvelope` JSON value, a network-order 32-bit JPEG length, and
+one complete JPEG. Diagnostic counters and FFmpeg messages use stderr, keeping
+the compressed interface machine-readable. Both consumers are bounded
+latest-frame workers and may replace their own waiting generation independently.

@@ -28,6 +28,9 @@ def main() -> None:
     serve.add_argument("--port", type=int, default=8190)
     serve.add_argument("--fps", type=float, default=10)
     serve.add_argument("--quality", type=int, choices=range(1, 96), default=80)
+    serve.add_argument("--native", action="store_true")
+    serve.add_argument("--exposure-us", type=int, default=10_000)
+    serve.add_argument("--gain", type=int, default=0)
     args = parser.parse_args()
     if args.command == "preflight":
         print(inspect_capabilities().to_json())
@@ -37,7 +40,13 @@ def main() -> None:
         print(run_hardware_gate(args.output, scenario).to_json())
         return
     uvicorn.run(
-        create_app(fps=args.fps, quality=args.quality),
+        create_app(
+            fps=args.fps,
+            quality=args.quality,
+            native=args.native,
+            exposure_us=args.exposure_us,
+            gain=args.gain,
+        ),
         host=args.host,
         port=args.port,
     )
