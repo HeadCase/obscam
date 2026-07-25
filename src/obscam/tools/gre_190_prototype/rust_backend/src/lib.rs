@@ -1,6 +1,8 @@
 //! Throwaway GRE-190 frame-ownership model.
 
 pub mod camera;
+pub mod h264;
+pub mod runtime;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Consumer {

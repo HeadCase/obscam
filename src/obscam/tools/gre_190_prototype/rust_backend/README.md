@@ -35,4 +35,21 @@ The camera command requires exactly one exact model match and the enrolled
 factory serial before capture. It opens only that candidate. It currently
 configures 1920x1080 RAW8 video at 10 ms, gain 0, high-speed mode 1, and USB
 bandwidth 100, then timestamps SDK completion and releases every frame through
-both logical consumer leases. Real encoder sinks are the next prototype slice.
+both logical consumer leases.
+
+Publish native-camera frames through the hardware H.264/WebRTC path after
+starting the isolated MediaMTX configuration:
+
+```bash
+cargo run --manifest-path \
+  src/obscam/tools/gre_190_prototype/rust_backend/Cargo.toml -- \
+  h264-stream 60 10000 0 20
+```
+
+Arguments after `h264-stream` are duration seconds, exposure microseconds, gain,
+and declared/paced output fps. An optional final `night` argument applies the
+temporary closed-roof display stretch; it is exploratory presentation, not a
+GRE-190 finalist. The gateway requires a read timeout longer than the maximum
+exposure plus processing time. The H.264 worker consumes only its newest waiting
+generation, so a slower Bayer conversion or hardware encoder cannot queue stale
+camera frames or block the independent JPEG lease.

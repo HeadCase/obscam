@@ -1,6 +1,7 @@
 # Throwaway GRE-190 gateway configuration. Never install as a system service.
 logLevel: debug
 logDestinations: [stdout]
+readTimeout: 45s
 
 api: true
 apiAddress: 127.0.0.1:19997

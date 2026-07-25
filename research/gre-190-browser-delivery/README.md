@@ -86,3 +86,35 @@ exposure-end-to-visible latency: the gateway's built-in player has no frame
 generation timestamp or presentation telemetry. That measurement must use the
 instrumented browser harness with a timestamped camera source or equivalent
 end-to-end marker.
+
+## Native-camera Rust-to-WebRTC integration
+
+The production-shaped Rust prototype reused GRE-191's fail-closed identity
+boundary: it required exactly one exact `ZWO ASI662MC` match, opened only that
+candidate, and validated factory serial `1d274e0920010900`. The ASI178MC AllSky
+capture process remained running and both USB devices remained present after
+identity and capture checks.
+
+A fixed four-buffer Rust owner captured 1920x1080 RAW8 SDK video and exposed
+independent latest-frame leases to logical JPEG and real H.264 consumers. In a
+10-second 10 ms/gain-0 integration run, capture completed 914 frames (91.4 fps)
+with zero pool starvation. The FFmpeg Bayer conversion plus
+`h264_v4l2m2m` sink completed 224 generations while replacing 690 obsolete H.264
+generations; the independent JPEG lease continued without being blocked. The
+gateway received a valid 1920x1080 Baseline H.264 track with zero inbound frame
+errors. This demonstrates bounded backpressure isolation rather than queueing
+the camera's approximately 91 fps output behind the approximately 22 fps colour
+H.264 processing ceiling.
+
+Real ASI662MC frames were displayed in Brave through MediaMTX/WebRTC at both the
+fast exposure point and closed-roof night settings. The latter exposed a
+long-exposure transport requirement: 10-second integrations plus processing
+slightly exceeded MediaMTX's default 10-second RTSP read timeout, causing the
+publisher to be closed and FFmpeg to report a broken pipe. Raising the isolated
+gateway's `readTimeout` to 45 seconds kept the same publisher and browser session
+connected across repeated 10-second inter-frame gaps with increasing byte
+counters and zero frame errors.
+
+Closed-roof image cleanup is not part of GRE-190. Follow-up work is tracked in
+GRE-196 (monochrome/spatial denoise), GRE-197 (defective pixels), and GRE-198
+(temperature-aware dark correction).

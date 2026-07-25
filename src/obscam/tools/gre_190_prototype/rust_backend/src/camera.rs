@@ -183,6 +183,16 @@ impl CameraOwner {
         self.camera_id
     }
 
+    pub fn ffmpeg_bayer_pixel_format(&self) -> Result<&'static str, String> {
+        match self.info.bayer_pattern {
+            0 => Ok("bayer_rggb8"),
+            1 => Ok("bayer_bggr8"),
+            2 => Ok("bayer_grbg8"),
+            3 => Ok("bayer_gbrg8"),
+            pattern => Err(format!("unsupported Bayer pattern {pattern}")),
+        }
+    }
+
     pub fn start_raw8_video(
         &self,
         exposure_us: c_long,
