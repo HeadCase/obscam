@@ -1,6 +1,17 @@
 repos:
   - repo: local
     hooks:
+      - id: deptry
+        name: deptry
+        entry: uv run deptry .
+        language: system
+        pass_filenames: false
+      - id: ty
+        name: ty
+        entry: uv run ty check 
+        language: system
+        pass_filenames: false
+        types_or: [python]
       - id: ruff-format
         name: ruff format
         entry: uv run ruff format --check src tests
@@ -11,11 +22,6 @@ repos:
         name: ruff check
         entry: uv run ruff check src tests
         language: system
+        types: [python]
         pass_filenames: false
-        types_or: [python]
-      - id: ty-check
-        name: ty check
-        entry: uv run ty check src tests
-        language: system
-        pass_filenames: false
-        types_or: [python]
+
