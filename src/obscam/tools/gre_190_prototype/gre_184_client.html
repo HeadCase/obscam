@@ -97,20 +97,20 @@
   </section>
 
   <section id="variant-b" class="controls edges" hidden>
-    <label class="edge left"><strong data-value="exposure"></strong><input id="edge-exposure" type="range" min="0" max="12"><small>Exposure</small></label>
+    <label class="edge left"><strong data-value="exposure"></strong><input id="edge-exposure" type="range" min="0" max="13"><small>Exposure</small></label>
     <label class="edge right"><strong data-value="gain"></strong><input id="edge-gain" type="range" min="0" max="13"><small>Gain</small></label>
     <div class="radial"><button class="trigger" aria-label="Toggle actions">✦</button><button class="action one" data-action="treatment" aria-label="Toggle treatment">◐</button><button class="action two" data-action="snapshot" aria-label="Download snapshot">⇩</button><button class="action three" data-action="rotate" aria-label="Rotate">↻</button><button class="action four" data-action="authority" aria-label="Take control">⌁</button></div>
   </section>
 
-  <section id="variant-c" class="controls palette-wrap" hidden><button class="palette-trigger">Controls</button><div class="palette" hidden><header><div><small>VIEWER CONTROLS</small><strong>Adjust camera</strong></div><button class="palette-close" aria-label="Close">×</button></header><label><span>Exposure <strong data-value="exposure"></strong></span><input id="palette-exposure" type="range" min="0" max="12"></label><label><span>Gain <strong data-value="gain"></strong></span><input id="palette-gain" type="range" min="0" max="13"></label><div class="palette-grid"><button data-action="treatment">Switch treatment</button><button data-action="snapshot">Download snapshot</button><button data-action="rotate">Rotate frame</button><button data-action="authority">Take control</button></div></div></section>
+  <section id="variant-c" class="controls palette-wrap" hidden><button class="palette-trigger">Controls</button><div class="palette" hidden><header><div><small>VIEWER CONTROLS</small><strong>Adjust camera</strong></div><button class="palette-close" aria-label="Close">×</button></header><label><span>Exposure <strong data-value="exposure"></strong></span><input id="palette-exposure" type="range" min="0" max="13"></label><label><span>Gain <strong data-value="gain"></strong></span><input id="palette-gain" type="range" min="0" max="13"></label><div class="palette-grid"><button data-action="treatment">Switch treatment</button><button data-action="snapshot">Download snapshot</button><button data-action="rotate">Rotate frame</button><button data-action="authority">Take control</button></div></div></section>
 
   <div id="dialog-backdrop" hidden><section id="dialog" role="dialog" aria-modal="true" aria-labelledby="dialog-title"><small>CONTROL AUTHORITY</small><h2 id="dialog-title">Take control from another viewer?</h2><p>Their current adjustment will stop. Authority remains simulated in this UI prototype.</p><footer><button id="cancel-takeover">Cancel</button><button id="confirm-takeover" class="confirm">Take control</button></footer></section></div>
   <div id="toast" hidden></div>
   <nav id="switcher"><button id="previous" aria-label="Previous variant">←</button><span><small>GRE-184 · GRE-190 HOST</small><strong id="variant-label"></strong></span><button id="next" aria-label="Next variant">→</button></nav>
 </main>
 <script>
-const exposureScale = [30000,20000,15000,10000,5000,2000,1000,500,200,100,50,20,10];
-const exposureLabels = ['30s','20s','15s','10s','5s','2s','1s','500ms','200ms','100ms','50ms','20ms','10ms'];
+const exposureScale = [30000,20000,15000,10000,5000,2000,1000,500,300,200,100,50,20,10];
+const exposureLabels = ['30s','20s','15s','10s','5s','2s','1s','500ms','300ms','200ms','100ms','50ms','20ms','10ms'];
 const gainScale = [0,25,50,100,150,200,250,300,350,400,450,500,550,600];
 const variants = {A:'A — Bottom tray', B:'B — Edge controls', C:'C — Command palette'};
 const params = new URLSearchParams(location.search);

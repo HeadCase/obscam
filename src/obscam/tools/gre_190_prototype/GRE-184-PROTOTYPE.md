@@ -34,6 +34,13 @@ download exports the actual presented canvas. Exposure, gain, and authority are
 browser-local simulations because the greenfield delivery prototype deliberately
 has no camera-control API.
 
+## Decision
+
+Variant A is the selected direction: a compact bottom tray with all fourteen
+curated exposure values visible in a seven-by-two button grid, a gain slider,
+and direct mode, snapshot, rotation, and authority actions. Controls auto-hide
+without hiding truthful stream status or cropping the complete source frame.
+
 ## Evaluation tasks
 
 For each variant on a mobile viewport, record completion time, errors or
