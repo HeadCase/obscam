@@ -30,11 +30,10 @@
     #status.stale { color:#ffdca1; } #status.stale .dot { background:var(--warn); box-shadow:none; }
     .controls { position:fixed; z-index:30; transition:opacity .18s ease; }
     .tray { right:.6rem; bottom:calc(4.8rem + env(safe-area-inset-bottom)); left:.6rem; padding:.65rem .75rem .55rem; border:1px solid var(--line); border-radius:1.15rem; background:var(--panel); box-shadow:0 1.2rem 4rem #0009; backdrop-filter:blur(20px); }
-    .exposure-row { display:grid; grid-template-columns:auto minmax(0,1fr); align-items:center; gap:.55rem; padding:0 .2rem .55rem; border-bottom:1px solid var(--line); }
-    .exposure-row > span { color:var(--muted); font-size:.62rem; letter-spacing:.04em; text-transform:uppercase; }
-    .exposure-options { display:flex; min-width:0; gap:.35rem; overflow-x:auto; overscroll-behavior-x:contain; scrollbar-width:none; scroll-snap-type:x proximity; }
-    .exposure-options::-webkit-scrollbar { display:none; }
-    .exposure-options button { flex:0 0 auto; min-width:2.7rem; min-height:2rem; padding:.35rem .55rem; border:1px solid transparent; border-radius:.55rem; background:#ffffff0e; color:var(--muted); font:700 .69rem ui-monospace,monospace; scroll-snap-align:center; }
+    .exposure-row { display:grid; gap:.35rem; padding:0 .2rem .55rem; border-bottom:1px solid var(--line); }
+    .exposure-row > span { color:var(--muted); font-size:.58rem; letter-spacing:.04em; text-transform:uppercase; }
+    .exposure-options { display:grid; grid-template-columns:repeat(7,minmax(0,1fr)); gap:.3rem; min-width:0; }
+    .exposure-options button { min-width:0; min-height:1.85rem; padding:.3rem .15rem; border:1px solid transparent; border-radius:.5rem; background:#ffffff0e; color:var(--muted); font:700 clamp(.56rem,2.3vw,.68rem) ui-monospace,monospace; }
     .exposure-options button.selected { border-color:#66e3b488; background:#66e3b421; color:var(--text); }
     .tray-second-row { display:grid; grid-template-columns:minmax(7rem,1.25fr) 2fr; align-items:center; gap:.55rem; padding-top:.35rem; }
     .gain-control { display:grid; grid-template-columns:auto 1fr auto; align-items:center; gap:.4rem; min-width:0; color:var(--muted); font-size:.62rem; }
@@ -78,7 +77,7 @@
     #switcher button { height:2.8rem; background:transparent; color:#10141b; font-size:1.1rem; } #switcher span { display:flex; flex-direction:column; align-items:center; line-height:1.1; }
     #switcher small { color:#657080; font-size:.48rem; letter-spacing:.12em; } #switcher strong { font-size:.68rem; }
     @media(min-width:700px) { .tray { right:50%; left:auto; width:31rem; transform:translateX(50%); } .edge.left{left:1rem}.edge.right{right:1rem} }
-    @media(max-height:560px) and (orientation:landscape) { .tray{right:5.4rem;bottom:.6rem;left:5.4rem;display:grid;grid-template-columns:minmax(0,1fr) minmax(18rem,.8fr);align-items:center;gap:.5rem;padding:.4rem .6rem}.exposure-row{padding:0 .6rem 0 0;border-right:1px solid var(--line);border-bottom:0}.tray-second-row{padding:0}.actions small{display:none}.actions button{min-height:2.25rem}#switcher{right:.6rem;bottom:.6rem;transform:none;grid-template-columns:2.5rem 2.5rem}#switcher span{display:none}.palette-wrap{bottom:.6rem} }
+    @media(max-height:560px) and (orientation:landscape) { .tray{right:5.4rem;bottom:.6rem;left:5.4rem;display:grid;grid-template-columns:minmax(0,1fr) minmax(18rem,.8fr);align-items:center;gap:.5rem;padding:.4rem .6rem}.exposure-row{padding:0 .6rem 0 0;border-right:1px solid var(--line);border-bottom:0}.exposure-row>span{display:none}.exposure-options button{min-height:1.7rem}.tray-second-row{padding:0}.actions small{display:none}.actions button{min-height:2.25rem}#switcher{right:.6rem;bottom:.6rem;transform:none;grid-template-columns:2.5rem 2.5rem}#switcher span{display:none}.palette-wrap{bottom:.6rem} }
   </style>
 </head>
 <body>
@@ -154,7 +153,7 @@ function act(action){
   render();
 }
 const exposureOptions=document.querySelector('#exposure-options');
-exposureLabels.forEach((label,index)=>{const button=document.createElement('button');button.type='button';button.textContent=label;button.dataset.index=index;button.onclick=()=>{model.exposure=index;render();button.scrollIntoView({behavior:'smooth',block:'nearest',inline:'center'});showControls();};exposureOptions.append(button);});
+exposureLabels.forEach((label,index)=>{const button=document.createElement('button');button.type='button';button.textContent=label;button.dataset.index=index;button.onclick=()=>{model.exposure=index;render();showControls();};exposureOptions.append(button);});
 for(const id of ['edge-exposure','palette-exposure'])document.querySelector(`#${id}`).oninput=event=>{model.exposure=Number(event.target.value);render();showControls();};
 for(const id of ['tray-gain','edge-gain','palette-gain'])document.querySelector(`#${id}`).oninput=event=>{model.gain=Number(event.target.value);render();showControls();};
 document.querySelectorAll('[data-action]').forEach(button=>button.onclick=()=>act(button.dataset.action));
