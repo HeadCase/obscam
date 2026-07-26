@@ -154,6 +154,9 @@ fn run_stream(
     let hub = FrameHub::new(4);
     let h264_hub = Arc::clone(&hub);
     let h264 = thread::spawn(move || -> Result<(), String> {
+        if emit_jpeg {
+            return h264_hub.consume(Consumer::H264, |_bytes, _frame| Ok(()));
+        }
         let filter = if night_stretch {
             "eq=gamma=3.0:contrast=3.0:brightness=0.1,format=yuv420p"
         } else {
@@ -168,27 +171,53 @@ fn run_stream(
         if !emit_jpeg {
             return jpeg_hub.consume(Consumer::Jpeg, |_bytes, _frame| Ok(()));
         }
-        let (mut sink, output) = JpegSink::new(bayer, 5)?;
+        let treatments = [("colour", "format=yuv420p"), ("mono", "format=gray")];
+        let configured = treatments
+            .iter()
+            .map(|(name, filter)| {
+                JpegSink::new(bayer, 5, filter)
+                    .map(|(sink, output)| ((*name).to_owned(), sink, output))
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        let mut sinks = Vec::with_capacity(configured.len());
+        let mut outputs = Vec::with_capacity(configured.len());
+        for (treatment, sink, output) in configured {
+            sinks.push(sink);
+            outputs.push((treatment, output));
+        }
         let (metadata_sender, metadata_receiver) = sync_channel(1);
         let packets = thread::spawn(move || -> Result<(), String> {
             while let Ok((frame, encode_start_ns, encode_end_ns)) = metadata_receiver.recv() {
-                let payload = output
-                    .recv()
-                    .map_err(|_| "FFmpeg JPEG reader stopped unexpectedly".to_owned())??;
-                write_jpeg_packet(frame, exposure_us, encode_start_ns, encode_end_ns, &payload)?;
+                for (treatment, output) in &outputs {
+                    let payload = output
+                        .recv()
+                        .map_err(|_| "FFmpeg JPEG reader stopped unexpectedly".to_owned())??;
+                    write_jpeg_packet(
+                        frame,
+                        exposure_us,
+                        encode_start_ns,
+                        encode_end_ns,
+                        treatment,
+                        &payload,
+                    )?;
+                }
             }
             Ok(())
         });
         let result = jpeg_hub.consume(Consumer::Jpeg, |bytes, frame| {
             let encode_start_ns = unix_ns()?;
-            sink.submit(bytes)?;
+            for sink in &mut sinks {
+                sink.submit(bytes)?;
+            }
             let encode_end_ns = unix_ns()?;
             metadata_sender
                 .send((frame, encode_start_ns, encode_end_ns))
                 .map_err(|_| "JPEG packet writer stopped unexpectedly".to_owned())
         });
+        for sink in sinks {
+            sink.finish()?;
+        }
         drop(metadata_sender);
-        sink.finish()?;
         packets
             .join()
             .map_err(|_| "JPEG packet writer panicked".to_owned())??;
@@ -225,13 +254,14 @@ fn write_jpeg_packet(
     exposure_us: i64,
     encode_start_ns: u64,
     encode_end_ns: u64,
+    treatment: &str,
     payload: &[u8],
 ) -> Result<(), String> {
     let exposure_end_ns = frame
         .capture_complete_ns
         .saturating_sub(exposure_us as u64 * 1_000);
     let metadata = format!(
-        "{{\"schema_version\":1,\"generation\":{},\"exposure_end_ns\":{},\"exposure_end_unix_ns\":{},\"capture_complete_ns\":{},\"capture_complete_unix_ns\":{},\"encode_start_ns\":{},\"encode_start_unix_ns\":{},\"encode_end_ns\":{},\"encode_end_unix_ns\":{},\"width\":1920,\"height\":1080,\"encoded_bytes\":{}}}",
+        "{{\"schema_version\":1,\"generation\":{},\"exposure_end_ns\":{},\"exposure_end_unix_ns\":{},\"capture_complete_ns\":{},\"capture_complete_unix_ns\":{},\"encode_start_ns\":{},\"encode_start_unix_ns\":{},\"encode_end_ns\":{},\"encode_end_unix_ns\":{},\"width\":1920,\"height\":1080,\"encoded_bytes\":{},\"treatment\":\"{}\"}}",
         frame.generation,
         exposure_end_ns,
         exposure_end_ns,
@@ -241,7 +271,8 @@ fn write_jpeg_packet(
         encode_start_ns,
         encode_end_ns,
         encode_end_ns,
-        payload.len()
+        payload.len(),
+        treatment
     );
     let mut output = io::stdout().lock();
     output

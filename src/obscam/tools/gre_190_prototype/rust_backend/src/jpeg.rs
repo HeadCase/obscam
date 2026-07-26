@@ -17,6 +17,7 @@ impl JpegSink {
     pub fn new(
         bayer_pixel_format: &str,
         quality: u8,
+        filter: &str,
     ) -> Result<(Self, Receiver<Result<Vec<u8>, String>>), String> {
         let mut child = Command::new("ffmpeg")
             .args([
@@ -32,7 +33,7 @@ impl JpegSink {
                 "-i",
                 "pipe:0",
                 "-vf",
-                "format=yuv420p",
+                filter,
                 "-threads",
                 "1",
                 "-c:v",

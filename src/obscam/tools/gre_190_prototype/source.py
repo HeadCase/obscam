@@ -16,6 +16,7 @@ from obscam.tools.gre_190_prototype.contract import (
     FULL_FRAME_HEIGHT,
     FULL_FRAME_WIDTH,
     FrameEnvelope,
+    Treatment,
 )
 from obscam.tools.gre_190_prototype.latest import EncodedFrame, LatestFrameFanout
 
@@ -84,14 +85,14 @@ class RustJpegSource:
 
     def __init__(
         self,
-        fanout: LatestFrameFanout,
+        fanouts: dict[Treatment, LatestFrameFanout],
         *,
         exposure_us: int,
         gain: int,
         fps: int,
         binary: Path | None = None,
     ) -> None:
-        self._fanout = fanout
+        self._fanouts = fanouts
         self._exposure_us = exposure_us
         self._gain = gain
         self._fps = fps
@@ -118,7 +119,7 @@ class RustJpegSource:
         try:
             while True:
                 frame = await read_rust_jpeg_packet(process.stdout)
-                await self._fanout.publish(frame)
+                await self._fanouts[frame.envelope.treatment].publish(frame)
                 self.counters.produced += 1
                 self.counters.encoded_bytes += len(frame.payload)
         finally:

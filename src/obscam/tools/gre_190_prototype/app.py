@@ -16,6 +16,7 @@ from fastapi.responses import HTMLResponse, StreamingResponse
 from obscam.tools.gre_190_prototype.contract import (
     BrowserPresentation,
     BrowserRunReport,
+    Treatment,
 )
 from obscam.tools.gre_190_prototype.latest import LatestFrameFanout
 from obscam.tools.gre_190_prototype.preflight import inspect_capabilities
@@ -33,16 +34,17 @@ def create_app(
     gain: int = 0,
 ) -> FastAPI:
     """Create an isolated generated or native-source benchmark application."""
-    fanout = LatestFrameFanout()
+    treatments: tuple[Treatment, ...] = ("colour", "mono")
+    fanouts = {treatment: LatestFrameFanout() for treatment in treatments}
     source = (
         RustJpegSource(
-            fanout,
+            fanouts,
             exposure_us=exposure_us,
             gain=gain,
             fps=round(fps),
         )
         if native
-        else GeneratedJpegSource(fanout, fps=fps, quality=quality)
+        else GeneratedJpegSource(fanouts["colour"], fps=fps, quality=quality)
     )
     presentations: list[BrowserPresentation] = []
     completed_runs: dict[str, dict[str, BrowserRunReport]] = {}
@@ -111,9 +113,9 @@ def create_app(
             },
         }
 
-    @app.websocket("/ws/jpeg")
-    async def jpeg_websocket(websocket: WebSocket) -> None:
+    async def stream_jpeg(websocket: WebSocket, treatment: Treatment) -> None:
         await websocket.accept()
+        fanout = fanouts[treatment]
         generation = 0
         try:
             while True:
@@ -126,7 +128,18 @@ def create_app(
         except WebSocketDisconnect:
             return
 
+    @app.websocket("/ws/jpeg")
+    async def default_jpeg_websocket(websocket: WebSocket) -> None:
+        await stream_jpeg(websocket, "colour")
+
+    @app.websocket("/ws/jpeg/{treatment}")
+    async def treatment_jpeg_websocket(
+        websocket: WebSocket, treatment: Treatment
+    ) -> None:
+        await stream_jpeg(websocket, treatment)
+
     async def mjpeg_stream() -> AsyncIterator[bytes]:
+        fanout = fanouts["colour"]
         generation = 0
         while True:
             frame = await fanout.wait_after(generation)

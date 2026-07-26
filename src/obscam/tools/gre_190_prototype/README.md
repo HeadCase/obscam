@@ -29,6 +29,11 @@ python -m obscam.tools.gre_190_prototype serve --native \
   --fps 20 --exposure-us 10000 --gain 0
 ```
 
+For GRE-196, the native JPEG consumer sends every captured RAW8 generation to
+independent neutral colour and monochrome pipelines. Compare them in separate
+browser tabs by adding `treatment=colour` or `treatment=mono` to the query
+string.
+
 The Rust process exclusively owns the enrolled camera and fixed RAW8 buffer
 pool. It independently feeds hardware H.264/RTSP and software JPEG encoders;
 Python receives only framed, compressed JPEG packets and relays the newest one

@@ -29,7 +29,11 @@ const config = {
   durationS: Math.min(3600, Math.max(5, Number(params.get('duration') || 60))),
   reconnect: params.get('reconnect') !== '0',
   auto: params.get('auto') === '1',
+  treatment: params.get('treatment') || 'colour',
 };
+if (!['colour', 'mono'].includes(config.treatment)) {
+  throw new Error(`Unknown treatment: ${config.treatment}`);
+}
 const state = document.querySelector('#state');
 const metrics = document.querySelector('#metrics');
 const canvas = document.querySelector('#view');
@@ -65,7 +69,7 @@ async function calibrateClock() {
 
 function websocketUrl() {
   const protocol = location.protocol === 'https:' ? 'wss' : 'ws';
-  return `${protocol}://${location.host}/ws/jpeg`;
+  return `${protocol}://${location.host}/ws/jpeg/${config.treatment}`;
 }
 
 async function run() {

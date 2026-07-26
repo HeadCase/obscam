@@ -10,6 +10,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 SCHEMA_VERSION = 1
 FULL_FRAME_WIDTH = 1920
 FULL_FRAME_HEIGHT = 1080
+Treatment = Literal["colour", "mono"]
 
 
 class DeliveryPath(StrEnum):
@@ -39,6 +40,7 @@ class FrameEnvelope(BaseModel):
     width: Literal[1920] = FULL_FRAME_WIDTH
     height: Literal[1080] = FULL_FRAME_HEIGHT
     encoded_bytes: int = Field(gt=0)
+    treatment: Treatment = "colour"
 
     @model_validator(mode="after")
     def validate_timeline(self) -> FrameEnvelope:
