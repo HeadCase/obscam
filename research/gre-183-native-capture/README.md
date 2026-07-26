@@ -124,7 +124,12 @@ cells had zero SDK drops, capture errors, corrupt frames, and throttling.
 
 Snapshot adds a nearly fixed 235-250 ms per exposure. Its relative penalty
 shrinks at long exposures, but it never overtakes video. The simpler production
-default is therefore one video acquisition path over the full range.
+default is therefore one video acquisition path over the full range. GRE-194's
+matched nighttime experiment subsequently confirmed that video and snapshot
+frames follow the same exposure-response curve: at 30 seconds and gain 400,
+their average full-frame RAW8 signal differed by only 0.168%, less than the
+repeat-to-repeat variation. Video mode therefore performs a genuine 30-second
+integration and snapshot mode has no separate image-integration role.
 
 ## Gain envelope and image-content classification
 
