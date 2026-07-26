@@ -29,17 +29,16 @@
     #status .dot { width:.42rem; height:.42rem; border-radius:50%; background:var(--accent); box-shadow:0 0 .5rem var(--accent); }
     #status.stale { color:#ffdca1; } #status.stale .dot { background:var(--warn); box-shadow:none; }
     .controls { position:fixed; z-index:30; transition:opacity .18s ease; }
-    .tray { right:.6rem; bottom:calc(4.8rem + env(safe-area-inset-bottom)); left:.6rem; padding:.5rem .85rem .75rem; border:1px solid var(--line); border-radius:1.4rem; background:var(--panel); box-shadow:0 1.2rem 4rem #0009; backdrop-filter:blur(20px); }
-    .grabber { width:2.4rem; height:.22rem; margin:0 auto .45rem; border-radius:1rem; background:#ffffff40; }
-    .readouts { display:grid; grid-template-columns:1fr 1fr; gap:.55rem; }
-    .readouts button { display:flex; align-items:baseline; justify-content:space-between; min-height:3rem; padding:.65rem .8rem; border:1px solid transparent; border-radius:.9rem; background:#ffffff0e; }
-    .readouts button.active { border-color:#66e3b488; background:#66e3b419; }
-    .readouts small, .actions small { color:var(--muted); } .readouts strong { font:700 1.05rem ui-monospace,monospace; }
-    .precision { display:grid; grid-template-columns:2.8rem 1fr 2.8rem; align-items:center; gap:.65rem; margin:.8rem 0; }
-    .precision button { height:2.8rem; border-radius:50%; background:#ffffff17; font-size:1.5rem; }
+    .tray { right:.6rem; bottom:calc(4.8rem + env(safe-area-inset-bottom)); left:.6rem; padding:.65rem .75rem .55rem; border:1px solid var(--line); border-radius:1.15rem; background:var(--panel); box-shadow:0 1.2rem 4rem #0009; backdrop-filter:blur(20px); }
+    .control-row { display:grid; grid-template-columns:1fr 1fr; gap:.8rem; padding:0 .2rem .55rem; border-bottom:1px solid var(--line); }
+    .compact-control { min-width:0; }
+    .compact-control span { display:flex; align-items:baseline; justify-content:space-between; gap:.4rem; margin-bottom:.2rem; color:var(--muted); font-size:.66rem; }
+    .compact-control strong { color:var(--text); font:700 .86rem ui-monospace,monospace; }
+    .compact-control input { display:block; height:1.25rem; margin:0; }
+    .actions small { color:var(--muted); }
     input[type=range] { width:100%; accent-color:var(--accent); }
     .actions { display:grid; grid-template-columns:repeat(4,1fr); gap:.4rem; }
-    .actions button { display:flex; min-height:3.2rem; flex-direction:column; align-items:center; justify-content:center; gap:.15rem; border-radius:.8rem; background:transparent; font-size:1.15rem; }
+    .actions button { display:flex; min-height:2.7rem; flex-direction:column; align-items:center; justify-content:center; gap:.05rem; border-radius:.7rem; background:transparent; font-size:1rem; }
     .actions small { font-size:.62rem; } .actions button.owned { background:#66e3b423; color:var(--accent); }
     .edges { inset:0; pointer-events:none; }
     .edge { position:absolute; top:50%; display:flex; width:3.5rem; height:min(56vh,25rem); padding:.65rem 0; transform:translateY(-50%); flex-direction:column; align-items:center; gap:.55rem; border:1px solid var(--line); border-radius:1.1rem; background:var(--panel); backdrop-filter:blur(16px); pointer-events:auto; }
@@ -74,7 +73,7 @@
     #switcher button { height:2.8rem; background:transparent; color:#10141b; font-size:1.1rem; } #switcher span { display:flex; flex-direction:column; align-items:center; line-height:1.1; }
     #switcher small { color:#657080; font-size:.48rem; letter-spacing:.12em; } #switcher strong { font-size:.68rem; }
     @media(min-width:700px) { .tray { right:50%; left:auto; width:31rem; transform:translateX(50%); } .edge.left{left:1rem}.edge.right{right:1rem} }
-    @media(max-height:560px) and (orientation:landscape) { .tray{right:5.4rem;bottom:.6rem;left:5.4rem;padding-block:.35rem}.grabber,.actions small{display:none}.readouts button{min-height:2.25rem;padding-block:.35rem}.precision{margin:.35rem 0}.actions button{min-height:2.25rem}#switcher{right:.6rem;bottom:.6rem;transform:none;grid-template-columns:2.5rem 2.5rem}#switcher span{display:none}.palette-wrap{bottom:.6rem} }
+    @media(max-height:560px) and (orientation:landscape) { .tray{right:5.4rem;bottom:.6rem;left:5.4rem;display:grid;grid-template-columns:1fr 14rem;align-items:center;gap:.5rem;padding:.4rem .6rem}.control-row{padding:0 .6rem 0 0;border-right:1px solid var(--line);border-bottom:0}.actions small{display:none}.actions button{min-height:2.25rem}#switcher{right:.6rem;bottom:.6rem;transform:none;grid-template-columns:2.5rem 2.5rem}#switcher span{display:none}.palette-wrap{bottom:.6rem} }
   </style>
 </head>
 <body>
@@ -83,9 +82,10 @@
   <div id="status" class="stale"><span class="dot"></span><span id="connection">Connecting</span><span id="cadence">— fps</span><span id="treatment">B&amp;W</span></div>
 
   <section id="variant-a" class="controls tray">
-    <div class="grabber"></div>
-    <div class="readouts"><button data-control="exposure" class="active"><small>Exposure</small><strong data-value="exposure"></strong></button><button data-control="gain"><small>Gain</small><strong data-value="gain"></strong></button></div>
-    <div class="precision"><button data-step="-1" aria-label="Decrease setting">−</button><input id="tray-range" type="range"><button data-step="1" aria-label="Increase setting">+</button></div>
+    <div class="control-row">
+      <label class="compact-control"><span>Exposure <strong data-value="exposure"></strong></span><input id="tray-exposure" type="range" min="0" max="19"></label>
+      <label class="compact-control"><span>Gain <strong data-value="gain"></strong></span><input id="tray-gain" type="range" min="0" max="13"></label>
+    </div>
     <nav class="actions"><button data-action="treatment"><span>◐</span><small>Mode</small></button><button data-action="snapshot"><span>⇩</span><small>Snapshot</small></button><button data-action="rotate"><span>↻</span><small>Rotate</small></button><button data-action="authority"><span>⌁</span><small>Take over</small></button></nav>
   </section>
 
@@ -106,7 +106,7 @@ const exposureScale = [.1,.2,.5,1,2,5,10,20,50,100,150,200,300,500,800,1000,2000
 const gainScale = [0,25,50,100,150,200,250,300,350,400,450,500,550,600];
 const variants = {A:'A — Bottom tray', B:'B — Edge controls', C:'C — Command palette'};
 const params = new URLSearchParams(location.search);
-const model = {variant:(params.get('variant')||'A').toUpperCase(), exposure:11, gain:6, active:'exposure', treatment:params.get('treatment')==='colour'?'colour':'mono', rotation:0, authority:false, controlsVisible:true, held:false, menu:false, palette:false, generation:0, received:0, lastFrameAt:0};
+const model = {variant:(params.get('variant')||'A').toUpperCase(), exposure:11, gain:6, treatment:params.get('treatment')==='colour'?'colour':'mono', rotation:0, authority:false, controlsVisible:true, held:false, menu:false, palette:false, generation:0, received:0, lastFrameAt:0};
 if (!variants[model.variant]) model.variant='A';
 const canvas=document.querySelector('#view'); const context=canvas.getContext('2d',{alpha:false});
 const empty=document.querySelector('#empty'); const status=document.querySelector('#status'); const stage=document.querySelector('#stage');
@@ -127,9 +127,8 @@ function render() {
   document.querySelector('#treatment').textContent=model.treatment==='mono'?'B&W':'Colour';
   document.querySelectorAll('[data-value="exposure"]').forEach(node=>node.textContent=formatExposure(exposureScale[model.exposure]));
   document.querySelectorAll('[data-value="gain"]').forEach(node=>node.textContent=gainScale[model.gain]);
-  document.querySelectorAll('[data-control]').forEach(button=>button.classList.toggle('active',button.dataset.control===model.active));
-  const tray=document.querySelector('#tray-range');const activeScale=model.active==='exposure'?exposureScale:gainScale;tray.max=activeScale.length-1;tray.value=model[model.active];
-  document.querySelector('#edge-exposure').value=model.exposure;document.querySelector('#edge-gain').value=model.gain;document.querySelector('#palette-exposure').value=model.exposure;document.querySelector('#palette-gain').value=model.gain;
+  for(const id of ['tray-exposure','edge-exposure','palette-exposure'])document.querySelector(`#${id}`).value=model.exposure;
+  for(const id of ['tray-gain','edge-gain','palette-gain'])document.querySelector(`#${id}`).value=model.gain;
   document.querySelector('.radial').classList.toggle('open',model.menu);
   document.querySelector('.palette').hidden=!model.palette;document.querySelector('.palette-trigger').hidden=model.palette;
   document.querySelectorAll('[data-action="authority"]').forEach(button=>{button.classList.toggle('owned',model.authority);if(button.querySelector('small'))button.querySelector('small').textContent=model.authority?'In control':'Take over';});
@@ -145,11 +144,8 @@ function act(action){
   if(action==='authority'){if(model.authority){toast('You already have control');}else{document.querySelector('#dialog-backdrop').hidden=false;model.held=true;}}
   render();
 }
-document.querySelectorAll('[data-control]').forEach(button=>button.onclick=()=>{model.active=button.dataset.control;render();showControls();});
-document.querySelectorAll('[data-step]').forEach(button=>button.onclick=()=>{const scale=model.active==='exposure'?exposureScale:gainScale;model[model.active]=Math.max(0,Math.min(scale.length-1,model[model.active]+Number(button.dataset.step)));render();showControls();});
-document.querySelector('#tray-range').oninput=event=>{model[model.active]=Number(event.target.value);render();};
-for(const id of ['edge-exposure','palette-exposure'])document.querySelector(`#${id}`).oninput=event=>{model.exposure=Number(event.target.value);render();};
-for(const id of ['edge-gain','palette-gain'])document.querySelector(`#${id}`).oninput=event=>{model.gain=Number(event.target.value);render();};
+for(const id of ['tray-exposure','edge-exposure','palette-exposure'])document.querySelector(`#${id}`).oninput=event=>{model.exposure=Number(event.target.value);render();showControls();};
+for(const id of ['tray-gain','edge-gain','palette-gain'])document.querySelector(`#${id}`).oninput=event=>{model.gain=Number(event.target.value);render();showControls();};
 document.querySelectorAll('[data-action]').forEach(button=>button.onclick=()=>act(button.dataset.action));
 document.querySelector('.radial .trigger').onclick=()=>{model.menu=!model.menu;render();showControls();};
 document.querySelector('.palette-trigger').onclick=()=>{model.palette=true;model.held=true;render();};
