@@ -1,0 +1,166 @@
+<!doctype html>
+<!--
+  GRE-184 PROTOTYPE — throwaway mobile viewer controls on the GRE-190
+  greenfield JPEG/WebSocket delivery path. Three variants at ?variant=A|B|C.
+-->
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>GRE-184 mobile viewer controls</title>
+  <style>
+    :root { color-scheme: dark; --bg:#06090d; --panel:rgba(14,19,28,.94); --line:rgba(255,255,255,.14); --text:#f5f7fa; --muted:#98a5b5; --accent:#66e3b4; --warn:#f3b84a; }
+    * { box-sizing:border-box; }
+    html, body { width:100%; height:100%; margin:0; overflow:hidden; background:var(--bg); color:var(--text); font:14px Inter,ui-sans-serif,system-ui,-apple-system,sans-serif; }
+    button, input { touch-action:manipulation; }
+    button { border:0; color:inherit; font:inherit; cursor:pointer; }
+    [hidden] { display:none !important; }
+    #viewer { position:fixed; inset:0; background:radial-gradient(circle at 50% 35%,#293641 0,transparent 48%),var(--bg); user-select:none; }
+    #stage { position:absolute; inset:0; display:grid; place-items:center; transition:transform .2s ease; }
+    #stage.rotated-90, #stage.rotated-270 { inset:calc((100vw - 100vh)/2) calc((100vh - 100vw)/2); }
+    #stage.rotated-90 { transform:rotate(90deg); }
+    #stage.rotated-180 { transform:rotate(180deg); }
+    #stage.rotated-270 { transform:rotate(270deg); }
+    #view { display:block; width:100%; height:100%; object-fit:contain; background:#0b0f14; }
+    #empty { position:absolute; inset:0; display:grid; place-content:center; gap:.5rem; text-align:center; color:var(--muted); }
+    #empty strong { color:var(--text); }
+    #empty i { color:var(--accent); font-style:normal; font-size:2.5rem; }
+    #status { position:fixed; z-index:20; top:max(.65rem,env(safe-area-inset-top)); left:50%; display:flex; align-items:center; gap:.45rem; padding:.42rem .65rem; transform:translateX(-50%); border:1px solid var(--line); border-radius:99px; background:rgba(5,8,12,.72); backdrop-filter:blur(12px); color:var(--muted); font-size:.65rem; white-space:nowrap; }
+    #status .dot { width:.42rem; height:.42rem; border-radius:50%; background:var(--accent); box-shadow:0 0 .5rem var(--accent); }
+    #status.stale { color:#ffdca1; } #status.stale .dot { background:var(--warn); box-shadow:none; }
+    .controls { position:fixed; z-index:30; transition:opacity .18s ease; }
+    .tray { right:.6rem; bottom:calc(4.8rem + env(safe-area-inset-bottom)); left:.6rem; padding:.5rem .85rem .75rem; border:1px solid var(--line); border-radius:1.4rem; background:var(--panel); box-shadow:0 1.2rem 4rem #0009; backdrop-filter:blur(20px); }
+    .grabber { width:2.4rem; height:.22rem; margin:0 auto .45rem; border-radius:1rem; background:#ffffff40; }
+    .readouts { display:grid; grid-template-columns:1fr 1fr; gap:.55rem; }
+    .readouts button { display:flex; align-items:baseline; justify-content:space-between; min-height:3rem; padding:.65rem .8rem; border:1px solid transparent; border-radius:.9rem; background:#ffffff0e; }
+    .readouts button.active { border-color:#66e3b488; background:#66e3b419; }
+    .readouts small, .actions small { color:var(--muted); } .readouts strong { font:700 1.05rem ui-monospace,monospace; }
+    .precision { display:grid; grid-template-columns:2.8rem 1fr 2.8rem; align-items:center; gap:.65rem; margin:.8rem 0; }
+    .precision button { height:2.8rem; border-radius:50%; background:#ffffff17; font-size:1.5rem; }
+    input[type=range] { width:100%; accent-color:var(--accent); }
+    .actions { display:grid; grid-template-columns:repeat(4,1fr); gap:.4rem; }
+    .actions button { display:flex; min-height:3.2rem; flex-direction:column; align-items:center; justify-content:center; gap:.15rem; border-radius:.8rem; background:transparent; font-size:1.15rem; }
+    .actions small { font-size:.62rem; } .actions button.owned { background:#66e3b423; color:var(--accent); }
+    .edges { inset:0; pointer-events:none; }
+    .edge { position:absolute; top:50%; display:flex; width:3.5rem; height:min(56vh,25rem); padding:.65rem 0; transform:translateY(-50%); flex-direction:column; align-items:center; gap:.55rem; border:1px solid var(--line); border-radius:1.1rem; background:var(--panel); backdrop-filter:blur(16px); pointer-events:auto; }
+    .edge.left { left:.55rem; } .edge.right { right:.55rem; }
+    .edge strong { font:700 .72rem ui-monospace,monospace; } .edge small { writing-mode:vertical-rl; color:var(--muted); font-size:.65rem; }
+    .edge input { width:calc(min(56vh,25rem) - 7rem); transform:rotate(-90deg); flex:1; }
+    .radial { position:absolute; right:4.6rem; bottom:5.4rem; width:3.6rem; height:3.6rem; pointer-events:auto; }
+    .radial button { position:absolute; width:3.5rem; height:3.5rem; border-radius:50%; background:var(--panel); box-shadow:0 .6rem 1.8rem #0007; }
+    .radial .trigger { z-index:2; color:var(--accent); }
+    .radial .action { opacity:0; transform:scale(.7); transition:.18s ease; pointer-events:none; }
+    .radial.open .action { opacity:1; pointer-events:auto; }
+    .radial.open .one { transform:translate(-4.25rem,0); } .radial.open .two { transform:translate(-3.6rem,-3.7rem); }
+    .radial.open .three { transform:translate(0,-4.8rem); } .radial.open .four { transform:translate(3.6rem,-3.7rem); }
+    .palette-wrap { right:1rem; bottom:calc(5rem + env(safe-area-inset-bottom)); left:1rem; display:flex; justify-content:center; }
+    .palette-trigger { min-width:8rem; min-height:3.25rem; border:1px solid var(--line); border-radius:99px; background:var(--panel); box-shadow:0 .8rem 2.4rem #0008; font-weight:700; }
+    .palette { width:min(100%,28rem); padding:1rem; border:1px solid var(--line); border-radius:1.25rem; background:#0a0e15f7; box-shadow:0 1.2rem 4rem #000a; }
+    .palette header { display:flex; justify-content:space-between; align-items:center; margin-bottom:1rem; }
+    .palette header div { display:flex; flex-direction:column; } .palette header small { color:var(--accent); font-size:.6rem; letter-spacing:.14em; }
+    .palette header button { width:2.4rem; height:2.4rem; border-radius:50%; background:#ffffff14; font-size:1.4rem; }
+    .palette label { display:block; margin:.9rem 0; } .palette label span { display:flex; justify-content:space-between; margin-bottom:.55rem; color:var(--muted); font-size:.76rem; }
+    .palette label strong { color:var(--text); font-family:ui-monospace,monospace; }
+    .palette-grid { display:grid; grid-template-columns:1fr 1fr; gap:.55rem; margin-top:1.1rem; }
+    .palette-grid button { min-height:3.2rem; padding:.6rem; border-radius:.75rem; background:#ffffff12; font-size:.72rem; }
+    .palette-grid button.owned { color:var(--accent); background:#66e3b421; }
+    #dialog-backdrop { position:fixed; inset:0; z-index:70; display:grid; place-items:center; padding:1rem; background:#000b; backdrop-filter:blur(8px); }
+    #dialog { width:min(100%,23rem); padding:1.3rem; border:1px solid var(--line); border-radius:1.15rem; background:#121821; box-shadow:0 1rem 4rem #000b; }
+    #dialog small { color:var(--warn); font-size:.6rem; letter-spacing:.12em; } #dialog h2 { margin:.45rem 0; font-size:1.15rem; }
+    #dialog p { color:var(--muted); font-size:.78rem; line-height:1.45; } #dialog footer { display:grid; grid-template-columns:1fr 1fr; gap:.55rem; margin-top:1rem; }
+    #dialog button { min-height:3rem; border-radius:.75rem; font-weight:700; background:#ffffff14; } #dialog .confirm { background:var(--accent); color:#07140f; }
+    #toast { position:fixed; z-index:80; top:3.6rem; left:50%; transform:translateX(-50%); max-width:calc(100% - 2rem); padding:.6rem .85rem; border:1px solid var(--line); border-radius:.65rem; background:#161d27; box-shadow:0 .6rem 2rem #0008; font-size:.7rem; white-space:nowrap; }
+    #switcher { position:fixed; z-index:60; right:50%; bottom:max(.65rem,env(safe-area-inset-bottom)); display:grid; grid-template-columns:2.7rem minmax(9.8rem,auto) 2.7rem; align-items:center; transform:translateX(50%); overflow:hidden; border:1px solid #ffffff33; border-radius:99px; background:#f4f7fb; color:#10141b; box-shadow:0 .8rem 2rem #0009; }
+    #switcher button { height:2.8rem; background:transparent; color:#10141b; font-size:1.1rem; } #switcher span { display:flex; flex-direction:column; align-items:center; line-height:1.1; }
+    #switcher small { color:#657080; font-size:.48rem; letter-spacing:.12em; } #switcher strong { font-size:.68rem; }
+    @media(min-width:700px) { .tray { right:50%; left:auto; width:31rem; transform:translateX(50%); } .edge.left{left:1rem}.edge.right{right:1rem} }
+    @media(max-height:560px) and (orientation:landscape) { .tray{right:5.4rem;bottom:.6rem;left:5.4rem;padding-block:.35rem}.grabber,.actions small{display:none}.readouts button{min-height:2.25rem;padding-block:.35rem}.precision{margin:.35rem 0}.actions button{min-height:2.25rem}#switcher{right:.6rem;bottom:.6rem;transform:none;grid-template-columns:2.5rem 2.5rem}#switcher span{display:none}.palette-wrap{bottom:.6rem} }
+  </style>
+</head>
+<body>
+<main id="viewer">
+  <div id="stage"><canvas id="view" width="1920" height="1080"></canvas><div id="empty"><i>✦</i><strong>Connecting to greenfield stream…</strong><span>The complete source frame stays visible.</span></div></div>
+  <div id="status" class="stale"><span class="dot"></span><span id="connection">Connecting</span><span id="cadence">— fps</span><span id="treatment">B&amp;W</span></div>
+
+  <section id="variant-a" class="controls tray">
+    <div class="grabber"></div>
+    <div class="readouts"><button data-control="exposure" class="active"><small>Exposure</small><strong data-value="exposure"></strong></button><button data-control="gain"><small>Gain</small><strong data-value="gain"></strong></button></div>
+    <div class="precision"><button data-step="-1" aria-label="Decrease setting">−</button><input id="tray-range" type="range"><button data-step="1" aria-label="Increase setting">+</button></div>
+    <nav class="actions"><button data-action="treatment"><span>◐</span><small>Mode</small></button><button data-action="snapshot"><span>⇩</span><small>Snapshot</small></button><button data-action="rotate"><span>↻</span><small>Rotate</small></button><button data-action="authority"><span>⌁</span><small>Take over</small></button></nav>
+  </section>
+
+  <section id="variant-b" class="controls edges" hidden>
+    <label class="edge left"><strong data-value="exposure"></strong><input id="edge-exposure" type="range" min="0" max="19"><small>Exposure</small></label>
+    <label class="edge right"><strong data-value="gain"></strong><input id="edge-gain" type="range" min="0" max="13"><small>Gain</small></label>
+    <div class="radial"><button class="trigger" aria-label="Toggle actions">✦</button><button class="action one" data-action="treatment" aria-label="Toggle treatment">◐</button><button class="action two" data-action="snapshot" aria-label="Download snapshot">⇩</button><button class="action three" data-action="rotate" aria-label="Rotate">↻</button><button class="action four" data-action="authority" aria-label="Take control">⌁</button></div>
+  </section>
+
+  <section id="variant-c" class="controls palette-wrap" hidden><button class="palette-trigger">Controls</button><div class="palette" hidden><header><div><small>VIEWER CONTROLS</small><strong>Adjust camera</strong></div><button class="palette-close" aria-label="Close">×</button></header><label><span>Exposure <strong data-value="exposure"></strong></span><input id="palette-exposure" type="range" min="0" max="19"></label><label><span>Gain <strong data-value="gain"></strong></span><input id="palette-gain" type="range" min="0" max="13"></label><div class="palette-grid"><button data-action="treatment">Switch treatment</button><button data-action="snapshot">Download snapshot</button><button data-action="rotate">Rotate frame</button><button data-action="authority">Take control</button></div></div></section>
+
+  <div id="dialog-backdrop" hidden><section id="dialog" role="dialog" aria-modal="true" aria-labelledby="dialog-title"><small>CONTROL AUTHORITY</small><h2 id="dialog-title">Take control from another viewer?</h2><p>Their current adjustment will stop. Authority remains simulated in this UI prototype.</p><footer><button id="cancel-takeover">Cancel</button><button id="confirm-takeover" class="confirm">Take control</button></footer></section></div>
+  <div id="toast" hidden></div>
+  <nav id="switcher"><button id="previous" aria-label="Previous variant">←</button><span><small>GRE-184 · GRE-190 HOST</small><strong id="variant-label"></strong></span><button id="next" aria-label="Next variant">→</button></nav>
+</main>
+<script>
+const exposureScale = [.1,.2,.5,1,2,5,10,20,50,100,150,200,300,500,800,1000,2000,5000,10000,30000];
+const gainScale = [0,25,50,100,150,200,250,300,350,400,450,500,550,600];
+const variants = {A:'A — Bottom tray', B:'B — Edge controls', C:'C — Command palette'};
+const params = new URLSearchParams(location.search);
+const model = {variant:(params.get('variant')||'A').toUpperCase(), exposure:11, gain:6, active:'exposure', treatment:params.get('treatment')==='colour'?'colour':'mono', rotation:0, authority:false, controlsVisible:true, held:false, menu:false, palette:false, generation:0, received:0, lastFrameAt:0};
+if (!variants[model.variant]) model.variant='A';
+const canvas=document.querySelector('#view'); const context=canvas.getContext('2d',{alpha:false});
+const empty=document.querySelector('#empty'); const status=document.querySelector('#status'); const stage=document.querySelector('#stage');
+let socket; let hideTimer; let toastTimer; let cadenceTimer; let connectionSequence=0;
+
+function websocketUrl() { const protocol=location.protocol==='https:'?'wss':'ws'; return `${protocol}://${location.host}/ws/jpeg/${model.treatment}`; }
+function connect() {
+  const sequence=++connectionSequence; socket?.close(); document.querySelector('#connection').textContent='Connecting'; status.classList.add('stale');
+  socket=new WebSocket(websocketUrl()); socket.binaryType='arraybuffer';
+  socket.onopen=()=>{document.querySelector('#connection').textContent='Live';status.classList.remove('stale');};
+  socket.onclose=()=>{if(sequence!==connectionSequence)return;document.querySelector('#connection').textContent='Reconnecting';status.classList.add('stale');setTimeout(connect,1200);};
+  socket.onmessage=async event=>{const bytes=new Uint8Array(event.data);const headerLength=new DataView(event.data).getUint32(0);const envelope=JSON.parse(new TextDecoder().decode(bytes.slice(4,4+headerLength)));const blob=new Blob([bytes.slice(4+headerLength)],{type:'image/jpeg'});const bitmap=await createImageBitmap(blob);if(canvas.width!==bitmap.width||canvas.height!==bitmap.height){canvas.width=bitmap.width;canvas.height=bitmap.height;}context.drawImage(bitmap,0,0);bitmap.close();model.generation=envelope.generation;model.received++;model.lastFrameAt=performance.now();empty.hidden=true;};
+}
+function formatExposure(value){return value>=1000?`${value/1000}${value%1000?'':' '}s`:`${value}ms`;}
+function render() {
+  for(const key of Object.keys(variants)) document.querySelector(`#variant-${key.toLowerCase()}`).hidden=model.variant!==key;
+  document.querySelector('#variant-label').textContent=variants[model.variant];
+  document.querySelector('#treatment').textContent=model.treatment==='mono'?'B&W':'Colour';
+  document.querySelectorAll('[data-value="exposure"]').forEach(node=>node.textContent=formatExposure(exposureScale[model.exposure]));
+  document.querySelectorAll('[data-value="gain"]').forEach(node=>node.textContent=gainScale[model.gain]);
+  document.querySelectorAll('[data-control]').forEach(button=>button.classList.toggle('active',button.dataset.control===model.active));
+  const tray=document.querySelector('#tray-range');const activeScale=model.active==='exposure'?exposureScale:gainScale;tray.max=activeScale.length-1;tray.value=model[model.active];
+  document.querySelector('#edge-exposure').value=model.exposure;document.querySelector('#edge-gain').value=model.gain;document.querySelector('#palette-exposure').value=model.exposure;document.querySelector('#palette-gain').value=model.gain;
+  document.querySelector('.radial').classList.toggle('open',model.menu);
+  document.querySelector('.palette').hidden=!model.palette;document.querySelector('.palette-trigger').hidden=model.palette;
+  document.querySelectorAll('[data-action="authority"]').forEach(button=>{button.classList.toggle('owned',model.authority);if(button.querySelector('small'))button.querySelector('small').textContent=model.authority?'In control':'Take over';});
+  stage.className=model.rotation?`rotated-${model.rotation}`:'';
+}
+function cycle(direction){const keys=Object.keys(variants);model.variant=keys[(keys.indexOf(model.variant)+direction+keys.length)%keys.length];model.menu=false;model.palette=false;const url=new URL(location);url.searchParams.set('variant',model.variant);history.replaceState({},'',url);showControls();render();}
+function showControls(){model.controlsVisible=true;for(const key of ['a','b','c'])document.querySelector(`#variant-${key}`).style.opacity='1';clearTimeout(hideTimer);hideTimer=setTimeout(()=>{if(model.held||model.palette||!document.querySelector('#dialog-backdrop').hidden)return;for(const key of ['a','b','c'])document.querySelector(`#variant-${key}`).style.opacity='0';model.menu=false;render();},4200);}
+function toast(message){const node=document.querySelector('#toast');node.textContent=message;node.hidden=false;clearTimeout(toastTimer);toastTimer=setTimeout(()=>node.hidden=true,2200);showControls();}
+function act(action){
+  if(action==='treatment'){model.treatment=model.treatment==='mono'?'colour':'mono';connect();toast(model.treatment==='mono'?'B&W performance stream':'Colour stream');}
+  if(action==='snapshot')canvas.toBlob(blob=>{if(!blob)return;const link=document.createElement('a');link.href=URL.createObjectURL(blob);link.download=`obscam-generation-${model.generation}.jpg`;link.click();setTimeout(()=>URL.revokeObjectURL(link.href),1000);toast(`Snapshot generation ${model.generation}`);},'image/jpeg',.92);
+  if(action==='rotate'){model.rotation=(model.rotation+90)%360;toast(`Rotated ${model.rotation}° · complete frame preserved`);}
+  if(action==='authority'){if(model.authority){toast('You already have control');}else{document.querySelector('#dialog-backdrop').hidden=false;model.held=true;}}
+  render();
+}
+document.querySelectorAll('[data-control]').forEach(button=>button.onclick=()=>{model.active=button.dataset.control;render();showControls();});
+document.querySelectorAll('[data-step]').forEach(button=>button.onclick=()=>{const scale=model.active==='exposure'?exposureScale:gainScale;model[model.active]=Math.max(0,Math.min(scale.length-1,model[model.active]+Number(button.dataset.step)));render();showControls();});
+document.querySelector('#tray-range').oninput=event=>{model[model.active]=Number(event.target.value);render();};
+for(const id of ['edge-exposure','palette-exposure'])document.querySelector(`#${id}`).oninput=event=>{model.exposure=Number(event.target.value);render();};
+for(const id of ['edge-gain','palette-gain'])document.querySelector(`#${id}`).oninput=event=>{model.gain=Number(event.target.value);render();};
+document.querySelectorAll('[data-action]').forEach(button=>button.onclick=()=>act(button.dataset.action));
+document.querySelector('.radial .trigger').onclick=()=>{model.menu=!model.menu;render();showControls();};
+document.querySelector('.palette-trigger').onclick=()=>{model.palette=true;model.held=true;render();};
+document.querySelector('.palette-close').onclick=()=>{model.palette=false;model.held=false;render();showControls();};
+document.querySelector('#cancel-takeover').onclick=()=>{document.querySelector('#dialog-backdrop').hidden=true;model.held=false;showControls();};
+document.querySelector('#confirm-takeover').onclick=()=>{document.querySelector('#dialog-backdrop').hidden=true;model.authority=true;model.held=false;render();toast('Control transferred to this viewer');};
+document.querySelector('#previous').onclick=()=>cycle(-1);document.querySelector('#next').onclick=()=>cycle(1);
+document.querySelector('#viewer').onpointermove=showControls;document.querySelector('#viewer').onclick=event=>{if(event.target.id==='viewer'||event.target.id==='stage'||event.target.id==='view')showControls();};
+addEventListener('keydown',event=>{if(!['ArrowLeft','ArrowRight'].includes(event.key)||event.target.matches('input,textarea,[contenteditable]'))return;event.preventDefault();cycle(event.key==='ArrowRight'?1:-1);});
+cadenceTimer=setInterval(()=>{const stale=performance.now()-model.lastFrameAt>2500;status.classList.toggle('stale',stale);if(stale&&model.lastFrameAt)document.querySelector('#connection').textContent='Stale frame';document.querySelector('#cadence').textContent=`${model.received} fps`;model.received=0;},1000);
+render();showControls();connect();
+</script>
+</body>
+</html>

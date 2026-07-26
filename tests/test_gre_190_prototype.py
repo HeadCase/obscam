@@ -7,8 +7,10 @@ import struct
 from pathlib import Path
 
 import pytest
+from fastapi.routing import APIRoute
 from pydantic import ValidationError
 
+from obscam.tools.gre_190_prototype.app import create_app
 from obscam.tools.gre_190_prototype.contract import (
     BrowserPresentation,
     BrowserRunReport,
@@ -35,6 +37,23 @@ def envelope(generation: int) -> FrameEnvelope:
         encode_end_unix_ns=4,
         encoded_bytes=1,
     )
+
+
+def test_gre_184_controls_use_greenfield_delivery_surface() -> None:
+    """The UI prototype must remain attached to GRE-190, never legacy frontend."""
+    app = create_app()
+    route = next(
+        route
+        for route in app.routes
+        if isinstance(route, APIRoute) and route.path == "/gre-184"
+    )
+    html = asyncio.run(route.endpoint())
+
+    assert "/ws/jpeg/${model.treatment}" in html
+    assert "GRE-184 · GRE-190 HOST" in html
+    assert "variant-a" in html
+    assert "variant-b" in html
+    assert "variant-c" in html
 
 
 def test_frame_envelope_rejects_impossible_timeline() -> None:

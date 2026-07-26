@@ -65,6 +65,11 @@ def create_app(
     async def index() -> str:
         return Path(__file__).with_name("client.html").read_text()
 
+    @app.get("/gre-184", response_class=HTMLResponse)
+    async def gre_184_mobile_controls() -> str:
+        """Serve the throwaway mobile-control UI on the greenfield stream."""
+        return Path(__file__).with_name("gre_184_client.html").read_text()
+
     @app.get("/api/preflight")
     async def preflight() -> dict[str, object]:
         return json.loads(inspect_capabilities().to_json())
