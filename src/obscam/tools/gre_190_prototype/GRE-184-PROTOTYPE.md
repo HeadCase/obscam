@@ -21,7 +21,7 @@ uv run python -m obscam.tools.gre_190_prototype serve --native --fps 20 --exposu
 Open <http://127.0.0.1:8190/gre-184?variant=A>. Use the floating switcher or
 left/right arrow keys to compare:
 
-- `A` — compact two-row bottom tray (preferred direction)
+- `A` — compact two-row bottom tray with direct exposure choices (preferred)
 - `B` — edge controls with radial actions
 - `C` — command palette
 
