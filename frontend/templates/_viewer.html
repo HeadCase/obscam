@@ -1,163 +1,23 @@
-<!--
-  GRE-184 PROTOTYPE — throwaway mobile viewer-control variants.
-  Three variants on the existing route, switchable with ?variant=A|B|C.
--->
-<main
-  class="viewer-surface prototype-viewer"
-  :class="`variant-${prototype.variant.toLowerCase()}`"
-  @pointermove="showPrototypeControls()"
-  @click.self="showPrototypeControls()"
->
-  <div class="prototype-frame-stage" :class="`rotation-${prototype.rotation}`">
-    <img
-      x-show="streaming"
-      x-ref="mjpegStream"
-      :src="streamUrl"
-      class="camera-feed"
-      alt="Live observatory camera frame"
-      @error="handleStreamError()"
-      @load="handleStreamLoad()"
-    />
+<!-- Main Camera Feed - Full Viewport -->
+<div class="viewer-surface">
+  <!-- MJPEG Stream -->
+  <img
+    x-show="streaming"
+    x-ref="mjpegStream"
+    :src="streamUrl"
+    class="camera-feed block"
+    @error="handleStreamError()"
+    @load="handleStreamLoad()"
+  />
 
-    <div x-show="!streaming" class="viewport-placeholder">
-      <span class="placeholder-icon">✦</span>
-      <strong>Starting camera feed…</strong>
-      <small>The complete source frame stays visible here.</small>
-    </div>
-  </div>
-
-  <div class="viewer-status" :class="prototype.stale ? 'is-stale' : ''">
-    <span class="status-dot"></span>
-    <span x-text="prototype.stale ? 'Stale frame · reconnecting' : 'Live'"></span>
-    <span x-text="telemetry.fps ? `${telemetry.fps.toFixed(1)} fps` : '— fps'"></span>
-    <span x-text="prototype.colour ? 'Colour' : 'B&W'"></span>
-  </div>
-
-  <!-- A: thumb-reachable tray, optimized for repeated tuning. -->
-  <section
-    x-show="prototype.variant === 'A' && prototype.controlsVisible"
-    x-transition.opacity
-    class="control-ui tray-ui"
-    @pointerdown="holdPrototypeControls()"
-    @pointerup="releasePrototypeControls()"
-    @click.stop
+  <!-- Loading Placeholder -->
+  <div
+    x-show="!streaming"
+    class="viewport-placeholder flex items-center justify-center bg-tokyo-night-surface/20 border-2 border-dashed border-tokyo-night-overlay"
   >
-    <div class="tray-grabber" aria-hidden="true"></div>
-    <div class="primary-readouts">
-      <button type="button" @click="prototype.activeControl = 'exposure'" :class="prototype.activeControl === 'exposure' && 'active'">
-        <small>Exposure</small>
-        <strong x-text="formatExposure(controls.exposure.value)"></strong>
-      </button>
-      <button type="button" @click="prototype.activeControl = 'gain'" :class="prototype.activeControl === 'gain' && 'active'">
-        <small>Gain</small>
-        <strong x-text="controls.gain.value"></strong>
-      </button>
-    </div>
-    <div class="precision-control">
-      <button type="button" class="step-button" @click="stepActiveControl(-1)" aria-label="Decrease setting">−</button>
-      <input
-        x-show="prototype.activeControl === 'exposure'"
-        type="range"
-        class="control-slider"
-        x-model="controls.exposure.index"
-        min="0"
-        :max="controls.exposure.scale.length - 1"
-        @input="updateControlValues()"
-      />
-      <input
-        x-show="prototype.activeControl === 'gain'"
-        type="range"
-        class="control-slider"
-        x-model="controls.gain.index"
-        min="0"
-        :max="controls.gain.scale.length - 1"
-        @input="updateControlValues()"
-      />
-      <button type="button" class="step-button" @click="stepActiveControl(1)" aria-label="Increase setting">+</button>
-    </div>
-    <nav class="action-row" aria-label="Viewer actions">
-      <button type="button" @click="toggleColour()"><span x-text="prototype.colour ? '◐' : '●'"></span><small x-text="prototype.colour ? 'Colour' : 'B&W'"></small></button>
-      <button type="button" @click="downloadSnapshot()"><span>⇩</span><small>Snapshot</small></button>
-      <button type="button" @click="rotateViewer()"><span>↻</span><small>Rotate</small></button>
-      <button type="button" :class="prototype.hasControl && 'authority-owned'" @click="requestTakeover()"><span>⌁</span><small x-text="prototype.hasControl ? 'In control' : 'Take over'"></small></button>
-    </nav>
-  </section>
-
-  <!-- B: direct edge controls with a radial secondary-action cluster. -->
-  <section
-    x-show="prototype.variant === 'B' && prototype.controlsVisible"
-    x-transition.opacity
-    class="control-ui edge-ui"
-    @pointerdown="holdPrototypeControls()"
-    @pointerup="releasePrototypeControls()"
-    @click.stop
-  >
-    <div class="edge-control edge-left">
-      <strong x-text="formatExposure(controls.exposure.value)"></strong>
-      <input type="range" x-model="controls.exposure.index" min="0" :max="controls.exposure.scale.length - 1" @input="updateControlValues()" />
-      <small>Exposure</small>
-    </div>
-    <div class="edge-control edge-right">
-      <strong x-text="controls.gain.value"></strong>
-      <input type="range" x-model="controls.gain.index" min="0" :max="controls.gain.scale.length - 1" @input="updateControlValues()" />
-      <small>Gain</small>
-    </div>
-    <div class="radial-actions" :class="prototype.menuOpen && 'open'">
-      <button type="button" class="radial-trigger" @click="prototype.menuOpen = !prototype.menuOpen" aria-label="Toggle actions">✦</button>
-      <button type="button" class="radial-action radial-one" @click="toggleColour()" aria-label="Toggle colour">◐</button>
-      <button type="button" class="radial-action radial-two" @click="downloadSnapshot()" aria-label="Download snapshot">⇩</button>
-      <button type="button" class="radial-action radial-three" @click="rotateViewer()" aria-label="Rotate">↻</button>
-      <button type="button" class="radial-action radial-four" @click="requestTakeover()" aria-label="Take control">⌁</button>
-    </div>
-  </section>
-
-  <!-- C: single command palette; viewing and editing are deliberately separated. -->
-  <section x-show="prototype.variant === 'C'" class="control-ui palette-ui" @click.stop>
-    <button
-      x-show="!prototype.paletteOpen"
-      type="button"
-      class="palette-trigger"
-      @click="prototype.paletteOpen = true; holdPrototypeControls()"
-    >Controls</button>
-    <div x-show="prototype.paletteOpen" x-transition class="command-palette">
-      <header>
-        <div><small>Viewer controls</small><strong>Adjust camera</strong></div>
-        <button type="button" @click="prototype.paletteOpen = false; releasePrototypeControls()" aria-label="Close controls">×</button>
-      </header>
-      <label>
-        <span>Exposure <strong x-text="formatExposure(controls.exposure.value)"></strong></span>
-        <input type="range" class="control-slider" x-model="controls.exposure.index" min="0" :max="controls.exposure.scale.length - 1" @input="updateControlValues()" />
-      </label>
-      <label>
-        <span>Gain <strong x-text="controls.gain.value"></strong></span>
-        <input type="range" class="control-slider" x-model="controls.gain.index" min="0" :max="controls.gain.scale.length - 1" @input="updateControlValues()" />
-      </label>
-      <div class="palette-grid">
-        <button type="button" @click="toggleColour()" x-text="prototype.colour ? 'Use B&W' : 'Use colour'"></button>
-        <button type="button" @click="downloadSnapshot()">Download snapshot</button>
-        <button type="button" @click="rotateViewer()">Rotate frame</button>
-        <button type="button" :class="prototype.hasControl && 'authority-owned'" @click="requestTakeover()" x-text="prototype.hasControl ? 'You have control' : 'Take control'"></button>
-      </div>
-    </div>
-  </section>
-
-  <div x-show="prototype.takeoverPending" x-transition.opacity class="prototype-dialog-backdrop" @click.stop>
-    <div role="dialog" aria-modal="true" aria-labelledby="takeover-title" class="prototype-dialog">
-      <small>CONTROL AUTHORITY</small>
-      <h2 id="takeover-title">Take control from another viewer?</h2>
-      <p>Their current adjustment will stop. This prototype does not contact the server.</p>
-      <div>
-        <button type="button" class="secondary" @click="prototype.takeoverPending = false">Cancel</button>
-        <button type="button" class="primary" @click="confirmTakeover()">Take control</button>
-      </div>
+    <div class="text-center">
+      <div class="text-6xl mb-4">📸</div>
+      <div class="text-tokyo-night-subtle">Starting camera feed...</div>
     </div>
   </div>
-
-  <div x-show="prototype.toast" x-transition class="prototype-toast" x-text="prototype.toast"></div>
-
-  <nav class="prototype-switcher" aria-label="Prototype variant switcher">
-    <button type="button" @click="cycleVariant(-1)" aria-label="Previous variant">←</button>
-    <span><small>GRE-184 PROTOTYPE</small><strong x-text="variantLabel()"></strong></span>
-    <button type="button" @click="cycleVariant(1)" aria-label="Next variant">→</button>
-  </nav>
-</main>
+</div>

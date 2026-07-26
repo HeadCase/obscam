@@ -23,137 +23,10 @@ function obsCam() {
 
     // Internal state
     eventSource: null,
-    prototypeTimer: null,
-    prototypeToastTimer: null,
-    prototype: {
-      variant: "A",
-      controlsVisible: true,
-      controlsHeld: false,
-      activeControl: "exposure",
-      colour: false,
-      rotation: 0,
-      hasControl: false,
-      takeoverPending: false,
-      menuOpen: false,
-      paletteOpen: false,
-      stale: false,
-      toast: "",
-    },
 
     init() {
       console.log("ObsCam initializing...");
-      this.prototype.variant = this.readPrototypeVariant();
-      window.addEventListener("keydown", (event) => this.handlePrototypeKey(event));
-      this.schedulePrototypeHide();
       this.bootstrap();
-    },
-
-    readPrototypeVariant() {
-      const candidate = new URLSearchParams(window.location.search)
-        .get("variant")
-        ?.toUpperCase();
-      return ["A", "B", "C"].includes(candidate) ? candidate : "A";
-    },
-
-    variantLabel() {
-      return {
-        A: "A — Bottom tray",
-        B: "B — Edge controls",
-        C: "C — Command palette",
-      }[this.prototype.variant];
-    },
-
-    cycleVariant(direction) {
-      const variants = ["A", "B", "C"];
-      const index = variants.indexOf(this.prototype.variant);
-      this.prototype.variant = variants[(index + direction + variants.length) % variants.length];
-      this.prototype.menuOpen = false;
-      this.prototype.paletteOpen = false;
-      const url = new URL(window.location.href);
-      url.searchParams.set("variant", this.prototype.variant);
-      window.history.replaceState({}, "", url);
-      this.showPrototypeControls();
-    },
-
-    handlePrototypeKey(event) {
-      if (!["ArrowLeft", "ArrowRight"].includes(event.key)) return;
-      const target = event.target;
-      if (target.matches("input, textarea, [contenteditable]")) return;
-      event.preventDefault();
-      this.cycleVariant(event.key === "ArrowRight" ? 1 : -1);
-    },
-
-    showPrototypeControls() {
-      this.prototype.controlsVisible = true;
-      this.schedulePrototypeHide();
-    },
-
-    holdPrototypeControls() {
-      this.prototype.controlsHeld = true;
-      clearTimeout(this.prototypeTimer);
-    },
-
-    releasePrototypeControls() {
-      this.prototype.controlsHeld = false;
-      this.schedulePrototypeHide();
-    },
-
-    schedulePrototypeHide() {
-      clearTimeout(this.prototypeTimer);
-      this.prototypeTimer = setTimeout(() => {
-        if (!this.prototype.controlsHeld && !this.prototype.takeoverPending && !this.prototype.paletteOpen) {
-          this.prototype.controlsVisible = false;
-          this.prototype.menuOpen = false;
-        }
-      }, 4200);
-    },
-
-    stepActiveControl(direction) {
-      const control = this.controls[this.prototype.activeControl];
-      control.index = Math.max(0, Math.min(control.scale.length - 1, Number(control.index) + direction));
-      this.updateControlValues();
-      this.showPrototypeControls();
-    },
-
-    toggleColour() {
-      this.prototype.colour = !this.prototype.colour;
-      this.showToast(this.prototype.colour ? "Colour presentation" : "B&W performance mode");
-    },
-
-    rotateViewer() {
-      this.prototype.rotation = (this.prototype.rotation + 90) % 360;
-      this.showToast(`Rotated ${this.prototype.rotation}° · complete frame preserved`);
-    },
-
-    requestTakeover() {
-      if (this.prototype.hasControl) {
-        this.showToast("You already have control");
-        return;
-      }
-      this.prototype.takeoverPending = true;
-      this.holdPrototypeControls();
-    },
-
-    confirmTakeover() {
-      this.prototype.takeoverPending = false;
-      this.prototype.hasControl = true;
-      this.releasePrototypeControls();
-      this.showToast("Control transferred to this viewer");
-    },
-
-    downloadSnapshot() {
-      const link = document.createElement("a");
-      link.href = this.streamUrl;
-      link.download = `obscam-snapshot-${Date.now()}.jpg`;
-      link.click();
-      this.showToast("Snapshot download requested");
-    },
-
-    showToast(message) {
-      clearTimeout(this.prototypeToastTimer);
-      this.prototype.toast = message;
-      this.prototypeToastTimer = setTimeout(() => { this.prototype.toast = ""; }, 2200);
-      this.showPrototypeControls();
     },
 
     async bootstrap() {
@@ -306,11 +179,6 @@ function obsCam() {
     },
 
     async updateCameraSettings() {
-      // GRE-184 is intentionally browser-local; no prototype control mutates the server.
-      if (this.prototype) {
-        this.showToast("Prototype setting updated locally");
-        return;
-      }
       try {
         const payload = {
           exposure_ms: this.controls.exposure.value,
