@@ -1,16 +1,14 @@
-# Rubbish
-*.DS_STORE
+# Editors and operating systems
+.DS_Store
+.idea/
+.vscode/
 
-# Python-generated files
-__pycache__/
-*.py[oc]
-build/
-dist/
-wheels/
-*.egg-info
+# Rust
+/target/
+**/*.rs.bk
 
-# Virtual environments
-.venv
+# Runtime output
+/logs/
 
-images/
-logs/
+# Local agent state
+/.codex/

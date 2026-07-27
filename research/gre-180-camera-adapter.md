@@ -198,12 +198,13 @@ isolated experimentally. At a 9.29 ms advertised frame period it may be
 irrelevant compared with USB transfer and encoding; per-frame allocations,
 format/control chatter, or serial processing may instead dominate.
 
-## Evidence from the current repository
+## Evidence from the superseded repository
 
-The present implementation is useful as a failure/control case, not as a
-greenfield constraint:
+The removed implementation was useful as a failure/control case, not as a
+greenfield constraint. Git history retains it for explicit historical
+investigation:
 
-- [`ZwoAsiCamera`](../src/obscam/camera/zwo_asi_camera.py) selects `Y8`, uses
+- The legacy ZWO camera adapter selected `Y8`, used
   video mode at exposures up to 200 ms, then encodes every captured frame to
   JPEG with Pillow.
 - It calls `_prepare_capture()` for every frame, including gain/exposure writes
@@ -213,7 +214,7 @@ greenfield constraint:
   already running.
 - It does not supply `capture_video_frame()` with a reusable buffer, so the
   wrapper allocates per frame.
-- [`ContinuousCaptureLoop`](../src/obscam/core/capture_loop.py) checks queued
+- The legacy continuous capture loop checked queued
   settings only between blocking captures. A setting request during a long
   exposure therefore does not trigger the required immediate cancellation.
 - The existing benchmark helpers do not provide a native C reference, use the

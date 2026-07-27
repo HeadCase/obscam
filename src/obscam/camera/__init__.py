@@ -1,1 +1,0 @@
-"""Camera implementations for obscam."""

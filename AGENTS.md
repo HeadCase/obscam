@@ -16,6 +16,14 @@ The tracker uses the canonical five-role triage vocabulary. See
 
 This is a single-context repository. See `docs/agents/domain.md`.
 
+### Architecture authority
+
+Linear issue GRE-179 and its accepted child decisions are the architectural
+system of record. See `docs/agents/architecture.md` for the local projection.
+Historical Git content and retained research are evidence, not implementation
+precedent. Do not inspect or recover deleted implementations unless the user
+explicitly requests historical investigation.
+
 ## Decision Policy
 
 - Always propose before implementing.
@@ -59,11 +67,21 @@ This is a single-context repository. See `docs/agents/domain.md`.
 
 ## Architecture Rules
 
-1. REUSE over CREATE - Reuse existing Flask/FastAPI threads and flows where practical.
+1. GREENFIELD over LEGACY - Implement the accepted Rust architecture without
+   recovering superseded application or prototype code.
 2. MEMORY over DISK - Keep runtime state in RAM, not persistent storage.
-3. CLIENT over SERVER - Push interaction and presentation complexity to the desktop browser.
+3. CLIENT over SERVER - Push interaction and presentation complexity to the browser.
 4. SIMPLE over FEATURE-RICH - Favor reliability over optional capability.
 5. GRACEFUL DEGRADATION - Lower quality is preferable to service failure.
+6. ONE MEDIA PATH - Use only shared hardware H.264 through MediaMTX WHEP/WebRTC.
+
+Prohibited unless a later approved Linear decision changes the map:
+
+- a Python application server
+- JPEG, MJPEG, or a secondary media-delivery path
+- server-side recording, image history, or runtime-state persistence
+- image rotation or silent spatial-resolution reduction
+- importing implementation from retained research or Git history
 
 ## Change Boundaries
 
@@ -77,9 +95,12 @@ This is a single-context repository. See `docs/agents/domain.md`.
 
 ## Testing and Verification
 
-- Tests must be written with `pytest`.
 - Add tests whenever behavior changes.
-- Prefer unit tests plus integration seams where possible, especially around hardware-dependent paths.
+- Prefer the deployed-stack acceptance seam: exercise the real Rust service,
+  FFmpeg, and MediaMTX through browser-facing contracts, substituting only
+  unavailable hardware edges.
+- Use focused Rust unit tests for state machines and algorithms, not as a
+  substitute for deployed-stack verification.
 - Before calling work complete, perform:
   - relevant automated tests
   - sanity checks where possible
@@ -95,11 +116,12 @@ This is a single-context repository. See `docs/agents/domain.md`.
 
 - After any code change, run all applicable project code quality checks before treating the work as complete.
 - The default quality checks for this repo are:
-  - `uv run ruff check`
-  - `uv run ruff format --check`
-  - `uv run ty check`
-  - `uv run deptry .`
-  - `uv run pytest`
+  - `cargo fmt --all -- --check`
+  - `cargo clippy --workspace --all-targets --all-features -- -D warnings`
+  - `cargo test --workspace --all-targets --all-features`
+  - `cargo deny check`
+  - `cargo machete`
+- Browser checks become required when browser code exists.
 - Resolve failures from these checks as part of the change when they are in scope.
 - If a check is unavailable due to environment setup or missing dependencies, report that explicitly.
 - Do not treat work as complete if any required check fails.
@@ -123,70 +145,17 @@ When relevant, explicitly consider:
 
 ## Build and Code Conventions
 
-- Python version: `>=3.11`
-- Use modern type annotations such as `dict[str, int]` and `list[str]`.
-- Use package imports such as `from obscam.foo import Foo`.
-- Use `loguru` for logging.
-- Build system: `uv_build`
-
-## Python Development Rules
-
-- Treat these rules as strong defaults. Deviate only when there is a clear, local justification.
-
-### Typing
-
-- Require type annotations everywhere in new or modified code, including private helpers.
-- Add explicit return types on all functions and methods.
-- Avoid `Any` by default. Use it only with explicit justification.
-- Prefer precise types over broad unions or loosely typed containers.
-- Wrap or isolate untyped third-party APIs before they reach core application logic where practical.
-
-### Data Models
-
-- Prefer `pydantic` for external, configuration, and shared structured models.
-- Use lighter typed classes or dataclasses for internal hot-path state where validation and serialization are not needed.
-- Avoid passing ad hoc dictionaries across module boundaries. Define typed models instead.
-- Prefer `pydantic` settings/models for configuration and environment-derived settings.
-- Favor explicit, named models over loosely structured payloads.
-
-### Validation
-
-- Validate aggressively at system boundaries, state transitions, and integration seams.
-- Avoid repeated runtime validation in hot internal paths unless it protects a critical invariant.
-- Coerce external input when it is clearly safe and predictable; otherwise fail with clear errors.
-- Validate and normalize hardware SDK and vendor responses as early as practical.
-- Do not let raw vendor-specific payloads spread through the codebase unless there is a strong performance reason.
-
-### Design
-
-- Prefer simple concrete functions and classes by default.
-- Use `Protocol` when abstraction is needed.
-- Use generics sparingly and only when they clearly improve correctness or API clarity.
-- Prefer synchronous code unless async is clearly necessary for correctness or performance.
-- When code becomes complex, first improve data models and simplify control flow before adding layers.
-- Prefer clearer models and more direct flow over additional abstraction.
-
-### Errors
-
-- Use specific custom exceptions at system and integration boundaries.
-- Prefer standard library exceptions internally unless a custom exception materially improves handling.
-- Keep exception scope tight and avoid broad catch-and-continue patterns.
-
-### Testability
-
-- Use dependency injection where it materially improves testability or isolation.
-- Prefer real components or high-fidelity seams where possible rather than heavy mock-driven tests.
-- Minimize mocks, especially for internal logic, unless they are the clearest way to isolate an external dependency.
-
-### Documentation
-
-- Add docstrings to public modules, classes, and functions.
-- Keep docstrings concise and focused on behavior, inputs, outputs, and non-obvious constraints.
-- Prefer readable code and well-named types over verbose inline explanation.
+- The application and camera owner are Rust.
+- Use the repository's pinned stable Rust toolchain once the workspace exists.
+- Deny Clippy warnings across the whole workspace, all targets, and all features.
+- Prefer concrete types and direct control flow over generalized abstraction.
+- Isolate unsafe FFI at the ZWO SDK boundary and document its safety invariants.
+- Validate external inputs and normalize vendor responses at integration boundaries.
+- Keep hot-path allocations, copies, locks, and disk I/O explicit and minimal.
+- Use structured tracing for operational logs and telemetry.
+- Document public APIs and non-obvious safety or performance constraints.
 
 ## References
 
 ### ZWO SDKs
 - https://zwoastro.yuque.com/olyczd/sfwyw6/kpde2odaw3h4ekix
-- https://github.com/python-zwoasi/python-zwoasi
-- https://raw.githubusercontent.com/python-zwoasi/python-zwoasi/refs/heads/master/zwoasi/examples/zwoasi_demo.py
