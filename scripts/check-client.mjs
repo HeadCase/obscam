@@ -107,6 +107,32 @@ assert.match(
   /Frame identity unavailable/,
   'authoritative unknown results must describe correlation, not connectivity',
 );
+assert.doesNotMatch(
+  script,
+  /whep_url|192\.168\.1\.200|10\.164\.190\.1/,
+  'the browser contract must not contain a fixed-interface media URL',
+);
+assert.match(
+  script,
+  /endpoint\(runtime\.whep\)/,
+  'the browser must consume the hostless WHEP descriptor',
+);
+
+const endpointStatement = script
+  .split('\n')
+  .find((line) => line.includes('function endpoint'));
+assert(endpointStatement, 'origin-aware WHEP endpoint function is present');
+for (const host of ['192.168.1.200', '10.164.190.1']) {
+  const endpointContext = {
+    URL,
+    location: { origin: `http://${host}:8200` },
+  };
+  vm.runInNewContext(
+    `${endpointStatement};result=endpoint({port:18889,path:'/obscam/whep'})`,
+    endpointContext,
+  );
+  assert.equal(endpointContext.result, `http://${host}:18889/obscam/whep`);
+}
 
 const clientIdStatements = script
   .split('\n')

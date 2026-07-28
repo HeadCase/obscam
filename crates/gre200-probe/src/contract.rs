@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-pub const SCHEMA_VERSION: u8 = 1;
+pub const SCHEMA_VERSION: u8 = 2;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -80,6 +80,37 @@ pub struct RuntimeDescription {
     pub schema_version: u8,
     pub runtime_epoch: String,
     pub stream_epoch: u64,
-    pub whep_url: String,
+    pub whep: WhepEndpoint,
     pub capture: Option<CaptureProgress>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+pub struct WhepEndpoint {
+    pub port: u16,
+    pub path: String,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{RuntimeDescription, SCHEMA_VERSION, WhepEndpoint};
+
+    #[test]
+    fn runtime_media_contract_has_no_host() {
+        let runtime = RuntimeDescription {
+            schema_version: SCHEMA_VERSION,
+            runtime_epoch: "epoch".into(),
+            stream_epoch: 1,
+            whep: WhepEndpoint {
+                port: 18_889,
+                path: "/obscam/whep".into(),
+            },
+            capture: None,
+        };
+
+        let value = serde_json::to_value(runtime).expect("runtime contract must serialize");
+        assert_eq!(value["whep"]["port"], 18_889);
+        assert_eq!(value["whep"]["path"], "/obscam/whep");
+        assert!(value["whep"].get("host").is_none());
+        assert!(value.get("whep_url").is_none());
+    }
 }

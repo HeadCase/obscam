@@ -34,8 +34,10 @@ struct Args {
     exposure_us: i64,
     #[arg(long, default_value_t = 100)]
     gain: i64,
-    #[arg(long, default_value = "http://127.0.0.1:18889/obscam/whep")]
-    whep_url: String,
+    #[arg(long, default_value_t = 18_889)]
+    whep_port: u16,
+    #[arg(long, default_value = "/obscam/whep", value_parser = parse_absolute_path)]
+    whep_path: String,
     #[arg(long, default_value = "127.0.0.1:8201")]
     qualification_listen: SocketAddr,
 }
@@ -92,7 +94,8 @@ async fn main() -> Result<()> {
 
     let app = server::router(AppState {
         probe: state,
-        whep_url: Arc::from(args.whep_url),
+        whep_port: args.whep_port,
+        whep_path: Arc::from(args.whep_path),
     });
     let listener = tokio::net::TcpListener::bind(args.listen)
         .await
@@ -119,6 +122,41 @@ async fn main() -> Result<()> {
     Ok(())
 }
 
+fn parse_absolute_path(value: &str) -> Result<String, String> {
+    if !value.starts_with('/') || value.starts_with("//") || value.contains(['?', '#']) {
+        return Err(
+            "WHEP path must be an absolute path without an authority, query, or fragment"
+                .to_owned(),
+        );
+    }
+    Ok(value.to_owned())
+}
+
 async fn shutdown() {
     let _ = tokio::signal::ctrl_c().await;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_absolute_path;
+
+    #[test]
+    fn accepts_absolute_whep_path() {
+        assert_eq!(
+            parse_absolute_path("/obscam/whep").as_deref(),
+            Ok("/obscam/whep")
+        );
+    }
+
+    #[test]
+    fn rejects_values_that_can_supply_an_authority() {
+        for value in [
+            "obscam/whep",
+            "//10.164.190.1/whep",
+            "/whep?host=lan",
+            "/whep#lan",
+        ] {
+            assert!(parse_absolute_path(value).is_err(), "accepted {value}");
+        }
+    }
 }

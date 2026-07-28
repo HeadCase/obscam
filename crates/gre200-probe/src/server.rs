@@ -14,6 +14,7 @@ use tracing::{debug, warn};
 
 use crate::contract::{
     BrowserPresentation, CorrelationResult, CorrelationStatus, RuntimeDescription, SCHEMA_VERSION,
+    WhepEndpoint,
 };
 use crate::state::ProbeState;
 
@@ -22,7 +23,8 @@ const CLIENT_HTML: &str = include_str!("client.html");
 #[derive(Clone)]
 pub struct AppState {
     pub probe: ProbeState,
-    pub whep_url: Arc<str>,
+    pub whep_port: u16,
+    pub whep_path: Arc<str>,
 }
 
 pub fn router(state: AppState) -> Router {
@@ -46,7 +48,10 @@ async fn runtime(State(state): State<AppState>) -> Json<RuntimeDescription> {
         schema_version: SCHEMA_VERSION,
         runtime_epoch: state.probe.runtime_epoch().to_owned(),
         stream_epoch: state.probe.stream_epoch(),
-        whep_url: state.whep_url.to_string(),
+        whep: WhepEndpoint {
+            port: state.whep_port,
+            path: state.whep_path.to_string(),
+        },
         capture: state.probe.capture(),
     })
 }
