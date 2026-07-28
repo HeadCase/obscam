@@ -11,4 +11,4 @@
 /logs/
 
 # Local agent state
-/.codex/
+/.codex
