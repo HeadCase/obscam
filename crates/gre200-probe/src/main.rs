@@ -1,3 +1,7 @@
+//! Deployed-stack probe for exact `ObsCam` H.264 browser correlation.
+
+#![warn(missing_docs)]
+
 mod contract;
 mod media;
 mod qualification;

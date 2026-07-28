@@ -26,30 +26,45 @@ pub struct RawFrame {
     pub exposure_completed_unix_ns: u128,
 }
 
-#[derive(Clone, Copy, Debug)]
-pub struct Settings {
+/// Complete capture and presentation treatment applied as one generation.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct CaptureProfile {
     exposure_us: i64,
     gain: i64,
+    treatment: Treatment,
 }
 
-impl Settings {
-    pub fn new(exposure_us: i64, gain: i64) -> Result<Self> {
+impl CaptureProfile {
+    /// Validates a complete capture profile before camera capture is interrupted.
+    pub fn new(exposure_us: i64, gain: i64, treatment: Treatment) -> Result<Self> {
         if !(10_000..=30_000_000).contains(&exposure_us) {
             bail!("exposure_us must be between 10000 and 30000000");
         }
         if !(0..=600).contains(&gain) {
             bail!("gain must be between 0 and 600");
         }
-        Ok(Self { exposure_us, gain })
+        Ok(Self {
+            exposure_us,
+            gain,
+            treatment,
+        })
     }
 }
 
+/// Commands serialized through the sole camera owner.
 #[derive(Debug)]
 pub enum SourceCommand {
-    ApplySettings {
-        settings: Settings,
-        reply: oneshot::Sender<Result<u64, String>>,
+    ApplyProfile {
+        profile: CaptureProfile,
+        reply: oneshot::Sender<Result<AppliedProfile, String>>,
     },
+}
+
+/// Acknowledges the generation fence established by an applied profile.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct AppliedProfile {
+    pub settings_generation: u64,
+    pub treatment: Treatment,
 }
 
 #[derive(Debug)]
@@ -102,7 +117,7 @@ pub async fn run_asi_source(
     gain: i64,
 ) -> Result<()> {
     tokio::task::spawn_blocking(move || -> Result<()> {
-        let mut settings = Settings::new(exposure_us, gain)?;
+        let mut profile = CaptureProfile::new(exposure_us, gain, Treatment::Mono)?;
         let mut camera = zwo_asi::Camera::open_exact("ZWO ASI662MC", "1d274e0920010900")
             .context("opening exact ObsCam camera")?;
         let (width, height) = camera.dimensions();
@@ -110,10 +125,10 @@ pub async fn run_asi_source(
             bail!("ASI662MC reported unexpected dimensions {width}x{height}");
         }
         camera
-            .configure(settings.exposure_us, settings.gain)
+            .configure(profile.exposure_us, profile.gain)
             .context("configuring ASI662MC")?;
         camera.start().context("starting ASI662MC video capture")?;
-        state.record_capture_started(1, 1, settings.exposure_us, unix_time_ns());
+        state.record_capture_started(1, 1, profile.exposure_us, unix_time_ns());
         info!(width, height, exposure_us, gain, "ASI662MC capture started");
         let mut raw = vec![0_u8; width * height];
         let mut generation = 0_u64;
@@ -121,31 +136,35 @@ pub async fn run_asi_source(
         loop {
             while let Ok(command) = commands.try_recv() {
                 match command {
-                    SourceCommand::ApplySettings {
-                        settings: requested,
+                    SourceCommand::ApplyProfile {
+                        profile: requested,
                         reply,
                     } => {
-                        let result = (|| -> Result<u64> {
+                        let result = (|| -> Result<AppliedProfile> {
                             camera.stop().context("interrupting ASI662MC capture")?;
                             camera
                                 .configure(requested.exposure_us, requested.gain)
                                 .context("applying ASI662MC qualification settings")?;
                             camera.start().context("restarting ASI662MC capture")?;
-                            settings = requested;
+                            profile = requested;
                             settings_generation = settings_generation.wrapping_add(1);
                             state.record_capture_started(
                                 settings_generation,
                                 generation + 1,
-                                settings.exposure_us,
+                                profile.exposure_us,
                                 unix_time_ns(),
                             );
                             info!(
-                                exposure_us = settings.exposure_us,
-                                gain = settings.gain,
+                                exposure_us = profile.exposure_us,
+                                gain = profile.gain,
+                                treatment = ?profile.treatment,
                                 settings_generation,
-                                "qualification settings applied"
+                                "qualification capture profile applied"
                             );
-                            Ok(settings_generation)
+                            Ok(AppliedProfile {
+                                settings_generation,
+                                treatment: profile.treatment,
+                            })
                         })()
                         .map_err(|error| error.to_string());
                         let _ = reply.send(result);
@@ -161,10 +180,14 @@ pub async fn run_asi_source(
             }
             generation = generation.wrapping_add(1);
             let frame = RawFrame {
-                pixels: raw8_to_mono_yuv420(&raw).into(),
+                pixels: match profile.treatment {
+                    Treatment::Mono => raw8_to_mono_yuv420(&raw),
+                    Treatment::Colour => raw8_rggb_to_colour_yuv420(&raw, width, height),
+                }
+                .into(),
                 source_generation: generation,
                 settings_generation,
-                treatment: Treatment::Mono,
+                treatment: profile.treatment,
                 exposure_completed_unix_ns: unix_time_ns(),
             };
             if sender.send(Some(frame)).is_err() {
@@ -173,7 +196,7 @@ pub async fn run_asi_source(
             state.record_capture_started(
                 settings_generation,
                 generation + 1,
-                settings.exposure_us,
+                profile.exposure_us,
                 unix_time_ns(),
             );
         }
@@ -479,6 +502,94 @@ fn raw8_to_mono_yuv420(raw: &[u8]) -> Vec<u8> {
     frame
 }
 
+/// Converts the ASI662MC's top-left-origin RGGB RAW8 mosaic to full-resolution
+/// YUV420 using fixed bilinear interpolation and full-range BT.601 coefficients.
+fn raw8_rggb_to_colour_yuv420(raw: &[u8], width: usize, height: usize) -> Vec<u8> {
+    debug_assert_eq!(raw.len(), width * height);
+    debug_assert!(width.is_multiple_of(2) && height.is_multiple_of(2));
+    let y_len = width * height;
+    let mut frame = vec![0_u8; y_len + y_len / 2];
+    let (y_plane, chroma) = frame.split_at_mut(y_len);
+    let (u_plane, v_plane) = chroma.split_at_mut(y_len / 4);
+    for y in (0..height).step_by(2) {
+        for x in (0..width).step_by(2) {
+            let mut red = 0_u16;
+            let mut green = 0_u16;
+            let mut blue = 0_u16;
+            for (dx, dy) in [(0, 0), (1, 0), (0, 1), (1, 1)] {
+                let rgb = demosaic_rggb(raw, width, height, x + dx, y + dy);
+                y_plane[(y + dy) * width + x + dx] = rgb_to_y(rgb.0, rgb.1, rgb.2);
+                red += u16::from(rgb.0);
+                green += u16::from(rgb.1);
+                blue += u16::from(rgb.2);
+            }
+            let chroma_index = (y / 2) * (width / 2) + x / 2;
+            let rgb = (
+                u8::try_from(red / 4).unwrap_or(u8::MAX),
+                u8::try_from(green / 4).unwrap_or(u8::MAX),
+                u8::try_from(blue / 4).unwrap_or(u8::MAX),
+            );
+            u_plane[chroma_index] = rgb_to_u(rgb.0, rgb.1, rgb.2);
+            v_plane[chroma_index] = rgb_to_v(rgb.0, rgb.1, rgb.2);
+        }
+    }
+    frame
+}
+
+fn demosaic_rggb(raw: &[u8], width: usize, height: usize, x: usize, y: usize) -> (u8, u8, u8) {
+    let at = |dx: isize, dy: isize| {
+        let reflect = |position: usize, delta: isize, limit: usize| {
+            let position = isize::try_from(position).unwrap_or_default() + delta;
+            let maximum = isize::try_from(limit - 1).unwrap_or_default();
+            let reflected = if position < 0 {
+                -position
+            } else if position > maximum {
+                2 * maximum - position
+            } else {
+                position
+            };
+            usize::try_from(reflected).unwrap_or_default()
+        };
+        let sample_x = reflect(x, dx, width);
+        let sample_y = reflect(y, dy, height);
+        raw[sample_y * width + sample_x]
+    };
+    let average = |offsets: &[(isize, isize)]| {
+        let sum = offsets
+            .iter()
+            .map(|&(dx, dy)| u16::from(at(dx, dy)))
+            .sum::<u16>();
+        u8::try_from(sum / u16::try_from(offsets.len()).unwrap_or(1)).unwrap_or(u8::MAX)
+    };
+    let horizontal = [(-1, 0), (1, 0)];
+    let vertical = [(0, -1), (0, 1)];
+    let cross = [(-1, 0), (1, 0), (0, -1), (0, 1)];
+    let diagonal = [(-1, -1), (1, -1), (-1, 1), (1, 1)];
+    match (y.is_multiple_of(2), x.is_multiple_of(2)) {
+        (true, true) => (at(0, 0), average(&cross), average(&diagonal)),
+        (true, false) => (average(&horizontal), at(0, 0), average(&vertical)),
+        (false, true) => (average(&vertical), at(0, 0), average(&horizontal)),
+        (false, false) => (average(&diagonal), average(&cross), at(0, 0)),
+    }
+}
+
+fn rgb_to_y(red: u8, green: u8, blue: u8) -> u8 {
+    let value = 77 * u16::from(red) + 150 * u16::from(green) + 29 * u16::from(blue);
+    u8::try_from(value >> 8).unwrap_or(u8::MAX)
+}
+
+fn rgb_to_u(red: u8, green: u8, blue: u8) -> u8 {
+    clamp_colour((-43 * i32::from(red) - 85 * i32::from(green) + 128 * i32::from(blue)) / 256 + 128)
+}
+
+fn rgb_to_v(red: u8, green: u8, blue: u8) -> u8 {
+    clamp_colour((128 * i32::from(red) - 107 * i32::from(green) - 21 * i32::from(blue)) / 256 + 128)
+}
+
+fn clamp_colour(value: i32) -> u8 {
+    u8::try_from(value.clamp(0, 255)).unwrap_or_default()
+}
+
 fn unix_time_ns() -> u128 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -502,12 +613,31 @@ mod tests {
     }
 
     #[test]
-    fn qualification_settings_are_bounded_to_the_production_envelope() {
-        assert!(Settings::new(10_000, 0).is_ok());
-        assert!(Settings::new(30_000_000, 600).is_ok());
-        assert!(Settings::new(9_999, 100).is_err());
-        assert!(Settings::new(30_000_001, 100).is_err());
-        assert!(Settings::new(10_000, 601).is_err());
+    fn capture_profiles_are_bounded_to_the_production_envelope() {
+        assert!(CaptureProfile::new(10_000, 0, Treatment::Mono).is_ok());
+        assert!(CaptureProfile::new(30_000_000, 600, Treatment::Colour).is_ok());
+        assert!(CaptureProfile::new(9_999, 100, Treatment::Mono).is_err());
+        assert!(CaptureProfile::new(30_000_001, 100, Treatment::Mono).is_err());
+        assert!(CaptureProfile::new(10_000, 601, Treatment::Mono).is_err());
+    }
+
+    #[test]
+    fn mono_conversion_preserves_luma_and_neutral_chroma() {
+        let raw = vec![37_u8; WIDTH * HEIGHT];
+        let frame = raw8_to_mono_yuv420(&raw);
+        assert_eq!(&frame[..WIDTH * HEIGHT], raw);
+        assert!(frame[WIDTH * HEIGHT..].iter().all(|&value| value == 128));
+    }
+
+    #[test]
+    fn colour_conversion_preserves_dimensions_and_rggb_channels() {
+        let raw = vec![
+            200, 100, 200, 100, 100, 20, 100, 20, 200, 100, 200, 100, 100, 20, 100, 20,
+        ];
+        let frame = raw8_rggb_to_colour_yuv420(&raw, 4, 4);
+        assert_eq!(frame.len(), 4 * 4 * 3 / 2);
+        assert!(frame[16..20].iter().all(|&value| value < 128));
+        assert!(frame[20..].iter().all(|&value| value > 128));
     }
 
     #[test]

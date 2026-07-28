@@ -74,10 +74,7 @@ async fn presentation(
     State(state): State<AppState>,
     Json(presentation): Json<BrowserPresentation>,
 ) -> Result<Json<CorrelationResult>, (StatusCode, &'static str)> {
-    if presentation.schema_version != SCHEMA_VERSION
-        || presentation.client_id.len() > 80
-        || presentation.visibility_state.len() > 16
-    {
+    if !presentation.is_valid() {
         return Err((StatusCode::UNPROCESSABLE_ENTITY, "invalid presentation"));
     }
     let result = state.probe.resolve(&presentation);

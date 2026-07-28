@@ -56,6 +56,35 @@ pub struct BrowserPresentation {
     pub visibility_state: String,
 }
 
+impl BrowserPresentation {
+    /// Validates untrusted browser telemetry before it reaches correlation state.
+    pub fn is_valid(&self) -> bool {
+        self.schema_version == SCHEMA_VERSION
+            && !self.client_id.is_empty()
+            && self.client_id.len() <= 80
+            && self
+                .client_id
+                .bytes()
+                .all(|byte| byte.is_ascii_alphanumeric())
+            && !self.runtime_epoch.is_empty()
+            && self.runtime_epoch.len() <= 80
+            && self
+                .runtime_epoch
+                .bytes()
+                .all(|byte| byte.is_ascii_alphanumeric())
+            && self.stream_epoch > 0
+            && self.expected_display_unix_ms.is_finite()
+            && self.expected_display_unix_ms > 0.0
+            && self.clock_uncertainty_ms.is_none_or(|uncertainty| {
+                uncertainty.is_finite() && (0.0..=60_000.0).contains(&uncertainty)
+            })
+            && self.presented_frames > 0
+            && (1..=8192).contains(&self.width)
+            && (1..=8192).contains(&self.height)
+            && matches!(self.visibility_state.as_str(), "visible" | "hidden")
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum CorrelationStatus {
@@ -92,7 +121,7 @@ pub struct WhepEndpoint {
 
 #[cfg(test)]
 mod tests {
-    use super::{RuntimeDescription, SCHEMA_VERSION, WhepEndpoint};
+    use super::{BrowserPresentation, RuntimeDescription, SCHEMA_VERSION, WhepEndpoint};
 
     #[test]
     fn runtime_media_contract_has_no_host() {
@@ -112,5 +141,45 @@ mod tests {
         assert_eq!(value["whep"]["path"], "/obscam/whep");
         assert!(value["whep"].get("host").is_none());
         assert!(value.get("whep_url").is_none());
+    }
+
+    fn presentation() -> BrowserPresentation {
+        BrowserPresentation {
+            schema_version: SCHEMA_VERSION,
+            client_id: "abc123".into(),
+            runtime_epoch: "epoch123".into(),
+            stream_epoch: 1,
+            rtp_timestamp: Some(42),
+            expected_display_unix_ms: 1_000.0,
+            clock_uncertainty_ms: Some(0.5),
+            presented_frames: 1,
+            width: 1920,
+            height: 1080,
+            visibility_state: "visible".into(),
+        }
+    }
+
+    #[test]
+    fn validates_complete_browser_presentation() {
+        assert!(presentation().is_valid());
+    }
+
+    #[test]
+    fn rejects_nonsensical_browser_presentation_values() {
+        let mut value = presentation();
+        value.expected_display_unix_ms = f64::NAN;
+        assert!(!value.is_valid());
+        value = presentation();
+        value.clock_uncertainty_ms = Some(-1.0);
+        assert!(!value.is_valid());
+        value = presentation();
+        value.width = 0;
+        assert!(!value.is_valid());
+        value = presentation();
+        value.visibility_state = "prerender".into();
+        assert!(!value.is_valid());
+        value = presentation();
+        value.client_id = "invalid-id".into();
+        assert!(!value.is_valid());
     }
 }
