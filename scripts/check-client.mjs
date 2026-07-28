@@ -117,6 +117,16 @@ assert.match(
   /endpoint\(runtime\.whep\)/,
   'the browser must consume the hostless WHEP descriptor',
 );
+assert.match(
+  script,
+  /schema_version:3/,
+  'the browser must report presentations using the treatment-aware schema',
+);
+assert.match(
+  script,
+  /result\.frame\.treatment/,
+  'the browser must display the treatment from the exactly correlated frame',
+);
 
 const endpointStatement = script
   .split('\n')

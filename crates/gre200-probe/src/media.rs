@@ -321,7 +321,10 @@ fn run_camera_session<C: CameraDevice>(
         *generation = generation.wrapping_add(1);
         let mut pixels = take_frame_buffer(recycle_rx);
         match profile.treatment {
-            Treatment::Mono => raw8_to_mono_yuv420_into(raw, &mut pixels),
+            Treatment::Mono => raw8_to_mono_yuv420_into(raw, WIDTH, HEIGHT, &mut pixels),
+            Treatment::GrayscaleDemosaiced => {
+                raw8_rggb_to_grayscale_yuv420_into(raw, WIDTH, HEIGHT, &mut pixels);
+            }
             Treatment::Colour => {
                 raw8_rggb_to_colour_yuv420_into(raw, WIDTH, HEIGHT, &mut pixels);
             }
@@ -647,10 +650,63 @@ fn synthetic_yuv420_into(generation: u64, frame: &mut [u8]) {
     }
 }
 
-fn raw8_to_mono_yuv420_into(raw: &[u8], frame: &mut [u8]) {
-    let y_len = WIDTH * HEIGHT;
+fn raw8_to_mono_yuv420_into(raw: &[u8], width: usize, height: usize, frame: &mut [u8]) {
+    let y_len = width * height;
+    debug_assert_eq!(raw.len(), y_len);
+    debug_assert_eq!(frame.len(), y_len + y_len / 2);
     frame[..y_len].copy_from_slice(raw);
     frame[y_len..].fill(128);
+}
+
+/// Reconstructs neutral full-resolution luminance from the ASI662MC's RGGB
+/// mosaic without allocating or copying an intermediate RGB frame.
+fn raw8_rggb_to_grayscale_yuv420_into(raw: &[u8], width: usize, height: usize, frame: &mut [u8]) {
+    debug_assert_eq!(raw.len(), width * height);
+    debug_assert!(width.is_multiple_of(2) && height.is_multiple_of(2));
+    let y_len = width * height;
+    debug_assert_eq!(frame.len(), y_len + y_len / 2);
+    let (y_plane, chroma) = frame.split_at_mut(y_len);
+    for x in 0..width {
+        let (red, green, blue) = demosaic_rggb(raw, width, height, x, 0);
+        y_plane[x] = rgb_to_y(red, green, blue);
+        let (red, green, blue) = demosaic_rggb(raw, width, height, x, height - 1);
+        y_plane[(height - 1) * width + x] = rgb_to_y(red, green, blue);
+    }
+    for y in 1..height - 1 {
+        let (red, green, blue) = demosaic_rggb(raw, width, height, 0, y);
+        y_plane[y * width] = rgb_to_y(red, green, blue);
+        for x in 1..width - 1 {
+            y_plane[y * width + x] = demosaiced_luma_rggb_interior(raw, width, x, y);
+        }
+        let (red, green, blue) = demosaic_rggb(raw, width, height, width - 1, y);
+        y_plane[(y + 1) * width - 1] = rgb_to_y(red, green, blue);
+    }
+    chroma.fill(128);
+}
+
+#[inline]
+fn demosaiced_luma_rggb_interior(raw: &[u8], width: usize, x: usize, y: usize) -> u8 {
+    let index = y * width + x;
+    let horizontal = u16::midpoint(u16::from(raw[index - 1]), u16::from(raw[index + 1]));
+    let vertical = u16::midpoint(u16::from(raw[index - width]), u16::from(raw[index + width]));
+    let cross = (u16::from(raw[index - 1])
+        + u16::from(raw[index + 1])
+        + u16::from(raw[index - width])
+        + u16::from(raw[index + width]))
+        / 4;
+    let diagonal = (u16::from(raw[index - width - 1])
+        + u16::from(raw[index - width + 1])
+        + u16::from(raw[index + width - 1])
+        + u16::from(raw[index + width + 1]))
+        / 4;
+    let centre = u16::from(raw[index]);
+    let (red, green, blue) = match (y.is_multiple_of(2), x.is_multiple_of(2)) {
+        (true, true) => (centre, cross, diagonal),
+        (true, false) => (horizontal, centre, vertical),
+        (false, true) => (vertical, centre, horizontal),
+        (false, false) => (diagonal, cross, centre),
+    };
+    u8::try_from((77 * red + 150 * green + 29 * blue) >> 8).unwrap_or(u8::MAX)
 }
 
 /// Converts the ASI662MC's top-left-origin RGGB RAW8 mosaic to full-resolution
@@ -803,9 +859,79 @@ mod tests {
     fn mono_conversion_preserves_luma_and_neutral_chroma() {
         let raw = vec![37_u8; WIDTH * HEIGHT];
         let mut frame = vec![0; WIDTH * HEIGHT * 3 / 2];
-        raw8_to_mono_yuv420_into(&raw, &mut frame);
+        raw8_to_mono_yuv420_into(&raw, WIDTH, HEIGHT, &mut frame);
         assert_eq!(&frame[..WIDTH * HEIGHT], raw);
         assert!(frame[WIDTH * HEIGHT..].iter().all(|&value| value == 128));
+    }
+
+    #[test]
+    fn demosaiced_grayscale_removes_detectable_bayer_grid() {
+        let (width, height) = (8_usize, 8_usize);
+        let raw = (0..height)
+            .flat_map(|y| {
+                (0..width).map(move |x| match (y.is_multiple_of(2), x.is_multiple_of(2)) {
+                    (true, true) => 200,
+                    (false, false) => 20,
+                    _ => 100,
+                })
+            })
+            .collect::<Vec<_>>();
+        let mut copied = vec![0; width * height * 3 / 2];
+        let mut demosaiced = vec![0; width * height * 3 / 2];
+
+        raw8_to_mono_yuv420_into(&raw, width, height, &mut copied);
+        raw8_rggb_to_grayscale_yuv420_into(&raw, width, height, &mut demosaiced);
+
+        let copied_luma = &copied[..width * height];
+        assert_eq!(copied_luma.iter().min(), Some(&20));
+        assert_eq!(copied_luma.iter().max(), Some(&200));
+        let expected_luma = rgb_to_y(200, 100, 20);
+        assert!(
+            demosaiced[..width * height]
+                .iter()
+                .all(|&value| value == expected_luma)
+        );
+        assert!(
+            demosaiced[width * height..]
+                .iter()
+                .all(|&value| value == 128)
+        );
+    }
+
+    #[test]
+    fn demosaiced_grayscale_preserves_full_resolution_edge_contrast() {
+        let (width, height) = (8_usize, 8_usize);
+        let raw = (0..height)
+            .flat_map(|_| (0..width).map(|x| if x < width / 2 { 24 } else { 224 }))
+            .collect::<Vec<_>>();
+        let mut frame = vec![0; width * height * 3 / 2];
+
+        raw8_rggb_to_grayscale_yuv420_into(&raw, width, height, &mut frame);
+
+        assert_eq!(frame.len(), width * height * 3 / 2);
+        for row in frame[..width * height].chunks_exact(width) {
+            assert_eq!(row[0], 24);
+            assert_eq!(row[width - 1], 224);
+            assert!(row.windows(2).all(|pair| pair[0] <= pair[1]));
+        }
+    }
+
+    #[test]
+    fn fast_grayscale_path_matches_reference_bilinear_demosaic() {
+        let (width, height) = (12_usize, 10_usize);
+        let raw = (0..width * height)
+            .map(|index| u8::try_from((index * 73 + 19) % 256).expect("sample fits u8"))
+            .collect::<Vec<_>>();
+        let mut frame = vec![0; width * height * 3 / 2];
+
+        raw8_rggb_to_grayscale_yuv420_into(&raw, width, height, &mut frame);
+
+        for y in 0..height {
+            for x in 0..width {
+                let (red, green, blue) = demosaic_rggb(&raw, width, height, x, y);
+                assert_eq!(frame[y * width + x], rgb_to_y(red, green, blue));
+            }
+        }
     }
 
     #[test]
