@@ -197,6 +197,7 @@ pub async fn run_asi_source(
             match result {
                 Ok(()) => return Ok(()),
                 Err(error) => {
+                    sender.send_replace(None);
                     warn!(%error, settings_generation, "camera owner failed; recovering component");
                     std::thread::sleep(Duration::from_millis(250));
                 }
@@ -395,12 +396,17 @@ async fn run_encoder_session(
             tokio::select! {
                 changed = receiver.changed() => {
                     changed.context("frame source stopped")?;
-                    let Some(frame) = receiver.borrow_and_update().clone() else {
-                        continue;
-                    };
-                    submit_frame(&mut stdin, state, &frame).await?;
-                    last_frame = Some(frame);
-                    heartbeat.as_mut().reset(tokio::time::Instant::now() + ENCODER_HEARTBEAT_INTERVAL);
+                    let latest = receiver.borrow_and_update().clone();
+                    match latest {
+                        Some(frame) => {
+                            submit_frame(&mut stdin, state, &frame).await?;
+                            last_frame = Some(frame);
+                            heartbeat.as_mut().reset(tokio::time::Instant::now() + ENCODER_HEARTBEAT_INTERVAL);
+                        }
+                        None => {
+                            last_frame = None;
+                        }
+                    }
                 }
                 () = &mut heartbeat, if last_frame.is_some() => {
                     let frame = last_frame.as_ref().expect("heartbeat requires a completed frame");
