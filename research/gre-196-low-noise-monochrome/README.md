@@ -15,28 +15,11 @@ No treatment retains a previous frame. All emitted envelopes include the source
 generation and treatment so equivalent generations can be compared without
 introducing temporal ghosting.
 
-Start the native harness on the Raspberry Pi:
-
-```bash
-cargo build --manifest-path \
-  src/obscam/tools/gre_190_prototype/rust_backend/Cargo.toml
-python -m obscam.tools.gre_190_prototype serve --native \
-  --fps 20 --exposure-us 10000 --gain 0
-```
-
-Open one foreground-visible Safari or Chromium tab per treatment through the
-same LAN or WireGuard route, changing the `client` value per tab:
-
-```text
-http://PI:8190/?auto=1&run=RUN&client=colour&treatment=colour&duration=60
-http://PI:8190/?auto=1&run=RUN&client=mono&treatment=mono&duration=60
-```
-
-Repeat at representative short and long closed-roof exposure/gain settings.
-Record server process CPU/RSS alongside `GET /api/runs/RUN`. Use matched
-generation numbers for visual and image-statistic comparisons. Include a moving
-telescope or equivalent edge target and the built-in reconnect event in every
-candidate-setting run.
+The executable harness was removed during the greenfield repository reset. Its
+method compared matched source generations in foreground-visible Safari and
+Chromium sessions over both LAN and WireGuard at representative short and long
+closed-roof exposure/gain settings. The retained conclusions below are evidence,
+not instructions for reconstructing that harness.
 
 ## Decision
 
