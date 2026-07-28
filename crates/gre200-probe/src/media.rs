@@ -1,6 +1,7 @@
 use std::net::SocketAddr;
 use std::process::Stdio;
 use std::sync::Arc;
+use std::sync::mpsc as std_mpsc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context, Result, bail};
@@ -17,13 +18,42 @@ const WIDTH: usize = 1920;
 const HEIGHT: usize = 1080;
 const ENCODER_HEARTBEAT_INTERVAL: Duration = Duration::from_millis(500);
 
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 pub struct RawFrame {
-    pub pixels: Arc<[u8]>,
+    pixels: RecycledPixels,
     pub source_generation: u64,
     pub settings_generation: u64,
     pub treatment: Treatment,
     pub exposure_completed_unix_ns: u128,
+}
+
+#[derive(Debug)]
+struct RecycledPixels {
+    bytes: Option<Vec<u8>>,
+    recycler: std_mpsc::Sender<Vec<u8>>,
+}
+
+impl RecycledPixels {
+    fn new(bytes: Vec<u8>, recycler: std_mpsc::Sender<Vec<u8>>) -> Self {
+        Self {
+            bytes: Some(bytes),
+            recycler,
+        }
+    }
+}
+
+impl AsRef<[u8]> for RecycledPixels {
+    fn as_ref(&self) -> &[u8] {
+        self.bytes.as_deref().unwrap_or_default()
+    }
+}
+
+impl Drop for RecycledPixels {
+    fn drop(&mut self) {
+        if let Some(bytes) = self.bytes.take() {
+            let _ = self.recycler.send(bytes);
+        }
+    }
 }
 
 /// Complete capture and presentation treatment applied as one generation.
@@ -75,10 +105,11 @@ pub enum EncoderCommand {
 }
 
 pub async fn run_synthetic_source(
-    sender: watch::Sender<Option<RawFrame>>,
+    sender: watch::Sender<Option<Arc<RawFrame>>>,
     state: ProbeState,
     fps: u32,
 ) {
+    let (recycle_tx, recycle_rx) = std_mpsc::channel();
     let mut interval = tokio::time::interval(Duration::from_secs_f64(1.0 / f64::from(fps)));
     interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
     let mut generation = 0_u64;
@@ -91,26 +122,27 @@ pub async fn run_synthetic_source(
             unix_time_ns(),
         );
         generation = generation.wrapping_add(1);
-        let pixels = synthetic_yuv420(generation);
+        let mut pixels = take_frame_buffer(&recycle_rx);
+        synthetic_yuv420_into(generation, &mut pixels);
         let settings_generation = generation / 200 + 1;
         let treatment = if settings_generation.is_multiple_of(2) {
             Treatment::Colour
         } else {
             Treatment::Mono
         };
-        let frame = RawFrame {
-            pixels: pixels.into(),
+        let frame = Arc::new(RawFrame {
+            pixels: RecycledPixels::new(pixels, recycle_tx.clone()),
             source_generation: generation,
             settings_generation,
             treatment,
             exposure_completed_unix_ns: unix_time_ns(),
-        };
+        });
         sender.send_replace(Some(frame));
     }
 }
 
 pub async fn run_asi_source(
-    sender: watch::Sender<Option<RawFrame>>,
+    sender: watch::Sender<Option<Arc<RawFrame>>>,
     state: ProbeState,
     mut commands: mpsc::Receiver<SourceCommand>,
     exposure_us: i64,
@@ -118,95 +150,202 @@ pub async fn run_asi_source(
 ) -> Result<()> {
     tokio::task::spawn_blocking(move || -> Result<()> {
         let mut profile = CaptureProfile::new(exposure_us, gain, Treatment::Mono)?;
-        let mut camera = zwo_asi::Camera::open_exact("ZWO ASI662MC", "1d274e0920010900")
-            .context("opening exact ObsCam camera")?;
-        let (width, height) = camera.dimensions();
-        if (width, height) != (WIDTH, HEIGHT) {
-            bail!("ASI662MC reported unexpected dimensions {width}x{height}");
-        }
-        camera
-            .configure(profile.exposure_us, profile.gain)
-            .context("configuring ASI662MC")?;
-        camera.start().context("starting ASI662MC video capture")?;
-        state.record_capture_started(1, 1, profile.exposure_us, unix_time_ns());
-        info!(width, height, exposure_us, gain, "ASI662MC capture started");
-        let mut raw = vec![0_u8; width * height];
+        let mut raw = vec![0_u8; WIDTH * HEIGHT];
+        let (recycle_tx, recycle_rx) = std_mpsc::channel();
         let mut generation = 0_u64;
-        let mut settings_generation = 1_u64;
+        let mut settings_generation = 0_u64;
         loop {
-            while let Ok(command) = commands.try_recv() {
-                match command {
-                    SourceCommand::ApplyProfile {
-                        profile: requested,
-                        reply,
-                    } => {
-                        let result = (|| -> Result<AppliedProfile> {
-                            camera.stop().context("interrupting ASI662MC capture")?;
-                            camera
-                                .configure(requested.exposure_us, requested.gain)
-                                .context("applying ASI662MC qualification settings")?;
-                            camera.start().context("restarting ASI662MC capture")?;
-                            profile = requested;
-                            settings_generation = settings_generation.wrapping_add(1);
-                            state.record_capture_started(
-                                settings_generation,
-                                generation + 1,
-                                profile.exposure_us,
-                                unix_time_ns(),
-                            );
-                            info!(
-                                exposure_us = profile.exposure_us,
-                                gain = profile.gain,
-                                treatment = ?profile.treatment,
-                                settings_generation,
-                                "qualification capture profile applied"
-                            );
-                            Ok(AppliedProfile {
-                                settings_generation,
-                                treatment: profile.treatment,
-                            })
-                        })()
-                        .map_err(|error| error.to_string());
-                        let _ = reply.send(result);
-                    }
-                }
-            }
-            match camera.capture(&mut raw, 100) {
-                Ok(()) => {}
-                Err(zwo_asi::CameraError::Timeout) => continue,
-                Err(error) => {
-                    return Err(error).context("capturing ASI662MC RAW8 frame");
-                }
-            }
-            generation = generation.wrapping_add(1);
-            let frame = RawFrame {
-                pixels: match profile.treatment {
-                    Treatment::Mono => raw8_to_mono_yuv420(&raw),
-                    Treatment::Colour => raw8_rggb_to_colour_yuv420(&raw, width, height),
-                }
-                .into(),
-                source_generation: generation,
-                settings_generation,
-                treatment: profile.treatment,
-                exposure_completed_unix_ns: unix_time_ns(),
-            };
-            if sender.send(Some(frame)).is_err() {
+            if sender.is_closed() {
                 return Ok(());
             }
+            let mut camera = match open_camera(profile) {
+                Ok(camera) => camera,
+                Err(error) => {
+                    warn!(%error, "ASI662MC unavailable; retrying exact camera ownership");
+                    std::thread::sleep(Duration::from_millis(250));
+                    continue;
+                }
+            };
+            settings_generation = settings_generation
+                .checked_add(1)
+                .context("settings generation exhausted")?;
             state.record_capture_started(
                 settings_generation,
                 generation + 1,
                 profile.exposure_us,
                 unix_time_ns(),
             );
+            info!(
+                exposure_us = profile.exposure_us,
+                gain = profile.gain,
+                treatment = ?profile.treatment,
+                settings_generation,
+                "ASI662MC capture owner ready"
+            );
+            let result = run_camera_session(
+                &mut camera,
+                &sender,
+                &state,
+                &mut commands,
+                &mut profile,
+                &mut generation,
+                &mut settings_generation,
+                &mut raw,
+                &recycle_tx,
+                &recycle_rx,
+            );
+            match result {
+                Ok(()) => return Ok(()),
+                Err(error) => {
+                    warn!(%error, settings_generation, "camera owner failed; recovering component");
+                    std::thread::sleep(Duration::from_millis(250));
+                }
+            }
         }
     })
     .await
     .context("joining ASI662MC capture thread")?
 }
 
+trait CameraDevice {
+    fn configure(&self, exposure_us: i64, gain: i64) -> Result<()>;
+    fn start(&mut self) -> Result<()>;
+    fn stop(&mut self) -> Result<()>;
+    fn capture(&self, buffer: &mut [u8]) -> Result<bool>;
+}
+
+impl CameraDevice for zwo_asi::Camera {
+    fn configure(&self, exposure_us: i64, gain: i64) -> Result<()> {
+        self.configure(exposure_us, gain).map_err(Into::into)
+    }
+
+    fn start(&mut self) -> Result<()> {
+        self.start().map_err(Into::into)
+    }
+
+    fn stop(&mut self) -> Result<()> {
+        self.stop().map_err(Into::into)
+    }
+
+    fn capture(&self, buffer: &mut [u8]) -> Result<bool> {
+        match self.capture(buffer, 100) {
+            Ok(()) => Ok(true),
+            Err(zwo_asi::CameraError::Timeout) => Ok(false),
+            Err(error) => Err(error.into()),
+        }
+    }
+}
+
+fn open_camera(profile: CaptureProfile) -> Result<zwo_asi::Camera> {
+    let mut camera = zwo_asi::Camera::open_exact("ZWO ASI662MC", "1d274e0920010900")
+        .context("opening exact ObsCam camera")?;
+    let (width, height) = camera.dimensions();
+    if (width, height) != (WIDTH, HEIGHT) {
+        bail!("ASI662MC reported unexpected dimensions {width}x{height}");
+    }
+    camera
+        .configure(profile.exposure_us, profile.gain)
+        .context("configuring ASI662MC")?;
+    camera.start().context("starting ASI662MC video capture")?;
+    Ok(camera)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn run_camera_session<C: CameraDevice>(
+    camera: &mut C,
+    sender: &watch::Sender<Option<Arc<RawFrame>>>,
+    state: &ProbeState,
+    commands: &mut mpsc::Receiver<SourceCommand>,
+    profile: &mut CaptureProfile,
+    generation: &mut u64,
+    settings_generation: &mut u64,
+    raw: &mut [u8],
+    recycle_tx: &std_mpsc::Sender<Vec<u8>>,
+    recycle_rx: &std_mpsc::Receiver<Vec<u8>>,
+) -> Result<()> {
+    loop {
+        while let Ok(command) = commands.try_recv() {
+            match command {
+                SourceCommand::ApplyProfile {
+                    profile: requested,
+                    reply,
+                } => {
+                    let result = (|| -> Result<AppliedProfile> {
+                        camera.stop().context("interrupting ASI662MC capture")?;
+                        camera
+                            .configure(requested.exposure_us, requested.gain)
+                            .context("applying ASI662MC qualification profile")?;
+                        camera.start().context("restarting ASI662MC capture")?;
+                        *profile = requested;
+                        *settings_generation = settings_generation
+                            .checked_add(1)
+                            .context("settings generation exhausted")?;
+                        state.record_capture_started(
+                            *settings_generation,
+                            *generation + 1,
+                            profile.exposure_us,
+                            unix_time_ns(),
+                        );
+                        info!(
+                            exposure_us = profile.exposure_us,
+                            gain = profile.gain,
+                            treatment = ?profile.treatment,
+                            settings_generation,
+                            "qualification capture profile applied"
+                        );
+                        Ok(AppliedProfile {
+                            settings_generation: *settings_generation,
+                            treatment: profile.treatment,
+                        })
+                    })();
+                    match result {
+                        Ok(applied) => {
+                            let _ = reply.send(Ok(applied));
+                        }
+                        Err(error) => {
+                            let message = error.to_string();
+                            let _ = reply.send(Err(message));
+                            return Err(error).context("applying capture profile");
+                        }
+                    }
+                }
+            }
+        }
+        if !camera
+            .capture(raw)
+            .context("capturing ASI662MC RAW8 frame")?
+        {
+            continue;
+        }
+        *generation = generation.wrapping_add(1);
+        let mut pixels = take_frame_buffer(recycle_rx);
+        match profile.treatment {
+            Treatment::Mono => raw8_to_mono_yuv420_into(raw, &mut pixels),
+            Treatment::Colour => {
+                raw8_rggb_to_colour_yuv420_into(raw, WIDTH, HEIGHT, &mut pixels);
+            }
+        }
+        let frame = Arc::new(RawFrame {
+            pixels: RecycledPixels::new(pixels, recycle_tx.clone()),
+            source_generation: *generation,
+            settings_generation: *settings_generation,
+            treatment: profile.treatment,
+            exposure_completed_unix_ns: unix_time_ns(),
+        });
+        if sender.send(Some(frame)).is_err() {
+            return Ok(());
+        }
+        state.record_capture_started(
+            *settings_generation,
+            *generation + 1,
+            profile.exposure_us,
+            unix_time_ns(),
+        );
+    }
+}
+
 pub async fn run_encoder(
-    mut receiver: watch::Receiver<Option<RawFrame>>,
+    mut receiver: watch::Receiver<Option<Arc<RawFrame>>>,
     state: ProbeState,
     fps: u32,
     rtp_destination: SocketAddr,
@@ -235,7 +374,7 @@ enum EncoderSessionEnd {
 }
 
 async fn run_encoder_session(
-    receiver: &mut watch::Receiver<Option<RawFrame>>,
+    receiver: &mut watch::Receiver<Option<Arc<RawFrame>>>,
     state: &ProbeState,
     fps: u32,
     rtp_destination: SocketAddr,
@@ -301,7 +440,7 @@ async fn submit_frame(
     if !state.record_submission(submission_for(frame, unix_time_ns())) {
         bail!("encoder correlation queue exceeded its fail-closed bound");
     }
-    if let Err(error) = stdin.write_all(&frame.pixels).await {
+    if let Err(error) = stdin.write_all(frame.pixels.as_ref()).await {
         state.abandon_submissions();
         return Err(error).context("writing RAW8-derived YUV420 frame to FFmpeg");
     }
@@ -476,9 +615,17 @@ fn rtp_timestamp(packet: &[u8]) -> Option<u32> {
     Some(u32::from_be_bytes(packet[4..8].try_into().ok()?))
 }
 
-fn synthetic_yuv420(generation: u64) -> Vec<u8> {
+fn take_frame_buffer(recycler: &std_mpsc::Receiver<Vec<u8>>) -> Vec<u8> {
+    let mut frame = recycler
+        .try_recv()
+        .unwrap_or_else(|_| Vec::with_capacity(WIDTH * HEIGHT * 3 / 2));
+    frame.resize(WIDTH * HEIGHT * 3 / 2, 128);
+    frame
+}
+
+fn synthetic_yuv420_into(generation: u64, frame: &mut [u8]) {
     let y_len = WIDTH * HEIGHT;
-    let mut frame = vec![128_u8; y_len + y_len / 2];
+    frame[y_len..].fill(128);
     let band = usize::try_from(generation % 240).expect("generation remainder fits usize");
     for y in 0..HEIGHT {
         let row = &mut frame[y * WIDTH..(y + 1) * WIDTH];
@@ -492,23 +639,21 @@ fn synthetic_yuv420(generation: u64) -> Vec<u8> {
             *value = 24_u8.saturating_add(gradient).saturating_add(pulse);
         }
     }
-    frame
 }
 
-fn raw8_to_mono_yuv420(raw: &[u8]) -> Vec<u8> {
+fn raw8_to_mono_yuv420_into(raw: &[u8], frame: &mut [u8]) {
     let y_len = WIDTH * HEIGHT;
-    let mut frame = vec![128_u8; y_len + y_len / 2];
     frame[..y_len].copy_from_slice(raw);
-    frame
+    frame[y_len..].fill(128);
 }
 
 /// Converts the ASI662MC's top-left-origin RGGB RAW8 mosaic to full-resolution
 /// YUV420 using fixed bilinear interpolation and full-range BT.601 coefficients.
-fn raw8_rggb_to_colour_yuv420(raw: &[u8], width: usize, height: usize) -> Vec<u8> {
+fn raw8_rggb_to_colour_yuv420_into(raw: &[u8], width: usize, height: usize, frame: &mut [u8]) {
     debug_assert_eq!(raw.len(), width * height);
     debug_assert!(width.is_multiple_of(2) && height.is_multiple_of(2));
     let y_len = width * height;
-    let mut frame = vec![0_u8; y_len + y_len / 2];
+    debug_assert_eq!(frame.len(), y_len + y_len / 2);
     let (y_plane, chroma) = frame.split_at_mut(y_len);
     let (u_plane, v_plane) = chroma.split_at_mut(y_len / 4);
     for y in (0..height).step_by(2) {
@@ -533,7 +678,6 @@ fn raw8_rggb_to_colour_yuv420(raw: &[u8], width: usize, height: usize) -> Vec<u8
             v_plane[chroma_index] = rgb_to_v(rgb.0, rgb.1, rgb.2);
         }
     }
-    frame
 }
 
 fn demosaic_rggb(raw: &[u8], width: usize, height: usize, x: usize, y: usize) -> (u8, u8, u8) {
@@ -601,6 +745,34 @@ fn unix_time_ns() -> u128 {
 mod tests {
     use super::*;
 
+    struct ScriptedCamera {
+        capturing: bool,
+        fail_configure: bool,
+    }
+
+    impl CameraDevice for ScriptedCamera {
+        fn configure(&self, _exposure_us: i64, _gain: i64) -> Result<()> {
+            if self.fail_configure {
+                bail!("injected configure failure");
+            }
+            Ok(())
+        }
+
+        fn start(&mut self) -> Result<()> {
+            self.capturing = true;
+            Ok(())
+        }
+
+        fn stop(&mut self) -> Result<()> {
+            self.capturing = false;
+            Ok(())
+        }
+
+        fn capture(&self, _buffer: &mut [u8]) -> Result<bool> {
+            Ok(false)
+        }
+    }
+
     #[test]
     fn parses_rtp_timestamp() {
         let packet = [0x80, 96, 0, 1, 0x12, 0x34, 0x56, 0x78, 0, 0, 0, 1];
@@ -624,7 +796,8 @@ mod tests {
     #[test]
     fn mono_conversion_preserves_luma_and_neutral_chroma() {
         let raw = vec![37_u8; WIDTH * HEIGHT];
-        let frame = raw8_to_mono_yuv420(&raw);
+        let mut frame = vec![0; WIDTH * HEIGHT * 3 / 2];
+        raw8_to_mono_yuv420_into(&raw, &mut frame);
         assert_eq!(&frame[..WIDTH * HEIGHT], raw);
         assert!(frame[WIDTH * HEIGHT..].iter().all(|&value| value == 128));
     }
@@ -634,16 +807,68 @@ mod tests {
         let raw = vec![
             200, 100, 200, 100, 100, 20, 100, 20, 200, 100, 200, 100, 100, 20, 100, 20,
         ];
-        let frame = raw8_rggb_to_colour_yuv420(&raw, 4, 4);
+        let mut frame = vec![0; 4 * 4 * 3 / 2];
+        raw8_rggb_to_colour_yuv420_into(&raw, 4, 4, &mut frame);
         assert_eq!(frame.len(), 4 * 4 * 3 / 2);
         assert!(frame[16..20].iter().all(|&value| value < 128));
         assert!(frame[20..].iter().all(|&value| value > 128));
     }
 
     #[test]
+    fn frame_buffer_returns_to_the_camera_owner_after_last_reader() {
+        let (recycle_tx, recycle_rx) = std_mpsc::channel();
+        let bytes = vec![0_u8; WIDTH * HEIGHT * 3 / 2];
+        let pointer = bytes.as_ptr();
+        drop(RecycledPixels::new(bytes, recycle_tx));
+        let recycled = take_frame_buffer(&recycle_rx);
+        assert_eq!(recycled.as_ptr(), pointer);
+    }
+
+    #[test]
+    fn failed_profile_transition_stops_session_and_preserves_generation() {
+        let mut camera = ScriptedCamera {
+            capturing: true,
+            fail_configure: true,
+        };
+        let (frame_tx, _) = watch::channel(None);
+        let state = ProbeState::new("epoch".into(), 1);
+        let (command_tx, mut command_rx) = mpsc::channel(1);
+        let (reply_tx, reply_rx) = oneshot::channel();
+        command_tx
+            .blocking_send(SourceCommand::ApplyProfile {
+                profile: CaptureProfile::new(50_000, 500, Treatment::Colour).unwrap(),
+                reply: reply_tx,
+            })
+            .unwrap();
+        let mut profile = CaptureProfile::new(50_000, 500, Treatment::Mono).unwrap();
+        let mut generation = 10;
+        let mut settings_generation = 3;
+        let mut raw = vec![0_u8; WIDTH * HEIGHT];
+        let (recycle_tx, recycle_rx) = std_mpsc::channel();
+        let result = run_camera_session(
+            &mut camera,
+            &frame_tx,
+            &state,
+            &mut command_rx,
+            &mut profile,
+            &mut generation,
+            &mut settings_generation,
+            &mut raw,
+            &recycle_tx,
+            &recycle_rx,
+        );
+        assert!(result.is_err());
+        assert!(!camera.capturing);
+        assert_eq!(profile.treatment, Treatment::Mono);
+        assert_eq!(settings_generation, 3);
+        assert!(reply_rx.blocking_recv().unwrap().is_err());
+    }
+
+    #[test]
     fn encoder_heartbeat_preserves_source_identity() {
+        let (recycle_tx, _) = std_mpsc::channel();
         let frame = RawFrame {
-            pixels: vec![0_u8; 6].into(),
+            pixels: RecycledPixels::new(vec![0_u8; 6], recycle_tx),
             source_generation: 42,
             settings_generation: 7,
             treatment: Treatment::Mono,

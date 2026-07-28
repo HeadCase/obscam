@@ -286,19 +286,27 @@ impl Camera {
                 bayer_pattern: info.bayer_pattern,
             });
         }
+        let width =
+            usize::try_from(info.max_width).map_err(|_| CameraError::InvalidDimensions {
+                width: info.max_width,
+                height: info.max_height,
+            })?;
+        let height =
+            usize::try_from(info.max_height).map_err(|_| CameraError::InvalidDimensions {
+                width: info.max_width,
+                height: info.max_height,
+            })?;
+        if width == 0 || height == 0 {
+            return Err(CameraError::InvalidDimensions {
+                width: info.max_width,
+                height: info.max_height,
+            });
+        }
         check("open camera", ffi::open(info.camera_id))?;
         let mut camera = Self {
             id: info.camera_id,
-            width: usize::try_from(info.max_width).map_err(|_| CameraError::InvalidDimensions {
-                width: info.max_width,
-                height: info.max_height,
-            })?,
-            height: usize::try_from(info.max_height).map_err(|_| {
-                CameraError::InvalidDimensions {
-                    width: info.max_width,
-                    height: info.max_height,
-                }
-            })?,
+            width,
+            height,
             capturing: false,
         };
         if let Err(error) = camera.initialize(model, expected_serial) {
