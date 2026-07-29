@@ -148,6 +148,16 @@ assert.match(
   /JSON\.stringify\(model\.evidence,null,2\)/,
   'the downloaded evidence must be the same authoritative object the browser displays',
 );
+assert.match(
+  script,
+  /schema_version:3/,
+  'the browser must report presentations using the treatment-aware schema',
+);
+assert.match(
+  script,
+  /result\.frame\.treatment/,
+  'the browser must display the treatment from the exactly correlated frame',
+);
 
 const endpointStatement = script
   .split('\n')
