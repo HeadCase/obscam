@@ -6,7 +6,6 @@ pub const SCHEMA_VERSION: u8 = 3;
 #[serde(rename_all = "snake_case")]
 pub enum Treatment {
     Mono,
-    GrayscaleDemosaiced,
     Colour,
 }
 

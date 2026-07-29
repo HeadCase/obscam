@@ -11,6 +11,10 @@ if the two differ.
 - The owner validates the exact SDK model and factory serial before capture.
 - Acquisition is full-resolution RAW8 with latest-frame generations and no
   queued stale frames.
+- Production monochrome reconstructs full-resolution neutral luminance from the
+  ASI662MC RGGB mosaic using fixed bilinear demosaicing and BT.601 coefficients.
+  It uses neutral YUV420 chroma without an intermediate RGB frame or temporal
+  image history.
 - Rust owns neutral monochrome/colour processing, FFmpeg hardware H.264
   orchestration, control, telemetry, exact-correlation evidence, and component
   recovery.
@@ -35,6 +39,7 @@ explicitly changes the map:
 - rotation, automatic binning, scaling, or silent ROI reduction
 - native mobile or desktop clients
 - application accounts inside the LAN/WireGuard authentication boundary
+- native ASI662MC Y8 and direct RAW8 mosaic-copy monochrome treatments
 
 ## Historical evidence
 

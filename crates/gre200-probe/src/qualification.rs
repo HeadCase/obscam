@@ -29,7 +29,6 @@ struct ProfileRequest {
 #[serde(rename_all = "snake_case")]
 enum TreatmentRequest {
     Mono,
-    GrayscaleDemosaiced,
     Colour,
 }
 
@@ -37,7 +36,6 @@ impl From<TreatmentRequest> for Treatment {
     fn from(value: TreatmentRequest) -> Self {
         match value {
             TreatmentRequest::Mono => Self::Mono,
-            TreatmentRequest::GrayscaleDemosaiced => Self::GrayscaleDemosaiced,
             TreatmentRequest::Colour => Self::Colour,
         }
     }
@@ -234,8 +232,8 @@ mod tests {
         assert!(serde_json::from_str::<Command>(missing).is_err());
         let colour = r#"{"command":"apply_capture_profile","profile":{"exposure_us":50000,"gain":500,"treatment":"colour"}}"#;
         assert!(serde_json::from_str::<Command>(colour).is_ok());
-        let demosaiced = r#"{"command":"apply_capture_profile","profile":{"exposure_us":50000,"gain":500,"treatment":"grayscale_demosaiced"}}"#;
-        assert!(serde_json::from_str::<Command>(demosaiced).is_ok());
+        let retired_candidate = r#"{"command":"apply_capture_profile","profile":{"exposure_us":50000,"gain":500,"treatment":"grayscale_demosaiced"}}"#;
+        assert!(serde_json::from_str::<Command>(retired_candidate).is_err());
     }
 
     #[tokio::test]
