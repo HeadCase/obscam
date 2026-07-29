@@ -20,9 +20,9 @@ This is a single-context repository. See `docs/agents/domain.md`.
 
 Linear issue GRE-179 and its accepted child decisions are the architectural
 system of record. See `docs/agents/architecture.md` for the local projection.
-Historical Git content and retained research are evidence, not implementation
-precedent. Do not inspect or recover deleted implementations unless the user
-explicitly requests historical investigation.
+Historical evidence and deleted implementations remain in Git history, not the
+active tree. Do not inspect or recover them unless the user explicitly requests
+historical investigation.
 
 ## Decision Policy
 
@@ -90,7 +90,7 @@ Prohibited unless a later approved Linear decision changes the map:
 - JPEG, MJPEG, or a secondary media-delivery path
 - server-side recording, image history, or runtime-state persistence
 - image rotation or silent spatial-resolution reduction
-- importing implementation from retained research or Git history
+- importing implementation from Git history
 
 ## Change Boundaries
 

@@ -11,8 +11,6 @@ permissions:
 jobs:
   quality:
     runs-on: ubuntu-latest
-    env:
-      OBSCAM_ZWO_SDK_STUB: "1"
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -34,4 +32,3 @@ jobs:
       - run: cargo test --workspace --all-targets --all-features
       - run: cargo deny check
       - run: cargo machete
-      - run: node scripts/check-client.mjs

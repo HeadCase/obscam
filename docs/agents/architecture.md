@@ -94,7 +94,7 @@ explicitly changes the map:
 
 ## Historical evidence
 
-Retained files under `research/` record measurements and conclusions. They are
-evidence, not reusable implementation. Deleted source remains available through
-Git history only for explicit historical investigation. Never search, restore,
-copy, or derive production architecture from it by default.
+Accepted conclusions live in Linear. Historical measurements, experiments, and
+deleted source remain available through Git history only for explicit
+historical investigation. Never search, restore, copy, or derive production
+architecture from them by default.
