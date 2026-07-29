@@ -20,6 +20,9 @@ if the two differ.
   recovery.
 - MediaMTX independently provides direct WHEP/WebRTC fan-out from one shared
   H.264 stream.
+- MediaMTX `v1.19.3` for Linux ARM64 is the deployment pin. Its binary checksum,
+  checked-in configuration, and deployed-stack smoke check advance together;
+  ambient host versions are not accepted. MoQ remains explicitly disabled.
 - The browser owns interaction, presentation, and snapshot download.
 - Runtime state is RAM-only.
 - Control uses a server-timed, renewable five-second lease with immediate,

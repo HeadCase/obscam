@@ -4,7 +4,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use axum::Json;
 use axum::Router;
 use axum::extract::ws::{Message, WebSocket};
-use axum::extract::{State, WebSocketUpgrade};
+use axum::extract::{Path, State, WebSocketUpgrade};
 use axum::http::StatusCode;
 use axum::response::{Html, IntoResponse, Response};
 use axum::routing::{get, post};
@@ -13,8 +13,8 @@ use tower_http::trace::TraceLayer;
 use tracing::{debug, warn};
 
 use crate::contract::{
-    BrowserPresentation, CorrelationResult, CorrelationStatus, RuntimeDescription, SCHEMA_VERSION,
-    WhepEndpoint,
+    BrowserConnection, BrowserPresentation, CorrelationResult, CorrelationStatus,
+    RuntimeDescription, SCHEMA_VERSION, WhepEndpoint,
 };
 use crate::state::ProbeState;
 
@@ -33,7 +33,9 @@ pub fn router(state: AppState) -> Router {
         .route("/api/runtime", get(runtime))
         .route("/api/clock", get(clock))
         .route("/api/presentations", post(presentation))
+        .route("/api/connections", post(connection))
         .route("/api/evidence", get(evidence))
+        .route("/api/evidence/clients/{client_id}", get(client_evidence))
         .route("/ws/telemetry", get(telemetry))
         .layer(TraceLayer::new_for_http())
         .with_state(state)
@@ -77,7 +79,7 @@ async fn presentation(
     if !presentation.is_valid() {
         return Err((StatusCode::UNPROCESSABLE_ENTITY, "invalid presentation"));
     }
-    let result = state.probe.resolve(&presentation);
+    let result = state.probe.resolve_and_record(&presentation);
     if result.status == CorrelationStatus::Correlated {
         debug!(
             client_id = presentation.client_id,
@@ -101,19 +103,33 @@ async fn presentation(
     Ok(Json(result))
 }
 
-#[derive(Serialize)]
-struct Evidence {
-    schema_version: u8,
-    runtime_epoch: String,
-    mappings: Vec<crate::contract::FrameMapping>,
+async fn connection(
+    State(state): State<AppState>,
+    Json(connection): Json<BrowserConnection>,
+) -> Result<StatusCode, (StatusCode, &'static str)> {
+    if !connection.is_valid()
+        || connection.runtime_epoch != state.probe.runtime_epoch()
+        || connection.stream_epoch != state.probe.stream_epoch()
+    {
+        return Err((StatusCode::UNPROCESSABLE_ENTITY, "invalid connection"));
+    }
+    state.probe.record_browser_connection(&connection.client_id);
+    Ok(StatusCode::NO_CONTENT)
 }
 
-async fn evidence(State(state): State<AppState>) -> Json<Evidence> {
-    Json(Evidence {
-        schema_version: SCHEMA_VERSION,
-        runtime_epoch: state.probe.runtime_epoch().to_owned(),
-        mappings: state.probe.snapshot(),
-    })
+async fn evidence(State(state): State<AppState>) -> Json<crate::evidence::EvidenceSnapshot> {
+    Json(state.probe.evidence())
+}
+
+async fn client_evidence(
+    State(state): State<AppState>,
+    Path(client_id): Path<String>,
+) -> Result<Json<crate::evidence::EvidenceSnapshot>, StatusCode> {
+    state
+        .probe
+        .client_evidence(&client_id)
+        .map(Json)
+        .ok_or(StatusCode::NOT_FOUND)
 }
 
 async fn telemetry(State(state): State<AppState>, upgrade: WebSocketUpgrade) -> Response {

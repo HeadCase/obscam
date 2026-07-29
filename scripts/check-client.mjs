@@ -119,6 +119,37 @@ assert.match(
 );
 assert.match(
   script,
+  /fetch\(`\/api\/evidence\/clients\/\$\{clientId\}`,\{cache:'no-store'\}\)/,
+  'browser-visible service quality must come from the agent-readable evidence contract',
+);
+assert.match(
+  script,
+  /fetch\('\/api\/connections',\{method:'POST'/,
+  'each browser media connection must advance authoritative reconnect evidence',
+);
+for (const field of [
+  'sample_count',
+  'exact_correlation_count',
+  'unknown_correlation_count',
+  'unique_presented_cadence_hz',
+  'latency_ms.p50',
+  'latency_ms.p95',
+  'latency_ms.p99',
+  'clock_uncertainty_ms.p95',
+  'reconnect_count',
+]) {
+  assert.ok(
+    script.includes(field),
+    `browser-visible evidence must display authoritative ${field}`,
+  );
+}
+assert.match(
+  script,
+  /JSON\.stringify\(model\.evidence,null,2\)/,
+  'the downloaded evidence must be the same authoritative object the browser displays',
+);
+assert.match(
+  script,
   /schema_version:3/,
   'the browser must report presentations using the treatment-aware schema',
 );
@@ -136,6 +167,9 @@ for (const host of ['192.168.1.200', '10.164.190.1']) {
   const endpointContext = {
     URL,
     location: { origin: `http://${host}:8200` },
+    fetch: () => Promise.resolve(),
+    model: { runtime: { runtime_epoch: 'epoch', stream_epoch: 1 } },
+    clientId: 'client',
   };
   vm.runInNewContext(
     `${endpointStatement};result=endpoint({port:18889,path:'/obscam/whep'})`,
