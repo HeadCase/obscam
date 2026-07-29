@@ -1,0 +1,13 @@
+{
+  "name": "obscam-viewer",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc && node web/scripts/build-assets.mjs",
+    "test": "npm run build && node --test web/tests/*.test.mjs",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "typescript": "5.9.3"
+  }
+}

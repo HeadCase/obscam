@@ -15,19 +15,24 @@ explicitly required; they are not implementation precedent.
 
 ## Current status
 
-The architecture is being completed in the GRE-179 Linear map. The repository
-currently retains the evidence needed to finish that work and will gain a new
-Rust workspace as production implementation begins.
+The production `obscam` Rust service now boots without camera or media
+dependencies and serves a truthful unavailable viewer. Its fixed-size,
+RAM-only bootstrap state gives every process an explicit runtime epoch and
+reports capture, encoder, and relay availability independently through
+`/api/v1/runtime` and `/api/v1/health`.
+
+The embedded browser application is compiled from vanilla TypeScript. Until a
+trustworthy frame is exactly correlated, it displays `Unavailable` and leaves
+frame age, cadence, source generation, and visible latency unknown.
 
 See:
 
 - `docs/agents/architecture.md` for binding local architecture guardrails
 - `docs/agents/issue-tracker.md` for the Linear workflow
-- `research/` for retained experimental evidence
 
 ## Quality gate
 
-Once the Rust workspace is introduced, every code change must pass:
+Every code change must pass:
 
 ```text
 cargo fmt --all -- --check
@@ -41,57 +46,9 @@ Browser checks and hardware-gated Pi acceptance are additionally required when
 relevant. Hardware-dependent verification must report unavailable equipment as
 blocked rather than infer success from substitutes.
 
-## Browser service-quality evidence
-
-The production-shaped probe accepts exact presentation callbacks through
-`POST /api/presentations`. `POST /api/connections` advances a client's media
-connection generation; the first connection is generation one and later
-generations count as reconnects. Invalid runtime or stream epochs are rejected.
-
-Evidence is RAM-only and bounded to 16 least-recently-active clients with 512
-samples per client. Both limits are returned in every evidence response. The
-oldest sample is evicted when a client window is full, and the least recently
-active client is evicted when the client limit is reached.
-
-`GET /api/evidence` builds the full agent-readable snapshot on demand.
-`GET /api/evidence/clients/{client_id}` builds only one client's snapshot and is
-the endpoint polled by the browser UI, preventing routine viewer polling from
-cloning and sorting every viewer's retained samples. The UI and its evidence
-download use that response directly rather than recalculating metrics.
-
-Samples retain runtime and stream epochs, connection, source and settings
-generations, treatment, dimensions, visibility, correlation status, latency,
-and clock uncertainty. Aggregates are partitioned by compatibility boundaries:
-runtime, stream and connection epochs, settings generation, treatment,
-dimensions, and visibility. Source generation remains per-frame identity so a
-cadence window can span successive frames. Percentiles use the nearest-rank
-method over the bounded window; unknown correlations contribute to counts and
-cadence but never receive invented latency or frame identity.
-
-## MediaMTX deployment pin
-
-ObsCam requires MediaMTX `v1.19.3` on 64-bit ARM. The binary and the checked-in
-configuration are one deployment contract; other MediaMTX versions are not
-accepted implicitly.
-
-Install the checksum-pinned official ARM64 release:
+Build and test the browser assets before compiling the Rust binary:
 
 ```text
-sudo scripts/install-mediamtx
+npm ci
+npm test
 ```
-
-The installer rejects non-ARM64 Linux hosts, verifies the release archive
-against the pinned SHA-256 digest, installs `/usr/local/bin/mediamtx`, and
-verifies the reported version. An alternate destination can be passed as the
-first argument for non-system qualification. Upgrades preserve the displaced
-binary as `mediamtx.previous` and refuse to overwrite an existing backup.
-
-Exercise the production-shaped Rust, FFmpeg, RTP, MediaMTX, and WHEP seam:
-
-```text
-scripts/check-deployed-stack
-```
-
-The smoke test rejects version drift, starts the synthetic Rust pipeline and
-the checked-in MediaMTX configuration, waits for the `obscam` H.264 path, checks
-the WHEP endpoint, and proves that the prohibited MoQ path remains disabled.

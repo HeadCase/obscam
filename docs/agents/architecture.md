@@ -23,6 +23,54 @@ if the two differ.
 - MediaMTX `v1.19.3` for Linux ARM64 is the deployment pin. Its binary checksum,
   checked-in configuration, and deployed-stack smoke check advance together;
   ambient host versions are not accepted. MoQ remains explicitly disabled.
+- ObsCam, MediaMTX, AllSky, and `asiair-sync` are independently supervised
+  workloads. ObsCam owns the ASI662MC, ZWO SDK interaction, FFmpeg, browser
+  service, control, telemetry, and component recovery; MediaMTX owns WHEP/WebRTC
+  fan-out; AllSky remains the exclusive ASI178MC owner. This repository versions
+  the independent `asiair-sync` host-integration policy without making it a
+  camera-service dependency.
+- ObsCam and MediaMTX start from local readiness only and must not wait for each
+  other, `network-online.target`, WireGuard, DNS, internet access, or optional
+  storage. Expected camera and FFmpeg failures recover inside Rust; unexpected
+  process exits receive persistent delayed systemd retries without permanent
+  start-limit lockout. A systemd watchdog is not required until evidence shows
+  internal recovery cannot detect a hang.
+- ObsCam and MediaMTX run as separate unprivileged non-login identities. Camera
+  access uses the narrowest permission mechanism proven on the deployed Pi;
+  exact model, exactly-one-match, and factory-serial validation remains the
+  fail-closed ownership boundary. Hardening is service-specific and retained
+  only after ZWO SDK, USB, FFmpeg hardware-encoding, recovery, and diagnostic
+  compatibility is verified.
+- Shared-host contention uses relative CPU and I/O weights rather than hard CPU
+  quotas. WireGuard remains protected infrastructure, interactive ObsCam and
+  MediaMTX receive favorable contention weights, AllSky retains normal service
+  capacity, and rclone yields first. Memory high/max thresholds are generous and
+  evidence-derived; OOM preference selects sync before camera infrastructure.
+- `asiair-sync` retains a 512 KiB/s bandwidth cap, one transfer, and two checkers
+  with low CPU/I/O priority. A five-minute systemd timer invokes a fail-soft
+  oneshot worker which verifies both paths are genuine mounts before copying.
+  It has no mount, VPN, network-online, or camera-service dependencies. Missing
+  resources defer the cycle for a later retry. Viewer-aware throttling is added
+  only if deployed contention tests show static isolation is insufficient.
+- Managed services log only through journald with bounded verbosity and per-unit
+  rate limits. The deployment provides read-only diagnostics across unit state,
+  recent logs, qualified versions, health, mount/VPN state, resources, and
+  thermal/throttling signals; health does not create cross-service restart
+  coupling.
+- A deployment release is one qualified compatibility set: ObsCam and browser
+  assets, MediaMTX binary/checksum/configuration, systemd definitions, and the
+  expected ZWO SDK ABI/version/checksum. Immutable staged releases advance
+  transactionally through a stable active-release link, retain the previous
+  known-good release, refuse to overwrite unowned host paths without explicit
+  adoption, and automatically roll back when bounded post-activation checks
+  fail. Host-specific configuration remains separate and validated.
+- Release promotion requires local quality/installer/rollback checks and a
+  deployed-Pi gate covering clean install, reboot without remote resources,
+  independent crashes, camera identity/disconnect recovery, uninterrupted
+  AllSky ownership, VPN and mount failures, concurrent AllSky/rclone/four-viewer
+  load, bounded logs and resources, automatic/manual rollback, and the accepted
+  GRE-189/GRE-208 field-quality soak. Unavailable required hardware evidence
+  blocks promotion rather than being replaced by mocks.
 - The browser owns interaction, presentation, and snapshot download.
 - Runtime state is RAM-only.
 - Control uses a server-timed, renewable five-second lease with immediate,
@@ -46,7 +94,7 @@ explicitly changes the map:
 
 ## Historical evidence
 
-Retained files under `research/` record measurements and conclusions. They are
-evidence, not reusable implementation. Deleted source remains available through
-Git history only for explicit historical investigation. Never search, restore,
-copy, or derive production architecture from it by default.
+Accepted conclusions live in Linear. Historical measurements, experiments, and
+deleted source remain available through Git history only for explicit
+historical investigation. Never search, restore, copy, or derive production
+architecture from them by default.

@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+    <meta name="color-scheme" content="dark">
+    <title>ObsCam</title>
+    <link rel="stylesheet" href="/assets/styles.css">
+  </head>
+  <body>
+    <main class="viewer" aria-label="ObsCam observatory viewer">
+      <section class="viewer__frame" data-viewer-frame aria-label="Camera frame">
+        <div class="viewer__unavailable" role="status" aria-live="polite">
+          <span class="viewer__status" data-viewer-status>Unavailable</span>
+          <span class="viewer__detail" data-viewer-detail>Capture · Encoder · Relay unavailable</span>
+        </div>
+      </section>
+
+      <section class="status-bar" aria-label="Service status">
+        <span class="status-bar__mark" aria-hidden="true"></span>
+        <span>Unavailable</span>
+        <span class="status-bar__truth">No trustworthy frame</span>
+      </section>
+
+      <section class="control-tray" aria-label="Camera controls">
+        <div class="control-tray__heading">
+          <span>Exposure</span>
+          <button class="take-control" data-control="take-control" type="button" disabled>Take control</button>
+        </div>
+        <div class="exposure-grid" aria-label="Exposure choices">
+          <button type="button" disabled>30 s</button><button type="button" disabled>20 s</button>
+          <button type="button" disabled>15 s</button><button type="button" disabled>10 s</button>
+          <button type="button" disabled>5 s</button><button type="button" disabled>2 s</button>
+          <button type="button" disabled>1 s</button><button type="button" disabled>500 ms</button>
+          <button type="button" disabled>300 ms</button><button type="button" disabled>200 ms</button>
+          <button type="button" disabled>100 ms</button><button type="button" disabled>50 ms</button>
+          <button type="button" disabled>20 ms</button><button type="button" disabled>10 ms</button>
+        </div>
+        <label class="gain-control">
+          <span>Gain <output>100</output></span>
+          <input type="range" min="0" max="600" step="50" value="100" disabled>
+        </label>
+        <div class="control-actions">
+          <button data-control="treatment-monochrome" type="button" disabled>B&amp;W</button>
+          <button data-control="treatment-colour" type="button" disabled>Colour</button>
+          <button data-control="snapshot" type="button" disabled>Snapshot</button>
+        </div>
+      </section>
+    </main>
+    <script type="module" src="/assets/app.js"></script>
+  </body>
+</html>
