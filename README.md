@@ -40,3 +40,30 @@ cargo machete
 Browser checks and hardware-gated Pi acceptance are additionally required when
 relevant. Hardware-dependent verification must report unavailable equipment as
 blocked rather than infer success from substitutes.
+
+## Browser service-quality evidence
+
+The production-shaped probe accepts exact presentation callbacks through
+`POST /api/presentations`. `POST /api/connections` advances a client's media
+connection generation; the first connection is generation one and later
+generations count as reconnects. Invalid runtime or stream epochs are rejected.
+
+Evidence is RAM-only and bounded to 16 least-recently-active clients with 512
+samples per client. Both limits are returned in every evidence response. The
+oldest sample is evicted when a client window is full, and the least recently
+active client is evicted when the client limit is reached.
+
+`GET /api/evidence` builds the full agent-readable snapshot on demand.
+`GET /api/evidence/clients/{client_id}` builds only one client's snapshot and is
+the endpoint polled by the browser UI, preventing routine viewer polling from
+cloning and sorting every viewer's retained samples. The UI and its evidence
+download use that response directly rather than recalculating metrics.
+
+Samples retain runtime and stream epochs, connection, source and settings
+generations, treatment, dimensions, visibility, correlation status, latency,
+and clock uncertainty. Aggregates are partitioned by compatibility boundaries:
+runtime, stream and connection epochs, settings generation, treatment,
+dimensions, and visibility. Source generation remains per-frame identity so a
+cadence window can span successive frames. Percentiles use the nearest-rank
+method over the bounded window; unknown correlations contribute to counts and
+cadence but never receive invented latency or frame identity.

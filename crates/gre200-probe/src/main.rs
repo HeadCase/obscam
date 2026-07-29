@@ -3,6 +3,7 @@
 #![warn(missing_docs)]
 
 mod contract;
+mod evidence;
 mod media;
 mod qualification;
 mod server;

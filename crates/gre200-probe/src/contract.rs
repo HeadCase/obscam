@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 
 pub const SCHEMA_VERSION: u8 = 2;
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Treatment {
     Mono,
@@ -56,22 +56,29 @@ pub struct BrowserPresentation {
     pub visibility_state: String,
 }
 
+#[derive(Clone, Debug, Deserialize)]
+pub struct BrowserConnection {
+    pub schema_version: u8,
+    pub client_id: String,
+    pub runtime_epoch: String,
+    pub stream_epoch: u64,
+}
+
+impl BrowserConnection {
+    pub fn is_valid(&self) -> bool {
+        self.schema_version == SCHEMA_VERSION
+            && valid_identifier(&self.client_id)
+            && valid_identifier(&self.runtime_epoch)
+            && self.stream_epoch > 0
+    }
+}
+
 impl BrowserPresentation {
     /// Validates untrusted browser telemetry before it reaches correlation state.
     pub fn is_valid(&self) -> bool {
         self.schema_version == SCHEMA_VERSION
-            && !self.client_id.is_empty()
-            && self.client_id.len() <= 80
-            && self
-                .client_id
-                .bytes()
-                .all(|byte| byte.is_ascii_alphanumeric())
-            && !self.runtime_epoch.is_empty()
-            && self.runtime_epoch.len() <= 80
-            && self
-                .runtime_epoch
-                .bytes()
-                .all(|byte| byte.is_ascii_alphanumeric())
+            && valid_identifier(&self.client_id)
+            && valid_identifier(&self.runtime_epoch)
             && self.stream_epoch > 0
             && self.expected_display_unix_ms.is_finite()
             && self.expected_display_unix_ms > 0.0
@@ -83,6 +90,10 @@ impl BrowserPresentation {
             && (1..=8192).contains(&self.height)
             && matches!(self.visibility_state.as_str(), "visible" | "hidden")
     }
+}
+
+fn valid_identifier(value: &str) -> bool {
+    !value.is_empty() && value.len() <= 80 && value.bytes().all(|byte| byte.is_ascii_alphanumeric())
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]

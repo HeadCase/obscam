@@ -7,6 +7,7 @@ use crate::contract::{
     BrowserPresentation, CaptureProgress, CorrelationResult, CorrelationStatus, FrameMapping,
     SCHEMA_VERSION, SubmittedFrame,
 };
+use crate::evidence::{EvidenceSnapshot, EvidenceStore};
 
 const MAPPING_CAPACITY: usize = 4096;
 pub(crate) const MAX_PENDING_SUBMISSIONS: usize = 8;
@@ -27,6 +28,7 @@ pub struct ProbeState {
     inner: Arc<Mutex<Inner>>,
     mapping_tx: broadcast::Sender<FrameMapping>,
     capture_tx: broadcast::Sender<CaptureProgress>,
+    evidence: Arc<Mutex<EvidenceStore>>,
 }
 
 impl ProbeState {
@@ -45,6 +47,7 @@ impl ProbeState {
             })),
             mapping_tx,
             capture_tx,
+            evidence: Arc::new(Mutex::new(EvidenceStore::new())),
         }
     }
 
@@ -202,6 +205,36 @@ impl ProbeState {
             exposure_end_to_visible_ms: latency,
             clock_uncertainty_ms: uncertainty,
         }
+    }
+
+    pub fn resolve_and_record(&self, presentation: &BrowserPresentation) -> CorrelationResult {
+        let result = self.resolve(presentation);
+        self.evidence
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .record(presentation, &result);
+        result
+    }
+
+    pub fn evidence(&self) -> EvidenceSnapshot {
+        self.evidence
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .snapshot(&self.runtime_epoch)
+    }
+
+    pub fn client_evidence(&self, client_id: &str) -> Option<EvidenceSnapshot> {
+        self.evidence
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .snapshot_for_client(&self.runtime_epoch, client_id)
+    }
+
+    pub fn record_browser_connection(&self, client_id: &str) {
+        self.evidence
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .record_connection(client_id);
     }
 }
 
