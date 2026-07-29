@@ -1,0 +1,75 @@
+#!/bin/sh
+set -eu
+
+repo=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+mediamtx_bin=${1:-$(command -v mediamtx)}
+expected_version=v1.19.3
+staging=$(mktemp -d)
+mediamtx_pid=
+probe_pid=
+
+cleanup() {
+    if [ -n "$probe_pid" ]; then
+        kill "$probe_pid" 2>/dev/null || true
+        wait "$probe_pid" 2>/dev/null || true
+    fi
+    if [ -n "$mediamtx_pid" ]; then
+        kill "$mediamtx_pid" 2>/dev/null || true
+        wait "$mediamtx_pid" 2>/dev/null || true
+    fi
+    rm -rf "$staging"
+}
+trap cleanup EXIT HUP INT TERM
+
+actual_version=$($mediamtx_bin --version)
+if [ "$actual_version" != "$expected_version" ]; then
+    echo "MediaMTX version mismatch: got $actual_version, expected $expected_version" >&2
+    exit 1
+fi
+
+cargo build --manifest-path "$repo/Cargo.toml" -p gre200-probe
+
+"$mediamtx_bin" "$repo/crates/gre200-probe/mediamtx.yml" >"$staging/mediamtx.log" 2>&1 &
+mediamtx_pid=$!
+"$repo/target/debug/gre200-probe" --listen 127.0.0.1:8200 >"$staging/probe.log" 2>&1 &
+probe_pid=$!
+
+attempt=0
+until curl --fail --silent --output /dev/null http://127.0.0.1:8200/api/runtime \
+    && curl --fail --silent --output /dev/null http://127.0.0.1:19997/v3/info; do
+    attempt=$((attempt + 1))
+    if [ "$attempt" -ge 100 ]; then
+        echo "stack did not become ready" >&2
+        cat "$staging/mediamtx.log" >&2
+        cat "$staging/probe.log" >&2
+        exit 1
+    fi
+    sleep 0.1
+done
+
+attempt=0
+until curl --fail --silent http://127.0.0.1:19997/v3/paths/get/obscam \
+    | grep -Eq '"(available|ready)"[[:space:]]*:[[:space:]]*true'; do
+    attempt=$((attempt + 1))
+    if [ "$attempt" -ge 100 ]; then
+        echo "obscam H.264 path did not become available" >&2
+        cat "$staging/mediamtx.log" >&2
+        cat "$staging/probe.log" >&2
+        exit 1
+    fi
+    sleep 0.1
+done
+
+whep_status=$(curl --silent --output /dev/null --write-out '%{http_code}' \
+    --request OPTIONS http://127.0.0.1:18889/obscam/whep)
+if [ "$whep_status" != 204 ]; then
+    echo "WHEP endpoint returned HTTP $whep_status, expected 204" >&2
+    exit 1
+fi
+
+if grep -q '\[MoQ\].*started' "$staging/mediamtx.log"; then
+    echo "MediaMTX started a prohibited secondary MoQ media path" >&2
+    exit 1
+fi
+
+echo "MediaMTX $actual_version: API ready, H.264 path available, WHEP HTTP 204, MoQ disabled"

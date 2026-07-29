@@ -67,3 +67,31 @@ dimensions, and visibility. Source generation remains per-frame identity so a
 cadence window can span successive frames. Percentiles use the nearest-rank
 method over the bounded window; unknown correlations contribute to counts and
 cadence but never receive invented latency or frame identity.
+
+## MediaMTX deployment pin
+
+ObsCam requires MediaMTX `v1.19.3` on 64-bit ARM. The binary and the checked-in
+configuration are one deployment contract; other MediaMTX versions are not
+accepted implicitly.
+
+Install the checksum-pinned official ARM64 release:
+
+```text
+sudo scripts/install-mediamtx
+```
+
+The installer rejects non-ARM64 Linux hosts, verifies the release archive
+against the pinned SHA-256 digest, installs `/usr/local/bin/mediamtx`, and
+verifies the reported version. An alternate destination can be passed as the
+first argument for non-system qualification. Upgrades preserve the displaced
+binary as `mediamtx.previous` and refuse to overwrite an existing backup.
+
+Exercise the production-shaped Rust, FFmpeg, RTP, MediaMTX, and WHEP seam:
+
+```text
+scripts/check-deployed-stack
+```
+
+The smoke test rejects version drift, starts the synthetic Rust pipeline and
+the checked-in MediaMTX configuration, waits for the `obscam` H.264 path, checks
+the WHEP endpoint, and proves that the prohibited MoQ path remains disabled.
