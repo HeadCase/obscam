@@ -38,6 +38,15 @@ explicitly requests historical investigation.
 - When a design choice exists, present 2-3 options with a recommendation.
 - If a requested approach conflicts with project principles, recommend an alternative and wait for confirmation.
 
+## Git Workflow
+
+- Never commit directly to `develop` or `main`.
+- Before changing files, create or switch to a feature branch. Agent-created
+  branches use the `codex/` prefix unless the user requests another name.
+- All changes enter `develop` through a pull request from the feature branch.
+- If work begins while `develop` or `main` is checked out, create the feature
+  branch before staging or committing any change.
+
 ## Response Style
 
 - Be concise but complete.
@@ -96,6 +105,15 @@ Prohibited unless a later approved Linear decision changes the map:
 ## Testing and Verification
 
 - Add tests whenever behavior changes.
+- For graphical browser verification, follow
+  `docs/agents/browser-testing.md`. A Playwright MCP runs on the operator's Mac
+  and is available to agents through an SSH tunnel; the Mac browser reaches the
+  Pi service over WireGuard at `10.164.190.1` or, as a LAN fallback only, at
+  `192.168.1.200`. Never infer that browser testing is unavailable from the
+  absence of a browser executable on the headless Pi.
+- Never use or probe `wg1` (`192.168.4.9`) for browser testing. It is unrelated
+  infrastructure used to write astrophotography images to the operator's NAS
+  and must not be inspected, tested, reconfigured, or treated as a fallback.
 - Prefer the deployed-stack acceptance seam: exercise the real Rust service,
   FFmpeg, and MediaMTX through browser-facing contracts, substituting only
   unavailable hardware edges.
