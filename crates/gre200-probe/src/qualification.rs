@@ -232,6 +232,8 @@ mod tests {
         assert!(serde_json::from_str::<Command>(missing).is_err());
         let colour = r#"{"command":"apply_capture_profile","profile":{"exposure_us":50000,"gain":500,"treatment":"colour"}}"#;
         assert!(serde_json::from_str::<Command>(colour).is_ok());
+        let retired_candidate = r#"{"command":"apply_capture_profile","profile":{"exposure_us":50000,"gain":500,"treatment":"grayscale_demosaiced"}}"#;
+        assert!(serde_json::from_str::<Command>(retired_candidate).is_err());
     }
 
     #[tokio::test]

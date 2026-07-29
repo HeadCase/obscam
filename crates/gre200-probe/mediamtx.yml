@@ -7,7 +7,6 @@ rtmp: false
 hls: false
 playback: false
 srt: false
-moq: false
 api: true
 apiAddress: 127.0.0.1:19997
 metrics: true
@@ -17,7 +16,6 @@ webrtcAddress: :18889
 webrtcLocalUDPAddress: :18190
 webrtcLocalTCPAddress: :18190
 webrtcAdditionalHosts: [192.168.1.200, 10.164.190.1]
-webrtcAllowOrigins: ["*"]
 pathDefaults:
   record: false
 
