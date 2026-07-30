@@ -80,6 +80,8 @@ async fn production_assets_expose_the_complete_unavailable_viewer_shell() {
     ] {
         assert!(html.contains(exposure), "missing exposure {exposure}");
     }
+    assert_eq!(html.matches("data-exposure-ms=").count(), 14);
+    assert!(html.contains("data-gain"));
 
     let (script_head, script) = get(address, "/assets/app.js").await;
     assert!(

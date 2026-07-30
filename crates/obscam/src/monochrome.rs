@@ -29,10 +29,7 @@ impl MonochromeProcessor {
     ) -> MonochromeFrame<'a> {
         process_edges(raw, &mut self.output);
         process_interior(raw, &mut self.output);
-        MonochromeFrame {
-            generation,
-            data: &self.output,
-        }
+        ProcessedFrame::new(generation, &self.output)
     }
 }
 
@@ -128,12 +125,16 @@ impl Default for MonochromeProcessor {
 }
 
 /// One native-dimension neutral monochrome I420 generation.
-pub struct MonochromeFrame<'a> {
+pub struct ProcessedFrame<'a> {
     generation: u64,
     data: &'a [u8],
 }
 
-impl MonochromeFrame<'_> {
+impl<'a> ProcessedFrame<'a> {
+    pub(crate) const fn new(generation: u64, data: &'a [u8]) -> Self {
+        Self { generation, data }
+    }
+
     /// Source generation represented by this complete output frame.
     #[must_use]
     pub const fn generation(&self) -> u64 {
@@ -159,7 +160,7 @@ impl MonochromeFrame<'_> {
     }
 }
 
-fn reconstruct(raw: &[u8], x: usize, y: usize) -> (u8, u8, u8) {
+pub(crate) fn reconstruct(raw: &[u8], x: usize, y: usize) -> (u8, u8, u8) {
     match (x & 1, y & 1) {
         (0, 0) => (
             sample(raw, x, y),
@@ -222,10 +223,13 @@ fn sample(raw: &[u8], x: usize, y: usize) -> u8 {
     raw[y * WIDTH + x]
 }
 
-const fn luminance(red: u8, green: u8, blue: u8) -> u8 {
+pub(crate) const fn luminance(red: u8, green: u8, blue: u8) -> u8 {
     let weighted = 77 * red as u16 + 150 * green as u16 + 29 * blue as u16;
     ((weighted + 128) >> 8) as u8
 }
+
+/// Backward-compatible name for the neutral monochrome processing result.
+pub type MonochromeFrame<'a> = ProcessedFrame<'a>;
 
 #[cfg(test)]
 mod tests {

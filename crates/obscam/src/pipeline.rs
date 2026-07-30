@@ -7,13 +7,14 @@ use std::{
     time::{Duration, Instant},
 };
 
-use zwo_asi::{CameraOwner, CameraSource, CaptureError, HEIGHT, Settings, WIDTH};
+use zwo_asi::{CameraOwner, CameraSource, CaptureError, HEIGHT, WIDTH};
 
 #[cfg(feature = "camera-substitute")]
 use zwo_asi::{DeterministicCamera, DeterministicScenario};
 
 use crate::{
-    ComponentReadiness, FfmpegEncoder, LatestFrameMailbox, MonochromeProcessor, RuntimeState,
+    ColourProcessor, ComponentReadiness, FfmpegEncoder, LatestFrameMailbox, MonochromeProcessor,
+    RuntimeState, SettingsTarget, Treatment,
     latest::{EpochFence, LatestBufferMailbox},
 };
 
@@ -68,7 +69,8 @@ impl MediaPipeline {
         ));
         let processed = Arc::new(LatestFrameMailbox::with_epoch_fence(epoch_fence));
         let encoder = spawn_encoder(Arc::clone(&processed), runtime.clone())?;
-        let processing = spawn_processing(Arc::clone(&raw), Arc::clone(&processed))?;
+        let processing =
+            spawn_processing(Arc::clone(&raw), Arc::clone(&processed), runtime.settings())?;
         let capture = thread::Builder::new()
             .name(capture_thread_name.into())
             .spawn(move || match connect() {
@@ -89,14 +91,28 @@ fn capture(
     raw: &LatestBufferMailbox,
     minimum_capture_interval: Option<Duration>,
 ) {
-    let settings = Settings::new(10_000, 100).expect("default settings are validated constants");
-    if let Err(error) = source.configure(settings).and_then(|()| source.start()) {
+    let settings = runtime.settings();
+    settings.install_interrupter(source.interrupter());
+    let defaults = settings.snapshot().applied().settings();
+    if let Err(error) = source
+        .configure(defaults.camera_settings())
+        .and_then(|()| source.start())
+    {
         tracing::error!(%error, "camera capture could not start");
         return;
     }
     runtime.set_capture_readiness(ComponentReadiness::Ready);
 
     loop {
+        if let Some(target) = settings.claim_latest() {
+            if let Err(error) = apply_settings(&mut source, target, raw, &settings) {
+                settings.fail_recovery();
+                runtime.set_capture_readiness(ComponentReadiness::Unavailable);
+                tracing::error!(%error, "camera settings transition failed");
+                return;
+            }
+            continue;
+        }
         let started = Instant::now();
         let epoch = raw.current_epoch();
         match source.capture_next(100) {
@@ -114,23 +130,49 @@ fn capture(
     }
 }
 
+fn apply_settings(
+    source: &mut impl CameraSource,
+    target: SettingsTarget,
+    raw: &LatestBufferMailbox,
+    controller: &crate::SettingsController,
+) -> Result<(), zwo_asi::CameraError> {
+    source.stop()?;
+    source.configure(target.settings().camera_settings())?;
+    source.start()?;
+    raw.begin_epoch(target.generation());
+    controller.mark_applied(target);
+    Ok(())
+}
+
 fn spawn_processing(
     raw: Arc<LatestBufferMailbox>,
     processed: Arc<LatestFrameMailbox>,
+    settings: crate::SettingsController,
 ) -> io::Result<thread::JoinHandle<()>> {
     thread::Builder::new()
         .name("obscam-processing".into())
         .spawn(move || {
             let mut processor = MonochromeProcessor::new();
+            let mut colour_processor = ColourProcessor::new();
             loop {
                 let Some(source) = raw.wait_take(Duration::from_secs(1)) else {
                     continue;
                 };
                 let generation = source.generation();
                 let epoch = source.epoch();
-                let output = processor.process_validated(generation, source.data());
-                if raw.is_current_epoch(epoch) {
-                    processed.publish_in_epoch(epoch, &output);
+                match settings.snapshot().applied().settings().treatment() {
+                    Treatment::Monochrome => {
+                        let output = processor.process_validated(generation, source.data());
+                        if raw.is_current_epoch(epoch) {
+                            processed.publish_in_epoch(epoch, &output);
+                        }
+                    }
+                    Treatment::Colour => {
+                        let output = colour_processor.process_validated(generation, source.data());
+                        if raw.is_current_epoch(epoch) {
+                            processed.publish_in_epoch(epoch, &output);
+                        }
+                    }
                 }
                 raw.recycle(source);
             }

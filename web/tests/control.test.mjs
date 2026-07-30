@@ -128,3 +128,46 @@ test("server messages validate schema, generations, and secrets", () => {
     /invalid control message/
   );
 });
+
+test("settings messages preserve complete accepted and applied tuples", () => {
+  const settings = { exposureMs: 20, gain: 350, treatment: "colour" };
+  assert.deepEqual(
+    parseControlMessage({
+      schemaVersion: 1,
+      type: "settings",
+      state: {
+        applied: { generation: 0, settings: { exposureMs: 500, gain: 100, treatment: "monochrome" } },
+        pending: null
+      }
+    }).state.applied.settings,
+    { exposureMs: 500, gain: 100, treatment: "monochrome" }
+  );
+
+  let state = reduceControl(initialControlState(null), {
+    type: "accepted",
+    targetGeneration: 1,
+    settings
+  }).state;
+  assert.equal(state.pendingIntent, false);
+  assert.deepEqual(state.settings.pending, { generation: 1, settings });
+
+  state = reduceControl(state, {
+    type: "applied",
+    settingsGeneration: 1,
+    settings
+  }).state;
+  assert.deepEqual(state.settings.applied, { generation: 1, settings });
+  assert.equal(state.settings.pending, null);
+});
+
+test("invalid settings rejection keeps a healthy lease", () => {
+  let state = reduceControl(initialControlState(null), { type: "connected" }).state;
+  state = reduceControl(state, { type: "granted", credentials }).state;
+  state = reduceControl(state, { type: "intent_queued" }).state;
+
+  const rejected = reduceControl(state, { type: "rejected", reason: "invalid_settings" });
+  assert.equal(rejected.state.ownership, "you");
+  assert.equal(rejected.state.mayMutate, true);
+  assert.deepEqual(rejected.state.credentials, credentials);
+  assert.equal(rejected.state.pendingIntent, false);
+});

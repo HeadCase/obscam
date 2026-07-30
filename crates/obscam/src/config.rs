@@ -3,6 +3,8 @@ use std::{env, net::SocketAddr, num::NonZeroU16};
 use serde::Serialize;
 use thiserror::Error;
 
+use crate::{CameraSettings, Treatment};
+
 const MAX_WHEP_PATH_BYTES: usize = 256;
 
 /// Validated host configuration required to start the HTTP service.
@@ -12,6 +14,7 @@ pub struct Config {
     whep_port: NonZeroU16,
     whep_path: WhepPath,
     camera_source: CameraSourceKind,
+    default_settings: CameraSettings,
 }
 
 impl Config {
@@ -26,7 +29,18 @@ impl Config {
         let whep_port = environment_value("OBSCAM_WHEP_PORT", "8889")?;
         let whep_path = environment_value("OBSCAM_WHEP_PATH", "/obscam/whep")?;
         let camera_source = environment_value("OBSCAM_CAMERA_SOURCE", "production")?;
-        Self::parse_with_camera_source(&bind_address, &whep_port, &whep_path, &camera_source)
+        let exposure_ms = environment_value("OBSCAM_DEFAULT_EXPOSURE_MS", "500")?;
+        let gain = environment_value("OBSCAM_DEFAULT_GAIN", "100")?;
+        let treatment = environment_value("OBSCAM_DEFAULT_TREATMENT", "monochrome")?;
+        Self::parse_with_defaults(
+            &bind_address,
+            &whep_port,
+            &whep_path,
+            &camera_source,
+            &exposure_ms,
+            &gain,
+            &treatment,
+        )
     }
 
     /// Parses and validates the complete startup configuration.
@@ -40,7 +54,15 @@ impl Config {
         whep_port: &str,
         whep_path: &str,
     ) -> Result<Self, ConfigError> {
-        Self::parse_with_camera_source(bind_address, whep_port, whep_path, "production")
+        Self::parse_with_defaults(
+            bind_address,
+            whep_port,
+            whep_path,
+            "production",
+            "500",
+            "100",
+            "monochrome",
+        )
     }
 
     /// Parses the complete startup configuration with an explicit camera boundary.
@@ -53,6 +75,32 @@ impl Config {
         whep_port: &str,
         whep_path: &str,
         camera_source: &str,
+    ) -> Result<Self, ConfigError> {
+        Self::parse_with_defaults(
+            bind_address,
+            whep_port,
+            whep_path,
+            camera_source,
+            "500",
+            "100",
+            "monochrome",
+        )
+    }
+
+    /// Parses host, camera-source, and restart-default configuration.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ConfigError`] when any value is not one of the accepted choices.
+    #[allow(clippy::too_many_arguments)]
+    pub fn parse_with_defaults(
+        bind_address: &str,
+        whep_port: &str,
+        whep_path: &str,
+        camera_source: &str,
+        exposure_ms: &str,
+        gain: &str,
+        treatment: &str,
     ) -> Result<Self, ConfigError> {
         let bind_address = bind_address
             .parse()
@@ -68,12 +116,24 @@ impl Config {
             "deterministic" => CameraSourceKind::Deterministic,
             _ => return Err(ConfigError::InvalidCameraSource),
         };
+        let default_settings = CameraSettings::new(
+            exposure_ms
+                .parse()
+                .map_err(|_| ConfigError::InvalidDefaultSettings)?,
+            gain.parse()
+                .map_err(|_| ConfigError::InvalidDefaultSettings)?,
+            treatment
+                .parse::<Treatment>()
+                .map_err(|_| ConfigError::InvalidDefaultSettings)?,
+        )
+        .map_err(|_| ConfigError::InvalidDefaultSettings)?;
 
         Ok(Self {
             bind_address,
             whep_port,
             whep_path,
             camera_source,
+            default_settings,
         })
     }
 
@@ -99,6 +159,12 @@ impl Config {
     #[must_use]
     pub const fn camera_source(&self) -> CameraSourceKind {
         self.camera_source
+    }
+
+    /// Complete tuple restored at every runtime start.
+    #[must_use]
+    pub const fn default_settings(&self) -> CameraSettings {
+        self.default_settings
     }
 
     pub(crate) fn whep_path_value(&self) -> WhepPath {
@@ -172,4 +238,7 @@ pub enum ConfigError {
     /// Camera source is not one of the two explicit boundary selections.
     #[error("OBSCAM_CAMERA_SOURCE must be production or deterministic")]
     InvalidCameraSource,
+    /// Restart camera defaults are not a complete accepted settings tuple.
+    #[error("default exposure, gain, and treatment must be accepted choices")]
+    InvalidDefaultSettings,
 }

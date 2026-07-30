@@ -46,7 +46,23 @@ async fn viewers_take_preempt_reject_stale_credentials_and_resume_same_tab() {
             "schemaVersion": 1,
             "type": "renew",
             "generation": first_generation,
-            "secret": first_secret
+            "secret": first_secret.clone()
+        }),
+    )
+    .await;
+    assert_eq!(
+        receive_type(&mut first, "rejected").await["reason"],
+        "not_holder"
+    );
+
+    send(
+        &mut first,
+        json!({
+            "schemaVersion": 1,
+            "type": "set_settings",
+            "generation": first_generation,
+            "secret": first_secret,
+            "settings": { "exposureMs": 20, "gain": 100, "treatment": "monochrome" }
         }),
     )
     .await;
@@ -77,14 +93,74 @@ async fn viewers_take_preempt_reject_stale_credentials_and_resume_same_tab() {
     );
 }
 
+#[tokio::test]
+async fn complete_tuple_is_accepted_then_applied_and_invalid_detents_are_rejected() {
+    let (address, state) = spawn_service_with_state().await;
+    let (mut socket, _) = connect_async(format!("ws://{address}/api/v1/control"))
+        .await
+        .expect("control connection");
+    receive_type(&mut socket, "authority").await;
+    receive_type(&mut socket, "settings").await;
+    send(&mut socket, json!({ "schemaVersion": 1, "type": "take" })).await;
+    let grant = receive_type(&mut socket, "granted").await;
+
+    send(
+        &mut socket,
+        json!({
+            "schemaVersion": 1,
+            "type": "set_settings",
+            "generation": grant["generation"],
+            "secret": grant["secret"],
+            "settings": { "exposureMs": 20, "gain": 350, "treatment": "colour" }
+        }),
+    )
+    .await;
+    let accepted = receive_type(&mut socket, "accepted").await;
+    assert_eq!(accepted["targetGeneration"], 1);
+
+    let target = state
+        .settings()
+        .claim_latest()
+        .expect("camera claims target");
+    state.settings().mark_applied(target);
+    let applied = receive_type(&mut socket, "applied").await;
+    assert_eq!(applied["settingsGeneration"], 1);
+    assert_eq!(applied["settings"]["gain"], 350);
+
+    send(
+        &mut socket,
+        json!({
+            "schemaVersion": 1,
+            "type": "set_settings",
+            "generation": grant["generation"],
+            "secret": grant["secret"],
+            "settings": { "exposureMs": 30, "gain": 350, "treatment": "colour" }
+        }),
+    )
+    .await;
+    assert_eq!(
+        receive_type(&mut socket, "rejected").await["reason"],
+        "invalid_settings"
+    );
+}
+
 async fn spawn_service() -> SocketAddr {
+    spawn_service_with_state().await.0
+}
+
+async fn spawn_service_with_state() -> (SocketAddr, RuntimeState) {
     let listener = TcpListener::bind("127.0.0.1:0").await.expect("listener");
     let address = listener.local_addr().expect("address");
     let bind_address = address.to_string();
     let config = Config::parse(&bind_address, "8889", "/obscam/whep").expect("config");
     let state = RuntimeState::unavailable(Uuid::new_v4(), &config);
-    tokio::spawn(async move { obscam::serve(listener, state).await.expect("service") });
-    address
+    let service_state = state.clone();
+    tokio::spawn(async move {
+        obscam::serve(listener, service_state)
+            .await
+            .expect("service");
+    });
+    (address, state)
 }
 
 async fn send<S>(socket: &mut WebSocketStream<S>, value: Value)

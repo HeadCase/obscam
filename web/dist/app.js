@@ -8,6 +8,11 @@ async function boot() {
     const video = requiredVideo("[data-viewer-video]");
     const takeControl = requiredButton("[data-control=\"take-control\"]");
     const controlStatus = requiredElement("[data-control-status]");
+    const exposureButtons = Array.from(document.querySelectorAll("[data-exposure-ms]"));
+    const gain = requiredInput("[data-gain]");
+    const gainOutput = requiredElement("[data-gain-output]");
+    const monochrome = requiredButton("[data-control=\"treatment-monochrome\"]");
+    const colour = requiredButton("[data-control=\"treatment-colour\"]");
     try {
         const response = await fetch("/api/v1/runtime", {
             cache: "no-store",
@@ -18,8 +23,26 @@ async function boot() {
         }
         const runtime = parseRuntimeContract(await response.json());
         const viewer = deriveViewerState(runtime);
-        const control = new ControlClient(runtime.runtimeEpoch, (state) => renderControl(state, takeControl, controlStatus));
+        let latestSettings = { exposureMs: 500, gain: 100, treatment: "monochrome" };
+        const control = new ControlClient(runtime.runtimeEpoch, (state) => {
+            latestSettings = state.settings.pending?.settings ?? state.settings.applied.settings;
+            renderControl(state, takeControl, controlStatus, exposureButtons, gain, gainOutput, monochrome, colour);
+        });
         takeControl.addEventListener("click", () => control.toggleAuthority());
+        for (const button of exposureButtons) {
+            button.addEventListener("click", () => {
+                control.setSettings({ ...latestSettings, exposureMs: Number(button.dataset.exposureMs) });
+            });
+        }
+        gain.addEventListener("change", () => {
+            control.setSettings({ ...latestSettings, gain: Number(gain.value) });
+        });
+        monochrome.addEventListener("click", () => {
+            control.setSettings({ ...latestSettings, treatment: "monochrome" });
+        });
+        colour.addEventListener("click", () => {
+            control.setSettings({ ...latestSettings, treatment: "colour" });
+        });
         control.start();
         window.addEventListener("pagehide", () => control.close(), { once: true });
         status.textContent = viewer.status;
@@ -42,17 +65,39 @@ async function boot() {
         console.error("ObsCam viewer bootstrap failed", error);
     }
 }
-function renderControl(state, takeControl, controlStatus) {
+function renderControl(state, takeControl, controlStatus, exposureButtons, gain, gainOutput, monochrome, colour) {
     takeControl.disabled = state.connection !== "connected" || state.pendingIntent;
     takeControl.textContent = state.ownership === "you" ? "Release control" : "Take control";
+    const settings = state.settings.pending?.settings ?? state.settings.applied.settings;
+    const settingsDisabled = !state.mayMutate || state.pendingIntent;
+    for (const button of exposureButtons) {
+        button.disabled = settingsDisabled;
+        button.setAttribute("aria-pressed", String(Number(button.dataset.exposureMs) === settings.exposureMs));
+    }
+    gain.disabled = settingsDisabled;
+    gain.value = String(settings.gain);
+    gainOutput.textContent = String(settings.gain);
+    monochrome.disabled = settingsDisabled;
+    colour.disabled = settingsDisabled;
+    monochrome.setAttribute("aria-pressed", String(settings.treatment === "monochrome"));
+    colour.setAttribute("aria-pressed", String(settings.treatment === "colour"));
     controlStatus.textContent =
         state.connection === "disconnected"
             ? "Control reconnecting"
-            : state.ownership === "you"
-                ? "You have control"
-                : state.ownership === "another_viewer"
-                    ? "Another viewer has control"
-                    : "No one has control";
+            : state.settings.pending !== null
+                ? "Applying settings"
+                : state.ownership === "you"
+                    ? "You have control"
+                    : state.ownership === "another_viewer"
+                        ? "Another viewer has control"
+                        : "No one has control";
+}
+function requiredInput(selector) {
+    const element = document.querySelector(selector);
+    if (element === null) {
+        throw new Error(`viewer shell is missing ${selector}`);
+    }
+    return element;
 }
 function requiredVideo(selector) {
     const element = document.querySelector(selector);
