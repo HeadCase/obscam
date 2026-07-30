@@ -15,9 +15,11 @@ use tokio::sync::broadcast;
 use uuid::Uuid;
 
 use crate::{
-    AuthorityCredentials, AuthorityGate, AuthorityRejection, AuthoritySnapshot, assets,
+    AuthorityCredentials, AuthorityGate, AuthorityRejection, AuthoritySnapshot, CameraSettings,
+    SettingsController, SettingsFailure, SettingsSnapshot, Treatment, assets,
     authority::LEASE_DURATION_MS,
     runtime::{Components, RuntimeState, SCHEMA_VERSION},
+    settings::SettingsEvent,
 };
 
 /// Serves browser-facing contracts until the listener fails or the task is cancelled.
@@ -44,15 +46,30 @@ fn router(state: RuntimeState) -> Router {
 }
 
 async fn control(ws: WebSocketUpgrade, State(state): State<RuntimeState>) -> Response {
-    ws.on_upgrade(move |socket| control_socket(socket, state.authority()))
+    ws.on_upgrade(move |socket| control_socket(socket, state))
 }
 
-async fn control_socket(mut socket: WebSocket, authority: AuthorityGate) {
+async fn control_socket(mut socket: WebSocket, state: RuntimeState) {
+    let authority = state.authority();
+    let settings = state.settings();
     let mut updates = authority.subscribe();
+    let mut settings_updates = settings.subscribe();
     if let Err(error) =
         send_server(&mut socket, ServerMessage::authority(authority.snapshot())).await
     {
         tracing::debug!(%error, "control connection closed before initial state");
+        return;
+    }
+    if let Err(error) = send_server(
+        &mut socket,
+        ServerMessage::Settings {
+            schema_version: SCHEMA_VERSION,
+            state: settings.snapshot(),
+        },
+    )
+    .await
+    {
+        tracing::debug!(%error, "control connection closed before initial settings");
         return;
     }
 
@@ -66,6 +83,20 @@ async fn control_socket(mut socket: WebSocket, authority: AuthorityGate) {
                 };
                 if let Err(error) = send_server(&mut socket, ServerMessage::authority(snapshot)).await {
                     tracing::debug!(%error, "control connection closed while broadcasting authority");
+                    return;
+                }
+            }
+            update = settings_updates.recv() => {
+                let message = match update {
+                    Ok(event) => settings_event_message(event, &settings),
+                    Err(broadcast::error::RecvError::Lagged(_)) => ServerMessage::Settings {
+                        schema_version: SCHEMA_VERSION,
+                        state: settings.snapshot(),
+                    },
+                    Err(broadcast::error::RecvError::Closed) => return,
+                };
+                if let Err(error) = send_server(&mut socket, message).await {
+                    tracing::debug!(%error, "control connection closed while broadcasting settings");
                     return;
                 }
             }
@@ -87,7 +118,7 @@ async fn control_socket(mut socket: WebSocket, authority: AuthorityGate) {
                     }
                     continue;
                 };
-                let response = handle_client_message(&authority, text.as_str());
+                let response = handle_client_message(&authority, &settings, text.as_str());
                 if let Some(expiry) = response.expiry {
                     schedule_expiry(authority.clone(), expiry);
                 }
@@ -105,7 +136,11 @@ struct ControlResponse {
     expiry: Option<(u64, Instant)>,
 }
 
-fn handle_client_message(authority: &AuthorityGate, text: &str) -> ControlResponse {
+fn handle_client_message(
+    authority: &AuthorityGate,
+    settings: &SettingsController,
+    text: &str,
+) -> ControlResponse {
     if text.len() > 4_096 {
         return ControlResponse::rejected(RejectionReason::Malformed);
     }
@@ -183,6 +218,61 @@ fn handle_client_message(authority: &AuthorityGate, text: &str) -> ControlRespon
                 Err(rejection) => ControlResponse::rejected(rejection.into()),
             }
         }
+        ClientMessage::SetSettings {
+            generation,
+            secret,
+            settings: requested,
+            ..
+        } => handle_settings_mutation(authority, settings, now, generation, secret, requested),
+    }
+}
+
+fn handle_settings_mutation(
+    authority: &AuthorityGate,
+    controller: &SettingsController,
+    now: Instant,
+    generation: u64,
+    secret: String,
+    requested: RequestedSettings,
+) -> ControlResponse {
+    let Some(credentials) = credentials(generation, secret) else {
+        return ControlResponse::rejected(RejectionReason::Malformed);
+    };
+    let Ok(requested) =
+        CameraSettings::new(requested.exposure_ms, requested.gain, requested.treatment)
+    else {
+        return ControlResponse::rejected(RejectionReason::InvalidSettings);
+    };
+    match authority.accept(&credentials, now, || controller.accept(requested)) {
+        Ok(Ok(target)) => ControlResponse {
+            message: ServerMessage::Accepted {
+                schema_version: SCHEMA_VERSION,
+                target_generation: target.generation(),
+                settings: target.settings(),
+            },
+            expiry: None,
+        },
+        Ok(Err(_)) => ControlResponse::rejected(RejectionReason::CameraUnavailable),
+        Err(rejection) => ControlResponse::rejected(rejection.into()),
+    }
+}
+
+fn settings_event_message(event: SettingsEvent, settings: &SettingsController) -> ServerMessage {
+    match event {
+        SettingsEvent::Accepted => ServerMessage::Settings {
+            schema_version: SCHEMA_VERSION,
+            state: settings.snapshot(),
+        },
+        SettingsEvent::Applied(target) => ServerMessage::Applied {
+            schema_version: SCHEMA_VERSION,
+            settings_generation: target.generation(),
+            settings: target.settings(),
+        },
+        SettingsEvent::Failed { generation, reason } => ServerMessage::Failed {
+            schema_version: SCHEMA_VERSION,
+            target_generation: generation,
+            reason,
+        },
     }
 }
 
@@ -240,6 +330,20 @@ enum ClientMessage {
         generation: u64,
         secret: String,
     },
+    SetSettings {
+        schema_version: u8,
+        generation: u64,
+        secret: String,
+        settings: RequestedSettings,
+    },
+}
+
+#[derive(Clone, Copy, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct RequestedSettings {
+    exposure_ms: u32,
+    gain: u16,
+    treatment: Treatment,
 }
 
 impl ClientMessage {
@@ -248,7 +352,8 @@ impl ClientMessage {
             Self::Take { schema_version }
             | Self::Renew { schema_version, .. }
             | Self::Resume { schema_version, .. }
-            | Self::Release { schema_version, .. } => *schema_version,
+            | Self::Release { schema_version, .. }
+            | Self::SetSettings { schema_version, .. } => *schema_version,
         }
     }
 }
@@ -285,6 +390,25 @@ enum ServerMessage {
         schema_version: u8,
         generation: u64,
     },
+    Settings {
+        schema_version: u8,
+        state: SettingsSnapshot,
+    },
+    Accepted {
+        schema_version: u8,
+        target_generation: u64,
+        settings: CameraSettings,
+    },
+    Applied {
+        schema_version: u8,
+        settings_generation: u64,
+        settings: CameraSettings,
+    },
+    Failed {
+        schema_version: u8,
+        target_generation: u64,
+        reason: SettingsFailure,
+    },
     Rejected {
         schema_version: u8,
         reason: RejectionReason,
@@ -308,6 +432,8 @@ enum RejectionReason {
     Expired,
     Malformed,
     UnsupportedSchema,
+    InvalidSettings,
+    CameraUnavailable,
 }
 
 impl From<AuthorityRejection> for RejectionReason {

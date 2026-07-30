@@ -30,17 +30,17 @@
           <button class="take-control" data-control="take-control" type="button" disabled>Take control</button>
         </div>
         <div class="exposure-grid" aria-label="Exposure choices">
-          <button type="button" disabled>30 s</button><button type="button" disabled>20 s</button>
-          <button type="button" disabled>15 s</button><button type="button" disabled>10 s</button>
-          <button type="button" disabled>5 s</button><button type="button" disabled>2 s</button>
-          <button type="button" disabled>1 s</button><button type="button" disabled>500 ms</button>
-          <button type="button" disabled>300 ms</button><button type="button" disabled>200 ms</button>
-          <button type="button" disabled>100 ms</button><button type="button" disabled>50 ms</button>
-          <button type="button" disabled>20 ms</button><button type="button" disabled>10 ms</button>
+          <button data-exposure-ms="30000" type="button" disabled>30 s</button><button data-exposure-ms="20000" type="button" disabled>20 s</button>
+          <button data-exposure-ms="15000" type="button" disabled>15 s</button><button data-exposure-ms="10000" type="button" disabled>10 s</button>
+          <button data-exposure-ms="5000" type="button" disabled>5 s</button><button data-exposure-ms="2000" type="button" disabled>2 s</button>
+          <button data-exposure-ms="1000" type="button" disabled>1 s</button><button data-exposure-ms="500" type="button" disabled>500 ms</button>
+          <button data-exposure-ms="300" type="button" disabled>300 ms</button><button data-exposure-ms="200" type="button" disabled>200 ms</button>
+          <button data-exposure-ms="100" type="button" disabled>100 ms</button><button data-exposure-ms="50" type="button" disabled>50 ms</button>
+          <button data-exposure-ms="20" type="button" disabled>20 ms</button><button data-exposure-ms="10" type="button" disabled>10 ms</button>
         </div>
         <label class="gain-control">
-          <span>Gain <output>100</output></span>
-          <input type="range" min="0" max="600" step="50" value="100" disabled>
+          <span>Gain <output data-gain-output>100</output></span>
+          <input data-gain type="range" min="0" max="600" step="50" value="100" disabled>
         </label>
         <div class="control-actions">
           <button data-control="treatment-monochrome" type="button" disabled>B&amp;W</button>

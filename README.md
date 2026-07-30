@@ -27,6 +27,12 @@ show the complete native frame without asserting frame identity; until
 GRE-217 adds exact correlation, frame age, cadence, source generation, and
 visible latency remain unknown.
 
+The restart camera tuple defaults to 500 ms exposure, gain 100, and monochrome.
+It can be changed with `OBSCAM_DEFAULT_EXPOSURE_MS`, `OBSCAM_DEFAULT_GAIN`, and
+`OBSCAM_DEFAULT_TREATMENT`; startup fails closed unless the values are one of
+the curated exposure choices, a 0–600 gain detent in steps of 50, and either
+`monochrome` or `colour`.
+
 See:
 
 - `docs/agents/architecture.md` for binding local architecture guardrails

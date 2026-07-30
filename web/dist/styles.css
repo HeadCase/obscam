@@ -152,6 +152,12 @@ input:disabled {
   opacity: 0.54;
 }
 
+button[aria-pressed="true"] {
+  border-color: #aeb7c0;
+  color: #fff;
+  background: #39414a;
+}
+
 .take-control {
   min-height: auto;
   padding-inline: 0.65rem;

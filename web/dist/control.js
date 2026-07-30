@@ -2,6 +2,9 @@ const STORAGE_KEY = "obscam.control.v1";
 const LEASE_DURATION_MS = 5_000;
 const RENEWAL_INTERVAL_MS = 2_000;
 const RECONNECT_DELAY_MS = 500;
+const EXPOSURE_CHOICES_MS = new Set([
+    10, 20, 50, 100, 200, 300, 500, 1_000, 2_000, 5_000, 10_000, 15_000, 20_000, 30_000
+]);
 export function initialControlState(stored, runtimeEpoch = stored?.runtimeEpoch ?? "") {
     const credentials = stored !== null && stored.runtimeEpoch === runtimeEpoch && validCredentials(stored)
         ? stored
@@ -12,7 +15,14 @@ export function initialControlState(stored, runtimeEpoch = stored?.runtimeEpoch 
         generation: credentials?.generation ?? 0,
         credentials,
         credentialsValidated: false,
-        pendingIntent: false
+        pendingIntent: false,
+        settings: {
+            applied: {
+                generation: 0,
+                settings: { exposureMs: 500, gain: 100, treatment: "monochrome" }
+            },
+            pending: null
+        }
     });
 }
 export function reduceControl(state, event) {
@@ -85,16 +95,58 @@ export function reduceControl(state, event) {
                 storage = state.credentials === null ? "none" : "remove";
             }
             break;
-        case "rejected":
+        case "settings":
+            next = { ...state, settings: event.state };
+            break;
+        case "accepted":
             next = {
                 ...state,
-                ownership: state.ownership === "another_viewer" ? "another_viewer" : "no_one",
-                credentials: null,
-                credentialsValidated: false,
-                pendingIntent: false
+                pendingIntent: false,
+                settings: {
+                    ...state.settings,
+                    pending: { generation: event.targetGeneration, settings: event.settings }
+                }
             };
-            storage = state.credentials === null ? "none" : "remove";
             break;
+        case "applied":
+            next = {
+                ...state,
+                pendingIntent: false,
+                settings: {
+                    applied: { generation: event.settingsGeneration, settings: event.settings },
+                    pending: state.settings.pending !== null &&
+                        state.settings.pending.generation > event.settingsGeneration
+                        ? state.settings.pending
+                        : null
+                }
+            };
+            break;
+        case "failed":
+            next = {
+                ...state,
+                pendingIntent: false,
+                settings: {
+                    ...state.settings,
+                    pending: state.settings.pending?.generation === event.targetGeneration
+                        ? null
+                        : state.settings.pending
+                }
+            };
+            break;
+        case "rejected": {
+            const authorityLost = event.reason === undefined || ["not_holder", "expired"].includes(event.reason);
+            next = authorityLost
+                ? {
+                    ...state,
+                    ownership: state.ownership === "another_viewer" ? "another_viewer" : "no_one",
+                    credentials: null,
+                    credentialsValidated: false,
+                    pendingIntent: false
+                }
+                : { ...state, pendingIntent: false };
+            storage = authorityLost && state.credentials !== null ? "remove" : "none";
+            break;
+        }
         case "intent_queued":
             next = { ...state, pendingIntent: state.mayMutate };
             break;
@@ -136,9 +188,33 @@ export function parseControlMessage(value) {
             return { type: "released", generation: value.generation };
         }
     }
+    else if (value.type === "settings") {
+        const state = parseSettingsState(value.state);
+        if (state !== null) {
+            return { type: "settings", state };
+        }
+    }
+    else if (value.type === "accepted") {
+        const settings = parseCameraSettings(value.settings);
+        if (validGeneration(value.targetGeneration) && settings !== null) {
+            return { type: "accepted", targetGeneration: value.targetGeneration, settings };
+        }
+    }
+    else if (value.type === "applied") {
+        const settings = parseCameraSettings(value.settings);
+        if (validGeneration(value.settingsGeneration, true) && settings !== null) {
+            return { type: "applied", settingsGeneration: value.settingsGeneration, settings };
+        }
+    }
+    else if (value.type === "failed") {
+        if (validGeneration(value.targetGeneration) &&
+            (value.reason === "superseded" || value.reason === "recovery")) {
+            return { type: "failed", targetGeneration: value.targetGeneration, reason: value.reason };
+        }
+    }
     else if (value.type === "rejected") {
-        if (["not_holder", "expired", "malformed", "unsupported_schema"].includes(String(value.reason))) {
-            return { type: "rejected" };
+        if (isRejectionReason(value.reason)) {
+            return { type: "rejected", reason: value.reason };
         }
     }
     throw new Error("invalid control message");
@@ -180,6 +256,19 @@ export class ControlClient {
         else {
             this.send({ schemaVersion: 1, type: "take" });
         }
+    }
+    setSettings(settings) {
+        if (!this.state.mayMutate || this.state.pendingIntent || this.state.credentials === null) {
+            return;
+        }
+        this.transition({ type: "intent_queued" });
+        this.send({
+            schemaVersion: 1,
+            type: "set_settings",
+            generation: this.state.credentials.generation,
+            secret: this.state.credentials.secret,
+            settings
+        });
     }
     connect() {
         if (this.stopped) {
@@ -234,7 +323,8 @@ export class ControlClient {
             this.startRenewal();
             this.startLeaseWatchdog(message.leaseDurationMs);
         }
-        else if (message.type === "rejected" || message.type === "released") {
+        else if (message.type === "released" ||
+            (message.type === "rejected" && ["not_holder", "expired"].includes(message.reason))) {
             this.clearAuthorityTimers();
         }
         else if (message.type === "authority" && this.state.ownership !== "you") {
@@ -360,6 +450,45 @@ function validGeneration(value, zeroAllowed = false) {
 }
 function validSecret(value) {
     return typeof value === "string" && /^[0-9a-f]{64}$/u.test(value);
+}
+function parseSettingsState(value) {
+    if (!isRecord(value)) {
+        return null;
+    }
+    const applied = parseVersionedSettings(value.applied, true);
+    const pending = value.pending === null ? null : parseVersionedSettings(value.pending, false);
+    return applied !== null && (value.pending === null || pending !== null) ? { applied, pending } : null;
+}
+function parseVersionedSettings(value, zeroAllowed) {
+    if (!isRecord(value) || !validGeneration(value.generation, zeroAllowed)) {
+        return null;
+    }
+    const settings = parseCameraSettings(value.settings);
+    return settings === null ? null : { generation: value.generation, settings };
+}
+function parseCameraSettings(value) {
+    if (!isRecord(value) ||
+        typeof value.exposureMs !== "number" ||
+        !EXPOSURE_CHOICES_MS.has(value.exposureMs) ||
+        typeof value.gain !== "number" ||
+        !Number.isInteger(value.gain) ||
+        value.gain < 0 ||
+        value.gain > 600 ||
+        value.gain % 50 !== 0 ||
+        (value.treatment !== "monochrome" && value.treatment !== "colour")) {
+        return null;
+    }
+    return { exposureMs: value.exposureMs, gain: value.gain, treatment: value.treatment };
+}
+function isRejectionReason(value) {
+    return [
+        "not_holder",
+        "expired",
+        "malformed",
+        "unsupported_schema",
+        "invalid_settings",
+        "camera_unavailable"
+    ].includes(String(value));
 }
 function isRecord(value) {
     return typeof value === "object" && value !== null && !Array.isArray(value);

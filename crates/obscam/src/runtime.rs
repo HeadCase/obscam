@@ -3,7 +3,7 @@ use std::sync::{Arc, RwLock};
 use serde::Serialize;
 use uuid::Uuid;
 
-use crate::{AuthorityGate, Config, config::WhepPath};
+use crate::{AuthorityGate, Config, SettingsController, config::WhepPath};
 
 pub(crate) const SCHEMA_VERSION: u8 = 1;
 
@@ -12,6 +12,7 @@ pub(crate) const SCHEMA_VERSION: u8 = 1;
 pub struct RuntimeState {
     snapshot: Arc<RwLock<RuntimeSnapshot>>,
     authority: AuthorityGate,
+    settings: SettingsController,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -65,6 +66,7 @@ impl RuntimeState {
                 latest_frame: None,
             })),
             authority: AuthorityGate::new(),
+            settings: SettingsController::new(config.default_settings()),
         }
     }
 
@@ -99,6 +101,12 @@ impl RuntimeState {
     #[must_use]
     pub fn authority(&self) -> AuthorityGate {
         self.authority.clone()
+    }
+
+    /// Returns the one runtime-local settings coordinator.
+    #[must_use]
+    pub fn settings(&self) -> SettingsController {
+        self.settings.clone()
     }
 
     /// Revokes authority when the camera backend restarts or runtime recovery begins.

@@ -2,6 +2,25 @@ const STORAGE_KEY = "obscam.control.v1";
 const LEASE_DURATION_MS = 5_000;
 const RENEWAL_INTERVAL_MS = 2_000;
 const RECONNECT_DELAY_MS = 500;
+const EXPOSURE_CHOICES_MS = new Set([
+  10, 20, 50, 100, 200, 300, 500, 1_000, 2_000, 5_000, 10_000, 15_000, 20_000, 30_000
+]);
+
+export interface CameraSettings {
+  exposureMs: number;
+  gain: number;
+  treatment: "monochrome" | "colour";
+}
+
+export interface VersionedSettings {
+  generation: number;
+  settings: CameraSettings;
+}
+
+export interface SettingsState {
+  applied: VersionedSettings;
+  pending: VersionedSettings | null;
+}
 
 export interface StoredCredentials {
   runtimeEpoch: string;
@@ -16,6 +35,7 @@ export interface ControlState {
   credentials: StoredCredentials | null;
   credentialsValidated: boolean;
   pendingIntent: boolean;
+  settings: SettingsState;
   mayMutate: boolean;
 }
 
@@ -27,7 +47,11 @@ export type ControlEvent =
   | { type: "resumed"; generation: number }
   | { type: "renewed"; generation: number }
   | { type: "released"; generation: number }
-  | { type: "rejected" }
+  | { type: "settings"; state: SettingsState }
+  | { type: "accepted"; targetGeneration: number; settings: CameraSettings }
+  | { type: "applied"; settingsGeneration: number; settings: CameraSettings }
+  | { type: "failed"; targetGeneration: number; reason: "superseded" | "recovery" }
+  | { type: "rejected"; reason?: RejectionReason }
   | { type: "intent_queued" };
 
 export interface ControlTransition {
@@ -49,7 +73,19 @@ type ControlMessage =
       leaseDurationMs: typeof LEASE_DURATION_MS;
     }
   | { type: "released"; generation: number }
-  | { type: "rejected" };
+  | { type: "settings"; state: SettingsState }
+  | { type: "accepted"; targetGeneration: number; settings: CameraSettings }
+  | { type: "applied"; settingsGeneration: number; settings: CameraSettings }
+  | { type: "failed"; targetGeneration: number; reason: "superseded" | "recovery" }
+  | { type: "rejected"; reason: RejectionReason };
+
+type RejectionReason =
+  | "not_holder"
+  | "expired"
+  | "malformed"
+  | "unsupported_schema"
+  | "invalid_settings"
+  | "camera_unavailable";
 
 export function initialControlState(
   stored: StoredCredentials | null,
@@ -65,7 +101,14 @@ export function initialControlState(
     generation: credentials?.generation ?? 0,
     credentials,
     credentialsValidated: false,
-    pendingIntent: false
+    pendingIntent: false,
+    settings: {
+      applied: {
+        generation: 0,
+        settings: { exposureMs: 500, gain: 100, treatment: "monochrome" }
+      },
+      pending: null
+    }
   });
 }
 
@@ -140,16 +183,60 @@ export function reduceControl(state: ControlState, event: ControlEvent): Control
         storage = state.credentials === null ? "none" : "remove";
       }
       break;
-    case "rejected":
+    case "settings":
+      next = { ...state, settings: event.state };
+      break;
+    case "accepted":
       next = {
         ...state,
-        ownership: state.ownership === "another_viewer" ? "another_viewer" : "no_one",
-        credentials: null,
-        credentialsValidated: false,
-        pendingIntent: false
+        pendingIntent: false,
+        settings: {
+          ...state.settings,
+          pending: { generation: event.targetGeneration, settings: event.settings }
+        }
       };
-      storage = state.credentials === null ? "none" : "remove";
       break;
+    case "applied":
+      next = {
+        ...state,
+        pendingIntent: false,
+        settings: {
+          applied: { generation: event.settingsGeneration, settings: event.settings },
+          pending:
+            state.settings.pending !== null &&
+            state.settings.pending.generation > event.settingsGeneration
+              ? state.settings.pending
+              : null
+        }
+      };
+      break;
+    case "failed":
+      next = {
+        ...state,
+        pendingIntent: false,
+        settings: {
+          ...state.settings,
+          pending:
+            state.settings.pending?.generation === event.targetGeneration
+              ? null
+              : state.settings.pending
+        }
+      };
+      break;
+    case "rejected": {
+      const authorityLost = event.reason === undefined || ["not_holder", "expired"].includes(event.reason);
+      next = authorityLost
+        ? {
+            ...state,
+            ownership: state.ownership === "another_viewer" ? "another_viewer" : "no_one",
+            credentials: null,
+            credentialsValidated: false,
+            pendingIntent: false
+          }
+        : { ...state, pendingIntent: false };
+      storage = authorityLost && state.credentials !== null ? "remove" : "none";
+      break;
+    }
     case "intent_queued":
       next = { ...state, pendingIntent: state.mayMutate };
       break;
@@ -191,9 +278,31 @@ export function parseControlMessage(value: unknown): ControlMessage {
     if (validGeneration(value.generation)) {
       return { type: "released", generation: value.generation };
     }
+  } else if (value.type === "settings") {
+    const state = parseSettingsState(value.state);
+    if (state !== null) {
+      return { type: "settings", state };
+    }
+  } else if (value.type === "accepted") {
+    const settings = parseCameraSettings(value.settings);
+    if (validGeneration(value.targetGeneration) && settings !== null) {
+      return { type: "accepted", targetGeneration: value.targetGeneration, settings };
+    }
+  } else if (value.type === "applied") {
+    const settings = parseCameraSettings(value.settings);
+    if (validGeneration(value.settingsGeneration, true) && settings !== null) {
+      return { type: "applied", settingsGeneration: value.settingsGeneration, settings };
+    }
+  } else if (value.type === "failed") {
+    if (
+      validGeneration(value.targetGeneration) &&
+      (value.reason === "superseded" || value.reason === "recovery")
+    ) {
+      return { type: "failed", targetGeneration: value.targetGeneration, reason: value.reason };
+    }
   } else if (value.type === "rejected") {
-    if (["not_holder", "expired", "malformed", "unsupported_schema"].includes(String(value.reason))) {
-      return { type: "rejected" };
+    if (isRejectionReason(value.reason)) {
+      return { type: "rejected", reason: value.reason };
     }
   }
   throw new Error("invalid control message");
@@ -238,6 +347,20 @@ export class ControlClient {
     } else {
       this.send({ schemaVersion: 1, type: "take" });
     }
+  }
+
+  setSettings(settings: CameraSettings): void {
+    if (!this.state.mayMutate || this.state.pendingIntent || this.state.credentials === null) {
+      return;
+    }
+    this.transition({ type: "intent_queued" });
+    this.send({
+      schemaVersion: 1,
+      type: "set_settings",
+      generation: this.state.credentials.generation,
+      secret: this.state.credentials.secret,
+      settings
+    });
   }
 
   private connect(): void {
@@ -292,7 +415,10 @@ export class ControlClient {
     if (message.type === "resumed" || message.type === "renewed") {
       this.startRenewal();
       this.startLeaseWatchdog(message.leaseDurationMs);
-    } else if (message.type === "rejected" || message.type === "released") {
+    } else if (
+      message.type === "released" ||
+      (message.type === "rejected" && ["not_holder", "expired"].includes(message.reason))
+    ) {
       this.clearAuthorityTimers();
     } else if (message.type === "authority" && this.state.ownership !== "you") {
       this.clearAuthorityTimers();
@@ -440,6 +566,51 @@ function validGeneration(value: unknown, zeroAllowed = false): value is number {
 
 function validSecret(value: unknown): value is string {
   return typeof value === "string" && /^[0-9a-f]{64}$/u.test(value);
+}
+
+function parseSettingsState(value: unknown): SettingsState | null {
+  if (!isRecord(value)) {
+    return null;
+  }
+  const applied = parseVersionedSettings(value.applied, true);
+  const pending = value.pending === null ? null : parseVersionedSettings(value.pending, false);
+  return applied !== null && (value.pending === null || pending !== null) ? { applied, pending } : null;
+}
+
+function parseVersionedSettings(value: unknown, zeroAllowed: boolean): VersionedSettings | null {
+  if (!isRecord(value) || !validGeneration(value.generation, zeroAllowed)) {
+    return null;
+  }
+  const settings = parseCameraSettings(value.settings);
+  return settings === null ? null : { generation: value.generation, settings };
+}
+
+function parseCameraSettings(value: unknown): CameraSettings | null {
+  if (
+    !isRecord(value) ||
+    typeof value.exposureMs !== "number" ||
+    !EXPOSURE_CHOICES_MS.has(value.exposureMs) ||
+    typeof value.gain !== "number" ||
+    !Number.isInteger(value.gain) ||
+    value.gain < 0 ||
+    value.gain > 600 ||
+    value.gain % 50 !== 0 ||
+    (value.treatment !== "monochrome" && value.treatment !== "colour")
+  ) {
+    return null;
+  }
+  return { exposureMs: value.exposureMs, gain: value.gain, treatment: value.treatment };
+}
+
+function isRejectionReason(value: unknown): value is RejectionReason {
+  return [
+    "not_holder",
+    "expired",
+    "malformed",
+    "unsupported_schema",
+    "invalid_settings",
+    "camera_unavailable"
+  ].includes(String(value));
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
