@@ -244,7 +244,7 @@ fn handle_settings_mutation(
         return ControlResponse::rejected(RejectionReason::InvalidSettings);
     };
     match authority.accept(&credentials, now, || controller.accept(requested)) {
-        Ok(target) => ControlResponse {
+        Ok(Ok(target)) => ControlResponse {
             message: ServerMessage::Accepted {
                 schema_version: SCHEMA_VERSION,
                 target_generation: target.generation(),
@@ -252,6 +252,7 @@ fn handle_settings_mutation(
             },
             expiry: None,
         },
+        Ok(Err(_)) => ControlResponse::rejected(RejectionReason::CameraUnavailable),
         Err(rejection) => ControlResponse::rejected(rejection.into()),
     }
 }
@@ -432,6 +433,7 @@ enum RejectionReason {
     Malformed,
     UnsupportedSchema,
     InvalidSettings,
+    CameraUnavailable,
 }
 
 impl From<AuthorityRejection> for RejectionReason {

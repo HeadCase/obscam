@@ -171,3 +171,14 @@ test("invalid settings rejection keeps a healthy lease", () => {
   assert.deepEqual(rejected.state.credentials, credentials);
   assert.equal(rejected.state.pendingIntent, false);
 });
+
+test("camera recovery rejection is a valid non-authority failure", () => {
+  assert.deepEqual(
+    parseControlMessage({
+      schemaVersion: 1,
+      type: "rejected",
+      reason: "camera_unavailable"
+    }),
+    { type: "rejected", reason: "camera_unavailable" }
+  );
+});

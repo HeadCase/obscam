@@ -1,4 +1,7 @@
-use std::sync::{Arc, Mutex};
+use std::sync::{
+    Arc, Mutex,
+    atomic::{AtomicBool, Ordering},
+};
 
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -179,6 +182,7 @@ struct SettingsState {
     applying: Option<SettingsTarget>,
     next_generation: u64,
     last_failure: Option<(u64, SettingsFailure)>,
+    camera_ready: bool,
 }
 
 /// Bounded RAM-only coordinator between the authority gate and camera owner.
@@ -187,6 +191,7 @@ pub struct SettingsController {
     state: Arc<Mutex<SettingsState>>,
     interrupter: Arc<Mutex<Option<CaptureInterrupter>>>,
     updates: broadcast::Sender<SettingsEvent>,
+    applied_colour: Arc<AtomicBool>,
 }
 
 impl SettingsController {
@@ -204,21 +209,29 @@ impl SettingsController {
                 applying: None,
                 next_generation: 0,
                 last_failure: None,
+                camera_ready: false,
             })),
             interrupter: Arc::new(Mutex::new(None)),
             updates,
+            applied_colour: Arc::new(AtomicBool::new(defaults.treatment() == Treatment::Colour)),
         }
     }
 
     /// Reserves a generation and replaces any older work that has not started applying.
     ///
+    /// # Errors
+    ///
+    /// Returns [`SettingsUnavailable`] while no camera owner can apply mutations.
+    ///
     /// # Panics
     ///
     /// Panics if an internal mutex is poisoned or the generation space is exhausted.
-    #[must_use]
-    pub fn accept(&self, settings: CameraSettings) -> SettingsTarget {
+    pub fn accept(&self, settings: CameraSettings) -> Result<SettingsTarget, SettingsUnavailable> {
         let (target, superseded) = {
             let mut state = self.state.lock().expect("settings mutex poisoned");
+            if !state.camera_ready {
+                return Err(SettingsUnavailable);
+            }
             state.next_generation = state
                 .next_generation
                 .checked_add(1)
@@ -248,7 +261,7 @@ impl SettingsController {
         {
             interrupter.interrupt();
         }
-        target
+        Ok(target)
     }
 
     /// Claims the newest pending target for the single camera-owner thread.
@@ -284,17 +297,22 @@ impl SettingsController {
             state.applied = target;
             target
         };
+        self.applied_colour.store(
+            applied.settings.treatment() == Treatment::Colour,
+            Ordering::Release,
+        );
         let _ = self.updates.send(SettingsEvent::Applied(applied));
     }
 
-    /// Fails all accepted work while retaining the previous fully applied tuple.
+    /// Starts camera recovery, failing accepted work and retaining the applied tuple.
     ///
     /// # Panics
     ///
     /// Panics if an internal mutex is poisoned.
-    pub fn fail_recovery(&self) {
+    pub fn begin_recovery(&self) {
         let failed = {
             let mut state = self.state.lock().expect("settings mutex poisoned");
+            state.camera_ready = false;
             let mut failed = Vec::with_capacity(2);
             if let Some(target) = state.applying.take() {
                 failed.push(target);
@@ -313,6 +331,18 @@ impl SettingsController {
                 reason: SettingsFailure::Recovery,
             });
         }
+    }
+
+    /// Allows mutations after the camera owner has restored the applied tuple.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the internal mutex is poisoned.
+    pub fn mark_camera_ready(&self) {
+        self.state
+            .lock()
+            .expect("settings mutex poisoned")
+            .camera_ready = true;
     }
 
     /// Installs the current camera owner's thread-safe capture interruption handle.
@@ -337,7 +367,7 @@ impl SettingsController {
         let state = self.state.lock().expect("settings mutex poisoned");
         SettingsSnapshot {
             applied: state.applied,
-            pending: state.applying.or(state.pending),
+            pending: state.pending.or(state.applying),
         }
     }
 
@@ -357,4 +387,17 @@ impl SettingsController {
     pub(crate) fn subscribe(&self) -> broadcast::Receiver<SettingsEvent> {
         self.updates.subscribe()
     }
+
+    pub(crate) fn applied_treatment(&self) -> Treatment {
+        if self.applied_colour.load(Ordering::Acquire) {
+            Treatment::Colour
+        } else {
+            Treatment::Monochrome
+        }
+    }
 }
+
+/// Camera settings cannot be accepted while the camera owner is recovering.
+#[derive(Clone, Copy, Debug, Eq, Error, PartialEq)]
+#[error("camera settings are unavailable during camera recovery")]
+pub struct SettingsUnavailable;

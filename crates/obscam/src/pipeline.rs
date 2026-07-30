@@ -75,7 +75,11 @@ impl MediaPipeline {
             .name(capture_thread_name.into())
             .spawn(move || match connect() {
                 Ok(source) => capture(source, &runtime, &raw, minimum_capture_interval),
-                Err(error) => tracing::error!(%error, "camera source unavailable"),
+                Err(error) => {
+                    runtime.settings().begin_recovery();
+                    runtime.set_capture_readiness(ComponentReadiness::Unavailable);
+                    tracing::error!(%error, "camera source unavailable");
+                }
             })?;
         Ok(Self {
             _capture: capture,
@@ -98,20 +102,28 @@ fn capture(
         .configure(defaults.camera_settings())
         .and_then(|()| source.start())
     {
+        settings.begin_recovery();
+        runtime.set_capture_readiness(ComponentReadiness::Unavailable);
         tracing::error!(%error, "camera capture could not start");
         return;
     }
+    settings.mark_camera_ready();
     runtime.set_capture_readiness(ComponentReadiness::Ready);
 
     loop {
-        if let Some(target) = settings.claim_latest() {
-            if let Err(error) = apply_settings(&mut source, target, raw, &settings) {
-                settings.fail_recovery();
+        match apply_pending_settings(&mut source, &settings, |generation| {
+            raw.begin_epoch(generation);
+        }) {
+            Ok(SettingsTransition::Applied(_)) => continue,
+            Ok(SettingsTransition::Idle) => {}
+            Ok(SettingsTransition::Restored { error, .. }) => {
+                tracing::warn!(%error, "camera settings transition failed; applied tuple restored");
+            }
+            Err(restore_error) => {
                 runtime.set_capture_readiness(ComponentReadiness::Unavailable);
-                tracing::error!(%error, "camera settings transition failed");
+                tracing::error!(%restore_error, "camera settings recovery failed");
                 return;
             }
-            continue;
         }
         let started = Instant::now();
         let epoch = raw.current_epoch();
@@ -119,6 +131,7 @@ fn capture(
             Ok(frame) => raw.publish(epoch, frame.generation(), frame.data()),
             Err(CaptureError::Timeout | CaptureError::Interrupted) => {}
             Err(error) => {
+                settings.begin_recovery();
                 runtime.set_capture_readiness(ComponentReadiness::Unavailable);
                 tracing::error!(%error, "camera capture stopped");
                 return;
@@ -130,18 +143,58 @@ fn capture(
     }
 }
 
-fn apply_settings(
+/// Applies at most one claimed settings target through the camera-owner lifecycle.
+///
+/// The boundary callback is invoked exactly once after capture restarts and before
+/// the target becomes authoritative as Applied.
+///
+/// # Errors
+///
+/// Returns a camera lifecycle error without marking the target Applied.
+///
+/// # Panics
+///
+/// Panics if the settings coordinator's internal invariants are violated.
+pub fn apply_pending_settings(
     source: &mut impl CameraSource,
-    target: SettingsTarget,
-    raw: &LatestBufferMailbox,
     controller: &crate::SettingsController,
-) -> Result<(), zwo_asi::CameraError> {
-    source.stop()?;
-    source.configure(target.settings().camera_settings())?;
-    source.start()?;
-    raw.begin_epoch(target.generation());
+    begin_epoch: impl FnOnce(u64),
+) -> Result<SettingsTransition, zwo_asi::CameraError> {
+    let Some(target) = controller.claim_latest() else {
+        return Ok(SettingsTransition::Idle);
+    };
+    let previous = controller.snapshot().applied().settings();
+    let transition = source
+        .stop()
+        .and_then(|()| source.configure(target.settings().camera_settings()))
+        .and_then(|()| source.start());
+    if let Err(error) = transition {
+        controller.begin_recovery();
+        source.stop()?;
+        source.configure(previous.camera_settings())?;
+        source.start()?;
+        controller.mark_camera_ready();
+        return Ok(SettingsTransition::Restored { target, error });
+    }
+    begin_epoch(target.generation());
     controller.mark_applied(target);
-    Ok(())
+    Ok(SettingsTransition::Applied(target))
+}
+
+/// Outcome of one bounded settings transition attempt.
+#[derive(Debug)]
+pub enum SettingsTransition {
+    /// No settings target was pending.
+    Idle,
+    /// The target restarted capture and became Applied.
+    Applied(SettingsTarget),
+    /// Applying failed, the target was failed, and the prior tuple was restored.
+    Restored {
+        /// Target that failed before becoming Applied.
+        target: SettingsTarget,
+        /// Camera error that triggered restoration.
+        error: zwo_asi::CameraError,
+    },
 }
 
 fn spawn_processing(
@@ -160,19 +213,14 @@ fn spawn_processing(
                 };
                 let generation = source.generation();
                 let epoch = source.epoch();
-                match settings.snapshot().applied().settings().treatment() {
-                    Treatment::Monochrome => {
-                        let output = processor.process_validated(generation, source.data());
-                        if raw.is_current_epoch(epoch) {
-                            processed.publish_in_epoch(epoch, &output);
-                        }
-                    }
+                let output = match settings.applied_treatment() {
+                    Treatment::Monochrome => processor.process_validated(generation, source.data()),
                     Treatment::Colour => {
-                        let output = colour_processor.process_validated(generation, source.data());
-                        if raw.is_current_epoch(epoch) {
-                            processed.publish_in_epoch(epoch, &output);
-                        }
+                        colour_processor.process_validated(generation, source.data())
                     }
+                };
+                if raw.is_current_epoch(epoch) {
+                    processed.publish_in_epoch(epoch, &output);
                 }
                 raw.recycle(source);
             }

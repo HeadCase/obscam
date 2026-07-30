@@ -481,7 +481,14 @@ function parseCameraSettings(value) {
     return { exposureMs: value.exposureMs, gain: value.gain, treatment: value.treatment };
 }
 function isRejectionReason(value) {
-    return ["not_holder", "expired", "malformed", "unsupported_schema", "invalid_settings"].includes(String(value));
+    return [
+        "not_holder",
+        "expired",
+        "malformed",
+        "unsupported_schema",
+        "invalid_settings",
+        "camera_unavailable"
+    ].includes(String(value));
 }
 function isRecord(value) {
     return typeof value === "object" && value !== null && !Array.isArray(value);

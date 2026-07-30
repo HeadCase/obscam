@@ -142,6 +142,23 @@ async fn complete_tuple_is_accepted_then_applied_and_invalid_detents_are_rejecte
         receive_type(&mut socket, "rejected").await["reason"],
         "invalid_settings"
     );
+
+    state.settings().begin_recovery();
+    send(
+        &mut socket,
+        json!({
+            "schemaVersion": 1,
+            "type": "set_settings",
+            "generation": grant["generation"],
+            "secret": grant["secret"],
+            "settings": { "exposureMs": 50, "gain": 350, "treatment": "colour" }
+        }),
+    )
+    .await;
+    assert_eq!(
+        receive_type(&mut socket, "rejected").await["reason"],
+        "camera_unavailable"
+    );
 }
 
 async fn spawn_service() -> SocketAddr {
@@ -154,6 +171,7 @@ async fn spawn_service_with_state() -> (SocketAddr, RuntimeState) {
     let bind_address = address.to_string();
     let config = Config::parse(&bind_address, "8889", "/obscam/whep").expect("config");
     let state = RuntimeState::unavailable(Uuid::new_v4(), &config);
+    state.settings().mark_camera_ready();
     let service_state = state.clone();
     tokio::spawn(async move {
         obscam::serve(listener, service_state)

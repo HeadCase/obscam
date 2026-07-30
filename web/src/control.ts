@@ -84,7 +84,8 @@ type RejectionReason =
   | "expired"
   | "malformed"
   | "unsupported_schema"
-  | "invalid_settings";
+  | "invalid_settings"
+  | "camera_unavailable";
 
 export function initialControlState(
   stored: StoredCredentials | null,
@@ -602,9 +603,14 @@ function parseCameraSettings(value: unknown): CameraSettings | null {
 }
 
 function isRejectionReason(value: unknown): value is RejectionReason {
-  return ["not_holder", "expired", "malformed", "unsupported_schema", "invalid_settings"].includes(
-    String(value)
-  );
+  return [
+    "not_holder",
+    "expired",
+    "malformed",
+    "unsupported_schema",
+    "invalid_settings",
+    "camera_unavailable"
+  ].includes(String(value));
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
