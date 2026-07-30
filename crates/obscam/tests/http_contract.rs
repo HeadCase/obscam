@@ -70,6 +70,7 @@ async fn production_assets_expose_the_complete_unavailable_viewer_shell() {
     assert!(html.contains("data-viewer-frame"));
     assert!(html.contains("data-viewer-video"));
     assert!(html.contains("data-control=\"take-control\""));
+    assert!(html.contains("data-control-status"));
     assert!(html.contains("data-control=\"snapshot\""));
     assert!(html.contains("data-control=\"treatment-monochrome\""));
     assert!(html.contains("data-control=\"treatment-colour\""));
@@ -86,6 +87,13 @@ async fn production_assets_expose_the_complete_unavailable_viewer_shell() {
         "{script_head}"
     );
     assert!(script.contains("parseRuntimeContract"));
+
+    let (control_head, control) = get(address, "/assets/control.js").await;
+    assert!(
+        control_head.contains("content-type: text/javascript"),
+        "{control_head}"
+    );
+    assert!(control.contains("ControlClient"));
 
     let (style_head, style) = get(address, "/assets/styles.css").await;
     assert!(

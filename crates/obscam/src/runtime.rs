@@ -3,7 +3,7 @@ use std::sync::{Arc, RwLock};
 use serde::Serialize;
 use uuid::Uuid;
 
-use crate::{Config, config::WhepPath};
+use crate::{AuthorityGate, Config, config::WhepPath};
 
 pub(crate) const SCHEMA_VERSION: u8 = 1;
 
@@ -11,6 +11,7 @@ pub(crate) const SCHEMA_VERSION: u8 = 1;
 #[derive(Clone, Debug)]
 pub struct RuntimeState {
     snapshot: Arc<RwLock<RuntimeSnapshot>>,
+    authority: AuthorityGate,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -63,6 +64,7 @@ impl RuntimeState {
                 },
                 latest_frame: None,
             })),
+            authority: AuthorityGate::new(),
         }
     }
 
@@ -74,6 +76,9 @@ impl RuntimeState {
     }
 
     pub(crate) fn set_capture_readiness(&self, readiness: ComponentReadiness) {
+        if readiness == ComponentReadiness::Unavailable {
+            self.authority.revoke();
+        }
         self.snapshot
             .write()
             .expect("runtime state lock poisoned")
@@ -88,6 +93,17 @@ impl RuntimeState {
             .expect("runtime state lock poisoned")
             .components
             .encoder = ComponentStatus::from_readiness(readiness, UnavailableReason::NoFrame);
+    }
+
+    /// Returns the one runtime-local mutation authority gate.
+    #[must_use]
+    pub fn authority(&self) -> AuthorityGate {
+        self.authority.clone()
+    }
+
+    /// Revokes authority when the camera backend restarts or runtime recovery begins.
+    pub fn revoke_authority(&self) {
+        self.authority.revoke();
     }
 }
 

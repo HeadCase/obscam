@@ -11,6 +11,10 @@ const APP: &str = include_str!(concat!(
     env!("CARGO_MANIFEST_DIR"),
     "/../../web/dist/app.js"
 ));
+const CONTROL: &str = include_str!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../../web/dist/control.js"
+));
 const MODEL: &str = include_str!(concat!(
     env!("CARGO_MANIFEST_DIR"),
     "/../../web/dist/model.js"
@@ -30,6 +34,10 @@ pub(crate) async fn index() -> Response<Body> {
 
 pub(crate) async fn app() -> Response<Body> {
     response("text/javascript; charset=utf-8", APP)
+}
+
+pub(crate) async fn control() -> Response<Body> {
+    response("text/javascript; charset=utf-8", CONTROL)
 }
 
 pub(crate) async fn model() -> Response<Body> {
