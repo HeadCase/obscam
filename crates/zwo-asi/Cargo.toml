@@ -9,6 +9,7 @@ rust-version.workspace = true
 thiserror = "2"
 
 [features]
+camera-substitute = []
 sdk-stub = []
 
 [build-dependencies]

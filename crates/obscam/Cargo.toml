@@ -5,6 +5,9 @@ edition.workspace = true
 license.workspace = true
 rust-version.workspace = true
 
+[features]
+camera-substitute = []
+
 [dependencies]
 axum = "0.8"
 serde = { version = "1", features = ["derive"] }

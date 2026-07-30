@@ -11,6 +11,12 @@ use std::sync::{
 
 use thiserror::Error;
 
+#[cfg(feature = "camera-substitute")]
+mod deterministic;
+
+#[cfg(feature = "camera-substitute")]
+pub use deterministic::{CapturePlan, DeterministicCamera, DeterministicScenario};
+
 /// Exact SDK model name accepted by `ObsCam`.
 pub const MODEL: &str = "ZWO ASI662MC";
 /// Exact factory serial accepted by `ObsCam`.
@@ -48,6 +54,18 @@ impl Settings {
             return Err(SettingsError::Gain);
         }
         Ok(Self { exposure_us, gain })
+    }
+
+    /// Configured exposure duration in microseconds.
+    #[must_use]
+    pub const fn exposure_us(self) -> i64 {
+        self.exposure_us
+    }
+
+    /// Configured sensor gain.
+    #[must_use]
+    pub const fn gain(self) -> i64 {
+        self.gain
     }
 }
 
@@ -149,6 +167,23 @@ pub enum CaptureError {
         /// Invalid vendor value.
         count: i32,
     },
+    /// The source disconnected while capture was active.
+    #[error("camera disconnected")]
+    Disconnected,
+    /// A completed source frame did not have the required native dimensions.
+    #[error("camera frame dimensions were {width}x{height}, expected 1920x1080")]
+    MalformedDimensions {
+        /// Reported frame width.
+        width: usize,
+        /// Reported frame height.
+        height: usize,
+    },
+    /// A completed source frame did not contain one full RAW8 byte per pixel.
+    #[error("camera frame length was {length}, expected 2073600")]
+    MalformedLength {
+        /// Reported byte length.
+        length: usize,
+    },
     /// Capture was requested outside the running state.
     #[error("camera is not capturing")]
     NotCapturing,
@@ -163,6 +198,40 @@ impl CaptureInterrupter {
     pub fn interrupt(&self) {
         self.0.store(true, Ordering::Release);
     }
+}
+
+/// Capture lifecycle shared by the production owner and explicit substitutes.
+pub trait CameraSource {
+    /// Returns a thread-safe interruption request handle.
+    fn interrupter(&self) -> CaptureInterrupter;
+
+    /// Applies one validated complete settings tuple while capture is stopped.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`CameraError`] when the lifecycle state rejects configuration.
+    fn configure(&mut self, settings: Settings) -> Result<(), CameraError>;
+
+    /// Starts continuously warm acquisition.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`CameraError`] when the source is unconfigured or already running.
+    fn start(&mut self) -> Result<(), CameraError>;
+
+    /// Performs one bounded wait for the newest complete generation.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`CaptureError`] for lifecycle, interruption, timeout, or source failures.
+    fn capture_next(&mut self, wait_ms: i32) -> Result<FrameGeneration<'_>, CaptureError>;
+
+    /// Stops acquisition. Calling stop when already stopped is harmless.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`CameraError`] when the source cannot stop.
+    fn stop(&mut self) -> Result<(), CameraError>;
 }
 
 /// One validated full-frame RAW8 generation borrowed from the fixed pool.
@@ -427,6 +496,28 @@ impl CameraOwner {
         self.closed = true;
         let close = check("close camera", ffi::close(self.id));
         stop.and(close)
+    }
+}
+
+impl CameraSource for CameraOwner {
+    fn interrupter(&self) -> CaptureInterrupter {
+        Self::interrupter(self)
+    }
+
+    fn configure(&mut self, settings: Settings) -> Result<(), CameraError> {
+        Self::configure(self, settings)
+    }
+
+    fn start(&mut self) -> Result<(), CameraError> {
+        Self::start(self)
+    }
+
+    fn capture_next(&mut self, wait_ms: i32) -> Result<FrameGeneration<'_>, CaptureError> {
+        Self::capture_next(self, wait_ms)
+    }
+
+    fn stop(&mut self) -> Result<(), CameraError> {
+        Self::stop(self)
     }
 }
 

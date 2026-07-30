@@ -11,6 +11,7 @@ pub struct Config {
     bind_address: SocketAddr,
     whep_port: NonZeroU16,
     whep_path: WhepPath,
+    camera_source: CameraSourceSelection,
 }
 
 impl Config {
@@ -24,7 +25,8 @@ impl Config {
         let bind_address = environment_value("OBSCAM_BIND_ADDRESS", "0.0.0.0:8080")?;
         let whep_port = environment_value("OBSCAM_WHEP_PORT", "8889")?;
         let whep_path = environment_value("OBSCAM_WHEP_PATH", "/obscam/whep")?;
-        Self::parse(&bind_address, &whep_port, &whep_path)
+        let camera_source = environment_value("OBSCAM_CAMERA_SOURCE", "production")?;
+        Self::parse_with_camera_source(&bind_address, &whep_port, &whep_path, &camera_source)
     }
 
     /// Parses and validates the complete startup configuration.
@@ -38,6 +40,21 @@ impl Config {
         whep_port: &str,
         whep_path: &str,
     ) -> Result<Self, ConfigError> {
+        Self::parse_with_camera_source(bind_address, whep_port, whep_path, "production")
+    }
+
+    /// Parses complete startup configuration with an explicit camera source.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ConfigError`] when a value cannot be normalized or when the
+    /// requested source is not present in this build.
+    pub fn parse_with_camera_source(
+        bind_address: &str,
+        whep_port: &str,
+        whep_path: &str,
+        camera_source: &str,
+    ) -> Result<Self, ConfigError> {
         let bind_address = bind_address
             .parse()
             .map_err(|_| ConfigError::InvalidBindAddress)?;
@@ -47,11 +64,13 @@ impl Config {
             .and_then(NonZeroU16::new)
             .ok_or(ConfigError::InvalidWhepPort)?;
         let whep_path = WhepPath::parse(whep_path)?;
+        let camera_source = CameraSourceSelection::parse(camera_source)?;
 
         Ok(Self {
             bind_address,
             whep_port,
             whep_path,
+            camera_source,
         })
     }
 
@@ -73,8 +92,43 @@ impl Config {
         self.whep_path.as_str()
     }
 
+    /// Explicitly selected camera hardware boundary.
+    #[must_use]
+    pub const fn camera_source(&self) -> CameraSourceSelection {
+        self.camera_source
+    }
+
     pub(crate) fn whep_path_value(&self) -> WhepPath {
         self.whep_path.clone()
+    }
+}
+
+/// Camera hardware boundary selected for this process.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum CameraSourceSelection {
+    /// Exact production ASI662MC owner.
+    Production,
+    /// Feature-gated deterministic development and acceptance source.
+    #[cfg(feature = "camera-substitute")]
+    Deterministic,
+}
+
+impl CameraSourceSelection {
+    fn parse(value: &str) -> Result<Self, ConfigError> {
+        match value {
+            "production" => Ok(Self::Production),
+            "deterministic" => {
+                #[cfg(feature = "camera-substitute")]
+                {
+                    Ok(Self::Deterministic)
+                }
+                #[cfg(not(feature = "camera-substitute"))]
+                {
+                    Err(ConfigError::CameraSubstituteUnavailable)
+                }
+            }
+            _ => Err(ConfigError::InvalidCameraSource),
+        }
     }
 }
 
@@ -132,4 +186,10 @@ pub enum ConfigError {
     /// WHEP path would exceed the fixed runtime-state bound.
     #[error("OBSCAM_WHEP_PATH must not exceed 256 bytes")]
     WhepPathTooLong,
+    /// Camera source selection is not one of the supported explicit names.
+    #[error("OBSCAM_CAMERA_SOURCE must be production or deterministic")]
+    InvalidCameraSource,
+    /// The deterministic source was requested from a production build.
+    #[error("OBSCAM_CAMERA_SOURCE=deterministic requires the camera-substitute feature")]
+    CameraSubstituteUnavailable,
 }
