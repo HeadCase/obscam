@@ -14,11 +14,12 @@ use zwo_asi::{DeterministicCamera, DeterministicScenario};
 
 use crate::{
     ColourProcessor, ComponentReadiness, FfmpegEncoder, LatestFrameMailbox, MonochromeProcessor,
-    RuntimeState, SettingsTarget, Treatment,
+    RuntimeState, Treatment,
     latest::{EpochFence, LatestBufferMailbox},
 };
 
 const RAW8_BYTES: usize = WIDTH * HEIGHT;
+const SETTINGS_RECOVERY_RETRY_DELAY: Duration = Duration::from_secs(1);
 
 /// Detached continuously warm capture, processing, and publication workers.
 pub struct MediaPipeline {
@@ -114,15 +115,16 @@ fn capture(
         match apply_pending_settings(&mut source, &settings, |generation| {
             raw.begin_epoch(generation);
         }) {
-            Ok(SettingsTransition::Applied(_)) => continue,
+            Ok(SettingsTransition::Applied) => continue,
             Ok(SettingsTransition::Idle) => {}
-            Ok(SettingsTransition::Restored { error, .. }) => {
+            Ok(SettingsTransition::Restored(error)) => {
                 tracing::warn!(%error, "camera settings transition failed; applied tuple restored");
             }
             Err(restore_error) => {
                 runtime.set_capture_readiness(ComponentReadiness::Unavailable);
                 tracing::error!(%restore_error, "camera settings recovery failed");
-                return;
+                restore_applied_settings(&mut source, &settings);
+                runtime.set_capture_readiness(ComponentReadiness::Ready);
             }
         }
         let started = Instant::now();
@@ -155,7 +157,7 @@ fn capture(
 /// # Panics
 ///
 /// Panics if the settings coordinator's internal invariants are violated.
-pub fn apply_pending_settings(
+fn apply_pending_settings(
     source: &mut impl CameraSource,
     controller: &crate::SettingsController,
     begin_epoch: impl FnOnce(u64),
@@ -174,27 +176,46 @@ pub fn apply_pending_settings(
         source.configure(previous.camera_settings())?;
         source.start()?;
         controller.mark_camera_ready();
-        return Ok(SettingsTransition::Restored { target, error });
+        return Ok(SettingsTransition::Restored(error));
     }
     begin_epoch(target.generation());
     controller.mark_applied(target);
-    Ok(SettingsTransition::Applied(target))
+    Ok(SettingsTransition::Applied)
 }
 
 /// Outcome of one bounded settings transition attempt.
 #[derive(Debug)]
-pub enum SettingsTransition {
+enum SettingsTransition {
     /// No settings target was pending.
     Idle,
     /// The target restarted capture and became Applied.
-    Applied(SettingsTarget),
+    Applied,
     /// Applying failed, the target was failed, and the prior tuple was restored.
-    Restored {
-        /// Target that failed before becoming Applied.
-        target: SettingsTarget,
-        /// Camera error that triggered restoration.
-        error: zwo_asi::CameraError,
-    },
+    Restored(zwo_asi::CameraError),
+}
+
+fn restore_applied_settings(
+    source: &mut impl CameraSource,
+    controller: &crate::SettingsController,
+) {
+    loop {
+        let applied = controller.snapshot().applied().settings();
+        let restoration = source
+            .stop()
+            .and_then(|()| source.configure(applied.camera_settings()))
+            .and_then(|()| source.start());
+        match restoration {
+            Ok(()) => {
+                controller.mark_camera_ready();
+                tracing::info!("camera settings recovery completed");
+                return;
+            }
+            Err(error) => {
+                tracing::error!(%error, "camera settings recovery retry failed");
+                thread::sleep(SETTINGS_RECOVERY_RETRY_DELAY);
+            }
+        }
+    }
 }
 
 fn spawn_processing(
@@ -261,4 +282,207 @@ fn spawn_encoder(
                 mailbox.recycle(frame);
             }
         })
+}
+
+#[cfg(all(test, feature = "camera-substitute"))]
+mod tests {
+    use super::*;
+    use crate::{CameraSettings, SettingsController};
+    use zwo_asi::{DeterministicCamera, DeterministicScenario, Settings};
+
+    #[test]
+    fn pending_tuple_runs_the_complete_camera_and_generation_transition() {
+        let mut camera =
+            DeterministicCamera::connect(DeterministicScenario::new([])).expect("camera present");
+        camera
+            .configure(Settings::new(500_000, 100).expect("defaults"))
+            .expect("configure");
+        camera.start().expect("start");
+        let controller = ready_controller();
+        controller.install_interrupter(camera.interrupter());
+        let target = controller
+            .accept(CameraSettings::new(20, 200, Treatment::Colour).expect("target"))
+            .expect("camera ready");
+        assert_eq!(
+            camera.capture_next(100).err(),
+            Some(CaptureError::Interrupted)
+        );
+        let mut boundaries = Vec::new();
+
+        let transition = apply_pending_settings(&mut camera, &controller, |generation| {
+            boundaries.push(generation);
+        })
+        .expect("transition");
+        assert!(matches!(transition, SettingsTransition::Applied));
+
+        assert_eq!(boundaries, [target.generation()]);
+        assert_eq!(controller.snapshot().applied(), target);
+        let frame = camera
+            .capture_next(100)
+            .expect("matching-generation capture");
+        assert_eq!(frame.data()[258 * WIDTH + 258], 171, "gain 200 applied");
+    }
+
+    #[test]
+    fn failed_apply_restores_only_the_previous_fully_applied_tuple() {
+        let mut inner =
+            DeterministicCamera::connect(DeterministicScenario::new([])).expect("camera present");
+        inner
+            .configure(Settings::new(500_000, 100).expect("defaults"))
+            .expect("configure");
+        inner.start().expect("start");
+        let mut camera = FailNextConfiguration::new(inner);
+        let controller = ready_controller();
+        controller.install_interrupter(camera.interrupter());
+        let target = controller
+            .accept(CameraSettings::new(20, 600, Treatment::Colour).expect("target"))
+            .expect("camera ready");
+        let mut boundary_count = 0;
+
+        let transition = apply_pending_settings(&mut camera, &controller, |_| boundary_count += 1)
+            .expect("previous tuple restores");
+
+        assert!(matches!(transition, SettingsTransition::Restored(_)));
+        assert_eq!(
+            controller.last_failure().map(|(generation, _)| generation),
+            Some(target.generation())
+        );
+        assert_eq!(boundary_count, 0, "failed target establishes no boundary");
+        assert_eq!(controller.snapshot().applied().generation(), 0);
+        let frame = loop {
+            match camera.capture_next(100) {
+                Ok(frame) => break frame,
+                Err(CaptureError::Timeout) => {}
+                Err(error) => panic!("restored capture failed: {error}"),
+            }
+        };
+        assert_eq!(frame.data()[258 * WIDTH + 258], 166, "gain 100 restored");
+    }
+
+    #[test]
+    fn failed_compensating_restoration_retries_until_the_previous_tuple_is_live() {
+        let mut inner =
+            DeterministicCamera::connect(DeterministicScenario::new([])).expect("camera present");
+        inner
+            .configure(Settings::new(500_000, 100).expect("defaults"))
+            .expect("configure");
+        inner.start().expect("start");
+        let mut camera = FailNextConfigurations::new(inner, 3);
+        let controller = ready_controller();
+        controller.install_interrupter(camera.interrupter());
+        let _target = controller
+            .accept(CameraSettings::new(20, 600, Treatment::Colour).expect("target"))
+            .expect("camera ready");
+
+        assert!(apply_pending_settings(&mut camera, &controller, |_| {}).is_err());
+        restore_applied_settings(&mut camera, &controller);
+
+        assert!(
+            controller
+                .accept(CameraSettings::new(50, 200, Treatment::Monochrome).expect("next target"))
+                .is_ok(),
+            "successful restoration makes the camera ready for new intent"
+        );
+        let frame = loop {
+            match camera.capture_next(100) {
+                Ok(frame) => break frame,
+                Err(CaptureError::Interrupted | CaptureError::Timeout) => {}
+                Err(error) => panic!("restored capture failed: {error}"),
+            }
+        };
+        assert_eq!(frame.data()[258 * WIDTH + 258], 166, "gain 100 restored");
+    }
+
+    fn ready_controller() -> SettingsController {
+        let controller = SettingsController::new(CameraSettings::default());
+        controller.mark_camera_ready();
+        controller
+    }
+
+    struct FailNextConfiguration {
+        inner: DeterministicCamera,
+        fail_next: bool,
+    }
+
+    struct FailNextConfigurations {
+        inner: DeterministicCamera,
+        remaining: usize,
+    }
+
+    impl FailNextConfigurations {
+        const fn new(inner: DeterministicCamera, remaining: usize) -> Self {
+            Self { inner, remaining }
+        }
+    }
+
+    impl CameraSource for FailNextConfigurations {
+        fn interrupter(&self) -> zwo_asi::CaptureInterrupter {
+            self.inner.interrupter()
+        }
+
+        fn configure(&mut self, settings: Settings) -> Result<(), zwo_asi::CameraError> {
+            if self.remaining > 0 {
+                self.remaining -= 1;
+                return Err(zwo_asi::CameraError::InvalidState {
+                    operation: "injected repeated settings failure",
+                });
+            }
+            self.inner.configure(settings)
+        }
+
+        fn start(&mut self) -> Result<(), zwo_asi::CameraError> {
+            self.inner.start()
+        }
+
+        fn capture_next(
+            &mut self,
+            wait_ms: i32,
+        ) -> Result<zwo_asi::FrameGeneration<'_>, CaptureError> {
+            self.inner.capture_next(wait_ms)
+        }
+
+        fn stop(&mut self) -> Result<(), zwo_asi::CameraError> {
+            self.inner.stop()
+        }
+    }
+
+    impl FailNextConfiguration {
+        const fn new(inner: DeterministicCamera) -> Self {
+            Self {
+                inner,
+                fail_next: true,
+            }
+        }
+    }
+
+    impl CameraSource for FailNextConfiguration {
+        fn interrupter(&self) -> zwo_asi::CaptureInterrupter {
+            self.inner.interrupter()
+        }
+
+        fn configure(&mut self, settings: Settings) -> Result<(), zwo_asi::CameraError> {
+            if self.fail_next {
+                self.fail_next = false;
+                return Err(zwo_asi::CameraError::InvalidState {
+                    operation: "injected settings failure",
+                });
+            }
+            self.inner.configure(settings)
+        }
+
+        fn start(&mut self) -> Result<(), zwo_asi::CameraError> {
+            self.inner.start()
+        }
+
+        fn capture_next(
+            &mut self,
+            wait_ms: i32,
+        ) -> Result<zwo_asi::FrameGeneration<'_>, CaptureError> {
+            self.inner.capture_next(wait_ms)
+        }
+
+        fn stop(&mut self) -> Result<(), zwo_asi::CameraError> {
+            self.inner.stop()
+        }
+    }
 }

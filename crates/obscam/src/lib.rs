@@ -21,7 +21,7 @@ pub use config::{CameraSourceKind, Config, ConfigError};
 pub use encoder::FfmpegEncoder;
 pub use latest::{LatestFrameMailbox, PublishedFrame};
 pub use monochrome::{MonochromeFrame, MonochromeProcessor, ProcessedFrame};
-pub use pipeline::{MediaPipeline, SettingsTransition, apply_pending_settings};
+pub use pipeline::MediaPipeline;
 pub use runtime::{ComponentReadiness, RuntimeState};
 pub use service::serve;
 pub use settings::{
