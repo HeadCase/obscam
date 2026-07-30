@@ -1,4 +1,5 @@
 import { deriveViewerState, deriveWhepUrl, parseRuntimeContract } from "./model.js";
+import { ControlClient, type ControlState } from "./control.js";
 import { startWhep } from "./whep.js";
 
 async function boot(): Promise<void> {
@@ -6,6 +7,8 @@ async function boot(): Promise<void> {
   const detail = requiredElement("[data-viewer-detail]");
   const unavailable = requiredElement("[data-viewer-unavailable]");
   const video = requiredVideo("[data-viewer-video]");
+  const takeControl = requiredButton("[data-control=\"take-control\"]");
+  const controlStatus = requiredElement("[data-control-status]");
 
   try {
     const response = await fetch("/api/v1/runtime", {
@@ -17,6 +20,12 @@ async function boot(): Promise<void> {
     }
     const runtime = parseRuntimeContract(await response.json());
     const viewer = deriveViewerState(runtime);
+    const control = new ControlClient(runtime.runtimeEpoch, (state) =>
+      renderControl(state, takeControl, controlStatus)
+    );
+    takeControl.addEventListener("click", () => control.toggleAuthority());
+    control.start();
+    window.addEventListener("pagehide", () => control.close(), { once: true });
     status.textContent = viewer.status;
     detail.textContent = unavailableDetail(runtime.components);
     video.addEventListener(
@@ -40,8 +49,33 @@ async function boot(): Promise<void> {
   }
 }
 
+function renderControl(
+  state: ControlState,
+  takeControl: HTMLButtonElement,
+  controlStatus: HTMLElement
+): void {
+  takeControl.disabled = state.connection !== "connected" || state.pendingIntent;
+  takeControl.textContent = state.ownership === "you" ? "Release control" : "Take control";
+  controlStatus.textContent =
+    state.connection === "disconnected"
+      ? "Control reconnecting"
+      : state.ownership === "you"
+        ? "You have control"
+        : state.ownership === "another_viewer"
+          ? "Another viewer has control"
+          : "No one has control";
+}
+
 function requiredVideo(selector: string): HTMLVideoElement {
   const element = document.querySelector<HTMLVideoElement>(selector);
+  if (element === null) {
+    throw new Error(`viewer shell is missing ${selector}`);
+  }
+  return element;
+}
+
+function requiredButton(selector: string): HTMLButtonElement {
+  const element = document.querySelector<HTMLButtonElement>(selector);
   if (element === null) {
     throw new Error(`viewer shell is missing ${selector}`);
   }

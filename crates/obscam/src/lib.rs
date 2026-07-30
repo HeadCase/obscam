@@ -1,6 +1,7 @@
 //! Production `ObsCam` service.
 
 mod assets;
+mod authority;
 mod config;
 mod encoder;
 mod latest;
@@ -9,6 +10,10 @@ mod pipeline;
 mod runtime;
 mod service;
 
+pub use authority::{
+    AuthorityCredentials, AuthorityGate, AuthorityGrant, AuthorityLease, AuthorityRejection,
+    AuthoritySnapshot, AuthorityState,
+};
 pub use config::{CameraSourceKind, Config, ConfigError};
 pub use encoder::FfmpegEncoder;
 pub use latest::{LatestFrameMailbox, PublishedFrame};
