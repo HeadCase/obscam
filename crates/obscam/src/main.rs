@@ -1,6 +1,6 @@
 use std::error::Error;
 
-use obscam::{Config, RuntimeState};
+use obscam::{CameraSourceKind, Config, MediaPipeline, RuntimeState};
 use tokio::net::TcpListener;
 use tracing_subscriber::EnvFilter;
 use uuid::Uuid;
@@ -21,8 +21,33 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
         "ObsCam browser service ready"
     );
 
-    obscam::serve(listener, RuntimeState::unavailable(runtime_epoch, &config)).await?;
+    let runtime = RuntimeState::unavailable(runtime_epoch, &config);
+    let _pipeline = start_pipeline(config.camera_source(), runtime.clone())?;
+    obscam::serve(listener, runtime).await?;
     Ok(())
+}
+
+fn start_pipeline(
+    camera_source: CameraSourceKind,
+    runtime: RuntimeState,
+) -> Result<MediaPipeline, std::io::Error> {
+    match camera_source {
+        CameraSourceKind::Production => MediaPipeline::start(runtime),
+        CameraSourceKind::Deterministic => {
+            #[cfg(feature = "camera-substitute")]
+            {
+                MediaPipeline::start_deterministic(runtime)
+            }
+            #[cfg(not(feature = "camera-substitute"))]
+            {
+                let _ = runtime;
+                Err(std::io::Error::new(
+                    std::io::ErrorKind::InvalidInput,
+                    "deterministic camera requires the camera-substitute build feature",
+                ))
+            }
+        }
+    }
 }
 
 fn init_tracing() -> Result<(), Box<dyn Error + Send + Sync>> {

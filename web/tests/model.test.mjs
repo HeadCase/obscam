@@ -1,7 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { deriveViewerState, parseRuntimeContract } from "../dist/model.js";
+import {
+  deriveViewerState,
+  deriveWhepUrl,
+  parseRuntimeContract
+} from "../dist/model.js";
 
 const unavailableRuntime = {
   schemaVersion: 1,
@@ -66,4 +70,17 @@ test("component readiness is parsed independently without inventing a frame", ()
   assert.equal(runtime.components.encoder.state, "unavailable");
   assert.equal(runtime.components.relay.state, "ready");
   assert.deepEqual(deriveViewerState(runtime), { status: "Unavailable" });
+});
+
+test("WHEP endpoint keeps the page host and uses only the hostless media descriptor", () => {
+  const runtime = parseRuntimeContract(unavailableRuntime);
+
+  assert.equal(
+    deriveWhepUrl(runtime.media, "http://10.164.190.1:8080/view?ignored=yes#fragment"),
+    "http://10.164.190.1:8889/obscam/whep"
+  );
+  assert.equal(
+    deriveWhepUrl(runtime.media, "https://obscam.lan/view"),
+    "https://obscam.lan:8889/obscam/whep"
+  );
 });

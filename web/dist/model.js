@@ -1,3 +1,12 @@
+/** Derives a direct WHEP endpoint without accepting a media-supplied authority. */
+export function deriveWhepUrl(media, pageUrl) {
+    const endpoint = new URL(pageUrl);
+    endpoint.port = String(media.whepPort);
+    endpoint.pathname = media.whepPath;
+    endpoint.search = "";
+    endpoint.hash = "";
+    return endpoint.toString();
+}
 /** Validates the untrusted runtime payload and rejects unsupported frame claims. */
 export function parseRuntimeContract(value) {
     if (!isRecord(value) || value.schemaVersion !== 1) {

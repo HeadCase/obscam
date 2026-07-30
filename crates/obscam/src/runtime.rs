@@ -1,3 +1,5 @@
+use std::sync::{Arc, RwLock};
+
 use serde::Serialize;
 use uuid::Uuid;
 
@@ -6,13 +8,18 @@ use crate::{Config, config::WhepPath};
 pub(crate) const SCHEMA_VERSION: u8 = 1;
 
 /// Fixed-size, RAM-only facts exposed to browser clients.
+#[derive(Clone, Debug)]
+pub struct RuntimeState {
+    snapshot: Arc<RwLock<RuntimeSnapshot>>,
+}
+
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct RuntimeState {
+pub(crate) struct RuntimeSnapshot {
     schema_version: u8,
-    runtime_epoch: Uuid,
+    pub(crate) runtime_epoch: Uuid,
     media: MediaDescriptor,
-    components: Components,
+    pub(crate) components: Components,
     latest_frame: Option<LatestFrame>,
 }
 
@@ -39,30 +46,48 @@ impl RuntimeState {
         relay: ComponentReadiness,
     ) -> Self {
         Self {
-            schema_version: SCHEMA_VERSION,
-            runtime_epoch,
-            media: MediaDescriptor {
-                whep_port: config.whep_port(),
-                whep_path: config.whep_path_value(),
-            },
-            components: Components {
-                capture: ComponentStatus::from_readiness(
-                    capture,
-                    UnavailableReason::NoCameraSource,
-                ),
-                encoder: ComponentStatus::from_readiness(encoder, UnavailableReason::NoFrame),
-                relay: ComponentStatus::from_readiness(relay, UnavailableReason::NotObserved),
-            },
-            latest_frame: None,
+            snapshot: Arc::new(RwLock::new(RuntimeSnapshot {
+                schema_version: SCHEMA_VERSION,
+                runtime_epoch,
+                media: MediaDescriptor {
+                    whep_port: config.whep_port(),
+                    whep_path: config.whep_path_value(),
+                },
+                components: Components {
+                    capture: ComponentStatus::from_readiness(
+                        capture,
+                        UnavailableReason::NoCameraSource,
+                    ),
+                    encoder: ComponentStatus::from_readiness(encoder, UnavailableReason::NoFrame),
+                    relay: ComponentStatus::from_readiness(relay, UnavailableReason::NotObserved),
+                },
+                latest_frame: None,
+            })),
         }
     }
 
-    pub(crate) const fn runtime_epoch(&self) -> Uuid {
-        self.runtime_epoch
+    pub(crate) fn snapshot(&self) -> RuntimeSnapshot {
+        self.snapshot
+            .read()
+            .expect("runtime state lock poisoned")
+            .clone()
     }
 
-    pub(crate) const fn components(&self) -> &Components {
-        &self.components
+    pub(crate) fn set_capture_readiness(&self, readiness: ComponentReadiness) {
+        self.snapshot
+            .write()
+            .expect("runtime state lock poisoned")
+            .components
+            .capture =
+            ComponentStatus::from_readiness(readiness, UnavailableReason::NoCameraSource);
+    }
+
+    pub(crate) fn set_encoder_readiness(&self, readiness: ComponentReadiness) {
+        self.snapshot
+            .write()
+            .expect("runtime state lock poisoned")
+            .components
+            .encoder = ComponentStatus::from_readiness(readiness, UnavailableReason::NoFrame);
     }
 }
 

@@ -46,3 +46,30 @@ fn rejects_whep_path_that_exceeds_the_runtime_bound() {
 
     assert_eq!(error, ConfigError::WhepPathTooLong);
 }
+
+#[test]
+fn deterministic_camera_requires_an_explicit_configuration_value() {
+    let production = Config::parse("127.0.0.1:8080", "8889", "/obscam/whep")
+        .expect("default production configuration");
+    let deterministic =
+        Config::parse_with_camera_source("127.0.0.1:8080", "8889", "/obscam/whep", "deterministic")
+            .expect("explicit acceptance configuration");
+
+    assert_eq!(
+        production.camera_source(),
+        obscam::CameraSourceKind::Production
+    );
+    assert_eq!(
+        deterministic.camera_source(),
+        obscam::CameraSourceKind::Deterministic
+    );
+}
+
+#[test]
+fn unknown_camera_source_fails_closed() {
+    let error =
+        Config::parse_with_camera_source("127.0.0.1:8080", "8889", "/obscam/whep", "automatic")
+            .expect_err("camera boundary cannot be selected silently");
+
+    assert_eq!(error, ConfigError::InvalidCameraSource);
+}
