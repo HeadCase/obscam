@@ -69,6 +69,8 @@ async fn production_assets_expose_the_complete_unavailable_viewer_shell() {
     assert!(html.contains("data-viewer-status>Unavailable"));
     assert!(html.contains("data-viewer-frame"));
     assert!(html.contains("data-viewer-video"));
+    assert!(html.contains("data-service-status"));
+    assert!(html.contains("data-service-detail"));
     assert!(html.contains("data-control=\"take-control\""));
     assert!(html.contains("data-control-status"));
     assert!(html.contains("data-control=\"snapshot\""));
@@ -96,6 +98,13 @@ async fn production_assets_expose_the_complete_unavailable_viewer_shell() {
         "{control_head}"
     );
     assert!(control.contains("ControlClient"));
+
+    let (presentation_head, presentation) = get(address, "/assets/presentation.js").await;
+    assert!(
+        presentation_head.contains("content-type: text/javascript"),
+        "{presentation_head}"
+    );
+    assert!(presentation.contains("reducePresentation"));
 
     let (style_head, style) = get(address, "/assets/styles.css").await;
     assert!(

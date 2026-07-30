@@ -17,15 +17,17 @@ explicitly required; they are not implementation precedent.
 
 The production `obscam` Rust service now owns the continuously warm camera,
 reconstructs default neutral monochrome directly from full-resolution RAW8,
-and feeds one long-lived FFmpeg hardware-H.264 publication. Pinned MediaMTX
-fans that stream directly to origin-aware WHEP browser sessions. The service
+and feeds one long-lived FFmpeg hardware-H.264 publication through a bounded
+local RTP observer. Pinned MediaMTX ingests the unchanged observed stream and
+fans it directly to origin-aware WHEP browser sessions. The service
 still boots its HTTP contracts truthfully when camera or media components are
 unavailable.
 
-The embedded browser application is compiled from vanilla TypeScript. It can
-show the complete native frame without asserting frame identity; until
-GRE-217 adds exact correlation, frame age, cadence, source generation, and
-visible latency remain unknown.
+The embedded browser application is compiled from vanilla TypeScript. It
+matches `requestVideoFrameCallback` RTP metadata only against bounded,
+runtime/stream-epoch-scoped mappings broadcast by Rust. Missing, stale,
+evicted, reset, fractional, ambiguous, or conflicting evidence remains
+unknown; arrival order and the newest server frame are not substitutes.
 
 The restart camera tuple defaults to 500 ms exposure, gain 100, and monochrome.
 It can be changed with `OBSCAM_DEFAULT_EXPOSURE_MS`, `OBSCAM_DEFAULT_GAIN`, and

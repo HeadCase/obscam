@@ -1,11 +1,18 @@
 import { deriveViewerState, deriveWhepUrl, parseRuntimeContract } from "./model.js";
 import { ControlClient, type CameraSettings, type ControlState } from "./control.js";
 import { startWhep } from "./whep.js";
+import {
+  initialPresentationState,
+  reducePresentation,
+  type PresentationState
+} from "./presentation.js";
 
 async function boot(): Promise<void> {
   const status = requiredElement("[data-viewer-status]");
   const detail = requiredElement("[data-viewer-detail]");
   const unavailable = requiredElement("[data-viewer-unavailable]");
+  const serviceStatus = requiredElement("[data-service-status]");
+  const serviceDetail = requiredElement("[data-service-detail]");
   const video = requiredVideo("[data-viewer-video]");
   const takeControl = requiredButton("[data-control=\"take-control\"]");
   const controlStatus = requiredElement("[data-control-status]");
@@ -28,7 +35,15 @@ async function boot(): Promise<void> {
     const runtime = parseRuntimeContract(await response.json());
     const viewer = deriveViewerState(runtime);
     let latestSettings: CameraSettings = { exposureMs: 500, gain: 100, treatment: "monochrome" };
-    const control = new ControlClient(runtime.runtimeEpoch, (state) => {
+    let presentation: PresentationState = initialPresentationState(runtime.runtimeEpoch);
+    let control: ControlClient;
+    control = new ControlClient(runtime.runtimeEpoch, (state) => {
+      if (state.connection === "disconnected") {
+        presentation = reducePresentation(presentation, {
+          type: "reconnected",
+          streamEpoch: presentation.streamEpoch
+        }).state;
+      }
       latestSettings = state.settings.pending?.settings ?? state.settings.applied.settings;
       renderControl(
         state,
@@ -40,6 +55,8 @@ async function boot(): Promise<void> {
         monochrome,
         colour
       );
+    }, (mapping) => {
+      presentation = reducePresentation(presentation, { type: "mapping", mapping }).state;
     });
     takeControl.addEventListener("click", () => control.toggleAuthority());
     for (const button of exposureButtons) {
@@ -69,6 +86,30 @@ async function boot(): Promise<void> {
     );
     try {
       const session = await startWhep(video, deriveWhepUrl(runtime.media, window.location.href));
+      presentation = reducePresentation(presentation, {
+        type: "reconnected",
+        streamEpoch: presentation.streamEpoch
+      }).state;
+      watchPresentedFrames(video, (metadata) => {
+        const transition = reducePresentation(presentation, {
+          type: "presented",
+          ...(metadata.rtpTimestamp === undefined ? {} : { rtpTimestamp: metadata.rtpTimestamp }),
+          nowUnixUs: Date.now() * 1_000
+        });
+        presentation = transition.state;
+        if (transition.presented !== null) {
+          control.markVisible(transition.presented.settingsGeneration);
+          status.textContent = "Visible";
+          detail.textContent = `Generation ${transition.presented.sourceGeneration}`;
+          serviceStatus.textContent = "Visible";
+          serviceDetail.textContent = `Generation ${transition.presented.sourceGeneration}`;
+        } else {
+          status.textContent = "Unknown";
+          detail.textContent = "Frame correlation unavailable";
+          serviceStatus.textContent = "Unknown";
+          serviceDetail.textContent = "Frame correlation unavailable";
+        }
+      });
       window.addEventListener("pagehide", () => void session.close(), { once: true });
     } catch (error: unknown) {
       detail.textContent = "Media unavailable";
@@ -79,6 +120,17 @@ async function boot(): Promise<void> {
     detail.textContent = "Runtime status unavailable";
     console.error("ObsCam viewer bootstrap failed", error);
   }
+}
+
+function watchPresentedFrames(
+  video: HTMLVideoElement,
+  presented: (metadata: VideoFrameCallbackMetadata) => void
+): void {
+  const callback: VideoFrameRequestCallback = (_now, metadata) => {
+    presented(metadata);
+    video.requestVideoFrameCallback(callback);
+  };
+  video.requestVideoFrameCallback(callback);
 }
 
 function renderControl(

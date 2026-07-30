@@ -16,7 +16,7 @@ use uuid::Uuid;
 
 use crate::{
     AuthorityCredentials, AuthorityGate, AuthorityRejection, AuthoritySnapshot, CameraSettings,
-    SettingsController, SettingsFailure, SettingsSnapshot, Treatment, assets,
+    CorrelationMapping, SettingsController, SettingsFailure, SettingsSnapshot, Treatment, assets,
     authority::LEASE_DURATION_MS,
     runtime::{Components, RuntimeState, SCHEMA_VERSION},
     settings::SettingsEvent,
@@ -37,6 +37,7 @@ fn router(state: RuntimeState) -> Router {
         .route("/assets/app.js", get(assets::app))
         .route("/assets/control.js", get(assets::control))
         .route("/assets/model.js", get(assets::model))
+        .route("/assets/presentation.js", get(assets::presentation))
         .route("/assets/whep.js", get(assets::whep))
         .route("/assets/styles.css", get(assets::styles))
         .route("/api/v1/runtime", get(runtime))
@@ -54,6 +55,7 @@ async fn control_socket(mut socket: WebSocket, state: RuntimeState) {
     let settings = state.settings();
     let mut updates = authority.subscribe();
     let mut settings_updates = settings.subscribe();
+    let mut correlation_updates = state.correlation().subscribe();
     if let Err(error) =
         send_server(&mut socket, ServerMessage::authority(authority.snapshot())).await
     {
@@ -97,6 +99,21 @@ async fn control_socket(mut socket: WebSocket, state: RuntimeState) {
                 };
                 if let Err(error) = send_server(&mut socket, message).await {
                     tracing::debug!(%error, "control connection closed while broadcasting settings");
+                    return;
+                }
+            }
+            update = correlation_updates.recv() => {
+                let mapping = match update {
+                    Ok(mapping) => mapping,
+                    Err(broadcast::error::RecvError::Lagged(_)) => continue,
+                    Err(broadcast::error::RecvError::Closed) => return,
+                };
+                let message = ServerMessage::FrameMapping {
+                    schema_version: SCHEMA_VERSION,
+                    mapping,
+                };
+                if let Err(error) = send_server(&mut socket, message).await {
+                    tracing::debug!(%error, "control connection closed while broadcasting frame mapping");
                     return;
                 }
             }
@@ -365,6 +382,11 @@ impl ClientMessage {
     rename_all_fields = "camelCase"
 )]
 enum ServerMessage {
+    FrameMapping {
+        schema_version: u8,
+        #[serde(flatten)]
+        mapping: CorrelationMapping,
+    },
     Authority {
         schema_version: u8,
         state: crate::AuthorityState,
@@ -472,4 +494,42 @@ struct Health {
 #[serde(rename_all = "snake_case")]
 enum ServiceState {
     Ready,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{CorrelationTracker, FrameSubmission};
+
+    #[test]
+    fn frame_mapping_is_flattened_into_the_browser_websocket_contract() {
+        let runtime_epoch = Uuid::from_u128(1);
+        let mut tracker = CorrelationTracker::new(4, 4_500);
+        tracker.submit(FrameSubmission::new(
+            runtime_epoch,
+            2,
+            81,
+            7,
+            Treatment::Monochrome,
+            1920,
+            1080,
+            10_000,
+            20_000,
+            false,
+        ));
+        let mapping = tracker.anchor(0, 55_000).expect("exact mapping");
+
+        let value = serde_json::to_value(ServerMessage::FrameMapping {
+            schema_version: SCHEMA_VERSION,
+            mapping,
+        })
+        .expect("serialize mapping");
+
+        assert_eq!(value["type"], "frame_mapping");
+        assert_eq!(value["runtimeEpoch"], runtime_epoch.to_string());
+        assert_eq!(value["streamEpoch"], 2);
+        assert_eq!(value["rtpTimestamp"], 55_000);
+        assert_eq!(value["sourceGeneration"], 81);
+        assert_eq!(value["settingsGeneration"], 7);
+    }
 }

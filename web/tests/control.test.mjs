@@ -157,7 +157,36 @@ test("settings messages preserve complete accepted and applied tuples", () => {
     settings
   }).state;
   assert.deepEqual(state.settings.applied, { generation: 1, settings });
+  assert.deepEqual(state.settings.pending, { generation: 1, settings });
+
+  state = reduceControl(state, {
+    type: "visible",
+    settingsGeneration: 1
+  }).state;
   assert.equal(state.settings.pending, null);
+  assert.deepEqual(state.settings.visible, { generation: 1, settings });
+});
+
+test("presentation before applied still advances the exact target to visible", () => {
+  const settings = { exposureMs: 20, gain: 350, treatment: "colour" };
+  let state = reduceControl(initialControlState(null), {
+    type: "accepted",
+    targetGeneration: 1,
+    settings
+  }).state;
+
+  state = reduceControl(state, { type: "visible", settingsGeneration: 1 }).state;
+  assert.equal(state.settings.pending?.generation, 1);
+  assert.equal(state.settings.presentedGeneration, 1);
+
+  state = reduceControl(state, {
+    type: "applied",
+    settingsGeneration: 1,
+    settings
+  }).state;
+  assert.equal(state.settings.pending, null);
+  assert.equal(state.settings.presentedGeneration, null);
+  assert.deepEqual(state.settings.visible, { generation: 1, settings });
 });
 
 test("invalid settings rejection keeps a healthy lease", () => {

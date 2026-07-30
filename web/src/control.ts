@@ -1,3 +1,5 @@
+import { parseFrameMapping, type FrameMapping } from "./presentation.js";
+
 const STORAGE_KEY = "obscam.control.v1";
 const LEASE_DURATION_MS = 5_000;
 const RENEWAL_INTERVAL_MS = 2_000;
@@ -20,6 +22,8 @@ export interface VersionedSettings {
 export interface SettingsState {
   applied: VersionedSettings;
   pending: VersionedSettings | null;
+  visible: VersionedSettings | null;
+  presentedGeneration: number | null;
 }
 
 export interface StoredCredentials {
@@ -50,6 +54,7 @@ export type ControlEvent =
   | { type: "settings"; state: SettingsState }
   | { type: "accepted"; targetGeneration: number; settings: CameraSettings }
   | { type: "applied"; settingsGeneration: number; settings: CameraSettings }
+  | { type: "visible"; settingsGeneration: number }
   | { type: "failed"; targetGeneration: number; reason: "superseded" | "recovery" }
   | { type: "rejected"; reason?: RejectionReason }
   | { type: "intent_queued" };
@@ -107,7 +112,9 @@ export function initialControlState(
         generation: 0,
         settings: { exposureMs: 500, gain: 100, treatment: "monochrome" }
       },
-      pending: null
+      pending: null,
+      visible: null,
+      presentedGeneration: null
     }
   });
 }
@@ -184,7 +191,17 @@ export function reduceControl(state: ControlState, event: ControlEvent): Control
       }
       break;
     case "settings":
-      next = { ...state, settings: event.state };
+      next = {
+        ...state,
+        settings: {
+          ...event.state,
+          visible: state.settings.visible,
+          presentedGeneration:
+            event.state.pending?.generation === state.settings.presentedGeneration
+              ? state.settings.presentedGeneration
+              : null
+        }
+      };
       break;
     case "accepted":
       next = {
@@ -192,7 +209,8 @@ export function reduceControl(state: ControlState, event: ControlEvent): Control
         pendingIntent: false,
         settings: {
           ...state.settings,
-          pending: { generation: event.targetGeneration, settings: event.settings }
+          pending: { generation: event.targetGeneration, settings: event.settings },
+          presentedGeneration: null
         }
       };
       break;
@@ -203,12 +221,41 @@ export function reduceControl(state: ControlState, event: ControlEvent): Control
         settings: {
           applied: { generation: event.settingsGeneration, settings: event.settings },
           pending:
-            state.settings.pending !== null &&
-            state.settings.pending.generation > event.settingsGeneration
-              ? state.settings.pending
-              : null
+            state.settings.presentedGeneration === event.settingsGeneration
+              ? null
+              : state.settings.pending !== null &&
+                  state.settings.pending.generation >= event.settingsGeneration
+                ? state.settings.pending
+                : null,
+          visible:
+            state.settings.presentedGeneration === event.settingsGeneration
+              ? { generation: event.settingsGeneration, settings: event.settings }
+              : state.settings.visible,
+          presentedGeneration: null
         }
       };
+      break;
+    case "visible":
+      if (state.settings.pending?.generation === event.settingsGeneration) {
+        next = {
+          ...state,
+          settings: {
+            ...state.settings,
+            pending:
+              state.settings.applied.generation === event.settingsGeneration
+                ? null
+                : state.settings.pending,
+            visible:
+              state.settings.applied.generation === event.settingsGeneration
+                ? state.settings.applied
+                : state.settings.visible,
+            presentedGeneration:
+              state.settings.applied.generation === event.settingsGeneration
+                ? null
+                : event.settingsGeneration
+          }
+        };
+      }
       break;
     case "failed":
       next = {
@@ -219,7 +266,11 @@ export function reduceControl(state: ControlState, event: ControlEvent): Control
           pending:
             state.settings.pending?.generation === event.targetGeneration
               ? null
-              : state.settings.pending
+              : state.settings.pending,
+          presentedGeneration:
+            state.settings.presentedGeneration === event.targetGeneration
+              ? null
+              : state.settings.presentedGeneration
         }
       };
       break;
@@ -319,7 +370,8 @@ export class ControlClient {
 
   constructor(
     private readonly runtimeEpoch: string,
-    private readonly onState: (state: ControlState) => void
+    private readonly onState: (state: ControlState) => void,
+    private readonly onFrameMapping: (mapping: FrameMapping) => void = () => {}
   ) {
     this.state = initialControlState(readStoredCredentials(), runtimeEpoch);
   }
@@ -363,6 +415,10 @@ export class ControlClient {
     });
   }
 
+  markVisible(settingsGeneration: number): void {
+    this.transition({ type: "visible", settingsGeneration });
+  }
+
   private connect(): void {
     if (this.stopped) {
       return;
@@ -386,7 +442,12 @@ export class ControlClient {
         return;
       }
       try {
-        this.acceptServerMessage(parseControlMessage(JSON.parse(event.data)));
+        const value: unknown = JSON.parse(event.data);
+        if (isRecord(value) && value.type === "frame_mapping") {
+          this.onFrameMapping(parseFrameMapping(value));
+        } else {
+          this.acceptServerMessage(parseControlMessage(value));
+        }
       } catch (error: unknown) {
         console.error("ObsCam control message rejected", error);
         socket.close();
@@ -574,7 +635,9 @@ function parseSettingsState(value: unknown): SettingsState | null {
   }
   const applied = parseVersionedSettings(value.applied, true);
   const pending = value.pending === null ? null : parseVersionedSettings(value.pending, false);
-  return applied !== null && (value.pending === null || pending !== null) ? { applied, pending } : null;
+  return applied !== null && (value.pending === null || pending !== null)
+    ? { applied, pending, visible: null, presentedGeneration: null }
+    : null;
 }
 
 function parseVersionedSettings(value: unknown, zeroAllowed: boolean): VersionedSettings | null {
