@@ -14,7 +14,7 @@ use zwo_asi::{DeterministicCamera, DeterministicScenario};
 
 use crate::{
     ComponentReadiness, FfmpegEncoder, LatestFrameMailbox, MonochromeProcessor, RuntimeState,
-    latest::LatestBufferMailbox,
+    latest::{EpochFence, LatestBufferMailbox},
 };
 
 const RAW8_BYTES: usize = WIDTH * HEIGHT;
@@ -61,8 +61,12 @@ impl MediaPipeline {
         S: CameraSource,
         E: Display,
     {
-        let raw = Arc::new(LatestBufferMailbox::new(RAW8_BYTES));
-        let processed = Arc::new(LatestFrameMailbox::new());
+        let epoch_fence = EpochFence::new();
+        let raw = Arc::new(LatestBufferMailbox::with_epoch_fence(
+            RAW8_BYTES,
+            epoch_fence.clone(),
+        ));
+        let processed = Arc::new(LatestFrameMailbox::with_epoch_fence(epoch_fence));
         let encoder = spawn_encoder(Arc::clone(&processed), runtime.clone())?;
         let processing = spawn_processing(Arc::clone(&raw), Arc::clone(&processed))?;
         let capture = thread::Builder::new()
@@ -94,8 +98,9 @@ fn capture(
 
     loop {
         let started = Instant::now();
+        let epoch = raw.current_epoch();
         match source.capture_next(100) {
-            Ok(frame) => raw.publish(frame.generation(), frame.data()),
+            Ok(frame) => raw.publish(epoch, frame.generation(), frame.data()),
             Err(CaptureError::Timeout | CaptureError::Interrupted) => {}
             Err(error) => {
                 runtime.set_capture_readiness(ComponentReadiness::Unavailable);
@@ -122,9 +127,10 @@ fn spawn_processing(
                     continue;
                 };
                 let generation = source.generation();
+                let epoch = source.epoch();
                 let output = processor.process_validated(generation, source.data());
-                if !raw.is_obsolete(generation) {
-                    processed.publish(&output);
+                if raw.is_current_epoch(epoch) {
+                    processed.publish_in_epoch(epoch, &output);
                 }
                 raw.recycle(source);
             }
@@ -149,11 +155,13 @@ fn spawn_encoder(
                 let Some(frame) = mailbox.wait_take(Duration::from_secs(1)) else {
                     continue;
                 };
-                if mailbox.is_obsolete(frame.generation()) {
+                let publication =
+                    mailbox.commit_if_current(&frame, |current| encoder.publish(current));
+                let Some(publication) = publication else {
                     mailbox.recycle(frame);
                     continue;
-                }
-                if let Err(error) = encoder.publish(&frame) {
+                };
+                if let Err(error) = publication {
                     runtime.set_encoder_readiness(ComponentReadiness::Unavailable);
                     tracing::error!(%error, "FFmpeg hardware publication stopped");
                     mailbox.recycle(frame);

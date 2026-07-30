@@ -1,6 +1,6 @@
 use std::{
     sync::{
-        Condvar, Mutex,
+        Arc, Condvar, Mutex,
         atomic::{AtomicU64, Ordering},
     },
     time::Duration,
@@ -25,6 +25,12 @@ impl LatestFrameMailbox {
         }
     }
 
+    pub(crate) fn with_epoch_fence(epoch_fence: EpochFence) -> Self {
+        Self {
+            inner: LatestBufferMailbox::with_epoch_fence(I420_BYTES, epoch_fence),
+        }
+    }
+
     /// Copies a complete frame into the sole pending slot, replacing older work.
     ///
     /// # Panics
@@ -32,7 +38,20 @@ impl LatestFrameMailbox {
     /// Panics after mailbox mutex poisoning or violation of the single-consumer
     /// buffer-ownership invariant; either condition is an internal invariant failure.
     pub fn publish(&self, frame: &MonochromeFrame<'_>) {
-        self.inner.publish(frame.generation(), frame.data());
+        self.inner.publish_current(frame.generation(), frame.data());
+    }
+
+    pub(crate) fn publish_in_epoch(&self, epoch: MediaEpoch, frame: &MonochromeFrame<'_>) {
+        self.inner.publish(epoch, frame.generation(), frame.data());
+    }
+
+    pub(crate) fn commit_if_current<T>(
+        &self,
+        frame: &PublishedFrame,
+        commit: impl FnOnce(&PublishedFrame) -> T,
+    ) -> Option<T> {
+        self.inner
+            .commit_if_current(frame.0.epoch(), || commit(frame))
     }
 
     /// Takes the newest pending frame, leaving no queued work.
@@ -64,10 +83,18 @@ impl LatestFrameMailbox {
         self.inner.recycle(frame.0);
     }
 
-    /// Reports whether newer work arrived while this generation was executing.
+    /// Starts a new semantic media epoch and fences older pending and uncommitted output.
+    ///
+    /// Same-epoch source generations do not call this method: they replace only
+    /// pending work. Settings, treatment, stream, and runtime changes do.
+    pub fn begin_new_epoch(&self) {
+        self.inner.begin_new_epoch();
+    }
+
+    /// Reports whether claimed output still belongs to the current semantic epoch.
     #[must_use]
-    pub fn is_obsolete(&self, generation: u64) -> bool {
-        self.inner.is_obsolete(generation)
+    pub fn is_current(&self, frame: &PublishedFrame) -> bool {
+        self.inner.is_current(frame.0.identity)
     }
 }
 
@@ -80,25 +107,44 @@ impl Default for LatestFrameMailbox {
 pub(crate) struct LatestBufferMailbox {
     state: Mutex<State>,
     available: Condvar,
-    newest_generation: AtomicU64,
+    epoch_fence: EpochFence,
 }
 
 impl LatestBufferMailbox {
     pub(crate) fn new(buffer_bytes: usize) -> Self {
+        Self::with_epoch_fence(buffer_bytes, EpochFence::new())
+    }
+
+    pub(crate) fn with_epoch_fence(buffer_bytes: usize, epoch_fence: EpochFence) -> Self {
         Self {
             state: Mutex::new(State {
                 pending: None,
                 spare: vec![new_buffer(buffer_bytes), new_buffer(buffer_bytes)],
+                newest: None,
             }),
             available: Condvar::new(),
-            newest_generation: AtomicU64::new(0),
+            epoch_fence,
         }
     }
 
-    pub(crate) fn publish(&self, generation: u64, data: &[u8]) {
+    pub(crate) fn current_epoch(&self) -> MediaEpoch {
+        self.epoch_fence.current()
+    }
+
+    pub(crate) fn publish_current(&self, generation: u64, data: &[u8]) {
+        self.publish(self.current_epoch(), generation, data);
+    }
+
+    pub(crate) fn publish(&self, epoch: MediaEpoch, generation: u64, data: &[u8]) {
+        let identity = FrameIdentity { epoch, generation };
+        if !self.epoch_fence.is_current(epoch) {
+            return;
+        }
+
         let mut state = self.state.lock().expect("frame mailbox mutex poisoned");
-        let newest = self.newest_generation.load(Ordering::Relaxed);
-        if generation <= newest {
+        if !self.epoch_fence.is_current(epoch)
+            || state.newest.is_some_and(|newest| identity <= newest)
+        {
             return;
         }
 
@@ -108,19 +154,16 @@ impl LatestBufferMailbox {
                 .pop()
                 .expect("one buffer remains while the consumer owns at most one")
         });
-        pending.generation = generation;
+        pending.identity = identity;
         pending.data.copy_from_slice(data);
         state.pending = Some(pending);
-        self.newest_generation.store(generation, Ordering::Release);
+        state.newest = Some(identity);
         self.available.notify_one();
     }
 
     pub(crate) fn take(&self) -> Option<BufferGeneration> {
-        self.state
-            .lock()
-            .expect("frame mailbox mutex poisoned")
-            .pending
-            .take()
+        let mut state = self.state.lock().expect("frame mailbox mutex poisoned");
+        self.claim_pending(&mut state)
     }
 
     pub(crate) fn wait_take(&self, timeout: Duration) -> Option<BufferGeneration> {
@@ -129,7 +172,17 @@ impl LatestBufferMailbox {
             .available
             .wait_timeout_while(state, timeout, |state| state.pending.is_none())
             .expect("frame mailbox mutex poisoned while waiting");
-        state.pending.take()
+        self.claim_pending(&mut state)
+    }
+
+    fn claim_pending(&self, state: &mut State) -> Option<BufferGeneration> {
+        let pending = state.pending.take()?;
+        if self.is_current(pending.identity) {
+            Some(pending)
+        } else {
+            state.spare.push(pending);
+            None
+        }
     }
 
     pub(crate) fn recycle(&self, frame: BufferGeneration) {
@@ -140,24 +193,45 @@ impl LatestBufferMailbox {
             .push(frame);
     }
 
-    pub(crate) fn is_obsolete(&self, generation: u64) -> bool {
-        self.newest_generation.load(Ordering::Acquire) > generation
+    pub(crate) fn begin_new_epoch(&self) {
+        let mut state = self.state.lock().expect("frame mailbox mutex poisoned");
+        self.epoch_fence.advance();
+        if let Some(pending) = state.pending.take() {
+            state.spare.push(pending);
+        }
+    }
+
+    fn is_current(&self, identity: FrameIdentity) -> bool {
+        self.epoch_fence.is_current(identity.epoch)
+    }
+
+    pub(crate) fn is_current_epoch(&self, epoch: MediaEpoch) -> bool {
+        self.epoch_fence.is_current(epoch)
+    }
+
+    fn commit_if_current<T>(&self, epoch: MediaEpoch, commit: impl FnOnce() -> T) -> Option<T> {
+        self.epoch_fence.commit_if_current(epoch, commit)
     }
 }
 
 struct State {
     pending: Option<BufferGeneration>,
     spare: Vec<BufferGeneration>,
+    newest: Option<FrameIdentity>,
 }
 
 pub(crate) struct BufferGeneration {
-    generation: u64,
+    identity: FrameIdentity,
     data: Box<[u8]>,
 }
 
 impl BufferGeneration {
     pub(crate) const fn generation(&self) -> u64 {
-        self.generation
+        self.identity.generation
+    }
+
+    pub(crate) const fn epoch(&self) -> MediaEpoch {
+        self.identity.epoch
     }
 
     pub(crate) const fn data(&self) -> &[u8] {
@@ -184,7 +258,127 @@ impl PublishedFrame {
 
 fn new_buffer(buffer_bytes: usize) -> BufferGeneration {
     BufferGeneration {
-        generation: 0,
+        identity: FrameIdentity {
+            epoch: MediaEpoch(0),
+            generation: 0,
+        },
         data: vec![0; buffer_bytes].into_boxed_slice(),
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+struct FrameIdentity {
+    epoch: MediaEpoch,
+    generation: u64,
+}
+
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+pub(crate) struct MediaEpoch(u64);
+
+#[derive(Clone, Debug)]
+pub(crate) struct EpochFence(Arc<AtomicU64>);
+
+impl EpochFence {
+    pub(crate) fn new() -> Self {
+        Self(Arc::new(AtomicU64::new(0)))
+    }
+
+    fn current(&self) -> MediaEpoch {
+        MediaEpoch(self.0.load(Ordering::Acquire))
+    }
+
+    fn advance(&self) -> MediaEpoch {
+        let previous = self
+            .0
+            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |epoch| {
+                Some(epoch.saturating_add(1))
+            })
+            .expect("semantic media epoch update is infallible");
+        MediaEpoch(previous.saturating_add(1))
+    }
+
+    fn is_current(&self, epoch: MediaEpoch) -> bool {
+        self.current() == epoch
+    }
+
+    fn commit_if_current<T>(&self, epoch: MediaEpoch, commit: impl FnOnce() -> T) -> Option<T> {
+        // This load is the encoder publication's commit point. An epoch that
+        // advances afterward cannot relabel the already-committed frame, but
+        // it also cannot wait on or be delayed by the downstream write.
+        self.is_current(epoch).then(commit)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn high_rate_same_epoch_input_preserves_claimed_work_and_only_latest_pending() {
+        let mailbox = LatestBufferMailbox::new(1);
+        let epoch = mailbox.current_epoch();
+        mailbox.publish(epoch, 1, &[1]);
+        let claimed = mailbox.take().expect("first generation is claimed");
+
+        for generation in 2..=100 {
+            mailbox.publish(
+                epoch,
+                generation,
+                &[u8::try_from(generation).expect("bounded")],
+            );
+        }
+
+        assert!(mailbox.is_current_epoch(claimed.epoch()));
+        let pending = mailbox.take().expect("one pending generation remains");
+        assert_eq!(pending.generation(), 100);
+        assert_eq!(pending.data(), &[100]);
+    }
+
+    #[test]
+    fn advancing_a_shared_epoch_fences_every_handoff() {
+        let epoch_fence = EpochFence::new();
+        let raw = LatestBufferMailbox::with_epoch_fence(1, epoch_fence.clone());
+        let processed = LatestBufferMailbox::with_epoch_fence(1, epoch_fence);
+        let old_epoch = raw.current_epoch();
+        raw.publish(old_epoch, 1, &[1]);
+        let claimed = raw.take().expect("old raw generation is claimed");
+        processed.publish(old_epoch, 1, &[1]);
+
+        raw.begin_new_epoch();
+
+        assert!(!raw.is_current_epoch(claimed.epoch()));
+        assert!(processed.take().is_none(), "old processed output is fenced");
+        raw.publish(old_epoch, 2, &[2]);
+        assert!(raw.take().is_none(), "late old-epoch input is rejected");
+
+        let current_epoch = raw.current_epoch();
+        raw.publish(current_epoch, 1, &[3]);
+        assert_eq!(
+            raw.take()
+                .expect("new epoch can restart at generation one")
+                .data(),
+            &[3]
+        );
+    }
+
+    #[test]
+    fn epoch_advance_rejects_uncommitted_old_output_without_waiting_on_committed_work() {
+        let mailbox = LatestBufferMailbox::new(1);
+        let old_epoch = mailbox.current_epoch();
+
+        assert_eq!(
+            mailbox.commit_if_current(old_epoch, || {
+                mailbox.begin_new_epoch();
+                42
+            }),
+            Some(42),
+            "work committed before the boundary completes as the last old frame"
+        );
+        assert_ne!(mailbox.current_epoch(), old_epoch);
+        assert_eq!(
+            mailbox.commit_if_current(old_epoch, || 7),
+            None,
+            "old work not committed before the boundary is rejected"
+        );
     }
 }

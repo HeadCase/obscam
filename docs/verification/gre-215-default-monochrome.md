@@ -6,16 +6,23 @@ The continuously warm camera worker consumes the production `CameraSource`
 contract, applies the default 10 ms/gain 100 settings, and copies each newest
 validated 1920×1080 RAW8 RGGB generation into one replaceable pending slot. A
 separate processing worker converts that generation directly to I420 and
-discards its completed output if capture advanced while it was executing. Missing colour
-samples use fixed bilinear interpolation at the native frame edges as well as
-the interior. Full-range BT.601 integer coefficients (`77R + 150G + 29B`) form
-the luma plane; both quarter-resolution chroma planes remain neutral 128. No
-intermediate RGB frame or temporal image history exists.
+commits the claimed output even when newer same-epoch capture arrives. Newer
+input replaces only pending work. Missing colour samples use fixed bilinear
+interpolation at the native frame edges as well as the interior. Full-range
+BT.601 integer coefficients (`77R + 150G + 29B`) form the luma plane; both
+quarter-resolution chroma planes remain neutral 128. No intermediate RGB frame
+or temporal image history exists.
 
 Two two-buffer mailboxes separate capture from processing and processing from
 publication. Each owns at most one pending generation, overwrites obsolete work
-in place, and fences completed work against the newest input before the next
-seam. All processing and mailbox buffers are allocated once and reused.
+in place, and permits at most one claimed in-flight generation. One shared
+semantic epoch fences incompatible pending and claimed output after a settings,
+treatment, stream, or runtime change; ordinary source-generation advancement
+does not. Encoder publication has an atomic commit point before the blocking
+FFmpeg write. An epoch change rejects old output that has not crossed that
+point, while an already-committed frame may finish only as the truthful last
+old-settings frame. Epoch advancement never waits for FFmpeg. All processing
+and mailbox buffers are allocated once and reused.
 
 Rust starts one long-lived FFmpeg child with native I420 input,
 `h264_v4l2m2m`, 1.5 Mbps bitrate/maxrate/buffer, 20 fps input timing, a
@@ -39,9 +46,12 @@ with MediaMTX, and displays it in a muted `playsinline` video element with
   edge reconstruction, neutral chroma, generation preservation, and processing
   buffer reuse. A direct RAW8 mosaic copy produces four unequal values and
   fails the uniform-patch assertion.
-- Latest-only tests prove generations 1–3 collapse to one pending generation 3
-  and prove an in-flight generation becomes explicitly obsolete when a newer
-  generation arrives.
+- Latest-only tests prove generations 1–3 collapse to one pending generation 3,
+  high-rate generations 2–100 replace only the pending slot while generation 1
+  remains committable, and a shared semantic-epoch advance fences old pending,
+  claimed, and late-arriving output across both handoffs.
+- An exhaustive full-frame test compares the block-optimized monochrome hot path
+  with the straightforward bilinear reference at every pixel.
 - The FFmpeg boundary test feeds one real native-size I420 generation through a
   fake external executable and checks the exact hardware codec, bitrate,
   timing/GOP, RTSP transport, publication path, and input byte count. A missing
@@ -76,3 +86,43 @@ this deployed seam; its focused fault tests retain virtual time.
 Exact source-generation-to-browser-presentation correlation is intentionally
 deferred to GRE-217. Until that contract exists, presentation does not claim
 frame generation, age, cadence, or latency.
+
+## Real-camera correction smoke — 2026-07-30
+
+The first implementation incorrectly discarded a completed processing result
+whenever the production camera had advanced to a newer source generation. The
+20 fps deterministic source concealed this, while the real ASI662MC at roughly
+99 fps caused steady-state starvation: FFmpeg received no frame and MediaMTX
+had no publisher. The corrected implementation uses non-preemptive
+claim/commit semantics and the shared semantic epoch described above.
+
+The correction was verified on the real ASI662MC at the default 10 ms exposure
+with the release binary, hardware `h264_v4l2m2m`, pinned MediaMTX v1.19.3, and a
+Mac browser over WireGuard:
+
+- MediaMTX observed one sustained H.264 publisher on `obscam`; runtime capture
+  and encoder readiness were both `ready`.
+- The browser decoded and displayed the native 1920×1080 track with
+  `readyState=4`; the unavailable overlay was absent.
+- A settled 12.04-second one-viewer `requestVideoFrameCallback` sample presented
+  200 unique frames, or 16.61 fps. After block-optimizing the equivalent
+  monochrome conversion, a second 12.02-second sample presented 209 unique
+  frames, or 17.39 fps.
+- A separate 12.01-second playback-quality sample decoded 17.65 fps and
+  presented 17.40 fps with three dropped frames.
+- A local 12-second RTSP probe observed 231 frames at the declared 20 fps stream
+  rate (about 19.25 observed fps), localizing the remaining normal-target gap
+  after processing/publication rather than to starvation.
+- Four simultaneous WebRTC readers remained connected to the same shared H.264
+  track. The active browser tab decoded and presented 198 native frames over
+  12.01 seconds, or 16.49 fps, with zero browser-reported drops.
+- The release-process snapshot used about 40 MiB RSS. Processing, capture, and
+  encoder work remained on independent threads; neither MediaMTX nor viewers
+  backpressured capture through a queue.
+
+The real-camera correction passes the accepted 15 unique browser-presented fps
+hard gate and restores guaranteed progress under faster source input. It does
+not yet reach the 20 fps normal target over WireGuard; the measured shortfall is
+retained explicitly for GRE-208 field service-quality qualification rather than
+being reported as achieved. Exposure-transition timing remains GRE-216 and
+exact browser correlation remains GRE-217.

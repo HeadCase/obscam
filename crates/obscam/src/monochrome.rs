@@ -27,17 +27,98 @@ impl MonochromeProcessor {
         generation: u64,
         raw: &[u8],
     ) -> MonochromeFrame<'a> {
-        for y in 0..HEIGHT {
-            for x in 0..WIDTH {
-                let (red, green, blue) = reconstruct(raw, x, y);
-                self.output[y * WIDTH + x] = luminance(red, green, blue);
-            }
-        }
+        process_edges(raw, &mut self.output);
+        process_interior(raw, &mut self.output);
         MonochromeFrame {
             generation,
             data: &self.output,
         }
     }
+}
+
+fn process_edges(raw: &[u8], output: &mut [u8]) {
+    for x in 0..WIDTH {
+        output[x] = reconstructed_luminance(raw, x, 0);
+        output[(HEIGHT - 1) * WIDTH + x] = reconstructed_luminance(raw, x, HEIGHT - 1);
+    }
+    for y in 1..HEIGHT - 1 {
+        output[y * WIDTH] = reconstructed_luminance(raw, 0, y);
+        output[y * WIDTH + WIDTH - 1] = reconstructed_luminance(raw, WIDTH - 1, y);
+    }
+}
+
+fn process_interior(raw: &[u8], output: &mut [u8]) {
+    for blue_y in (1..HEIGHT - 1).step_by(2) {
+        let red_y = blue_y + 1;
+        let above = row(raw, blue_y - 1);
+        let blue_row = row(raw, blue_y);
+        let red_row = row(raw, red_y);
+        let below = row(raw, red_y + 1);
+
+        for blue_x in (1..WIDTH - 1).step_by(2) {
+            let red_x = blue_x + 1;
+
+            output[blue_y * WIDTH + blue_x] = luminance(
+                average4(
+                    above[blue_x - 1],
+                    above[blue_x + 1],
+                    red_row[blue_x - 1],
+                    red_row[blue_x + 1],
+                ),
+                average4(
+                    blue_row[blue_x - 1],
+                    blue_row[blue_x + 1],
+                    above[blue_x],
+                    red_row[blue_x],
+                ),
+                blue_row[blue_x],
+            );
+            output[blue_y * WIDTH + red_x] = luminance(
+                average2(above[red_x], red_row[red_x]),
+                blue_row[red_x],
+                average2(blue_row[blue_x], blue_row[red_x + 1]),
+            );
+            output[red_y * WIDTH + blue_x] = luminance(
+                average2(red_row[blue_x - 1], red_row[blue_x + 1]),
+                red_row[blue_x],
+                average2(blue_row[blue_x], below[blue_x]),
+            );
+            output[red_y * WIDTH + red_x] = luminance(
+                red_row[red_x],
+                average4(
+                    red_row[blue_x],
+                    red_row[red_x + 1],
+                    blue_row[red_x],
+                    below[red_x],
+                ),
+                average4(
+                    blue_row[blue_x],
+                    blue_row[red_x + 1],
+                    below[blue_x],
+                    below[red_x + 1],
+                ),
+            );
+        }
+    }
+}
+
+fn row(raw: &[u8], y: usize) -> &[u8] {
+    &raw[y * WIDTH..(y + 1) * WIDTH]
+}
+
+fn reconstructed_luminance(raw: &[u8], x: usize, y: usize) -> u8 {
+    let (red, green, blue) = reconstruct(raw, x, y);
+    luminance(red, green, blue)
+}
+
+fn average2(first: u8, second: u8) -> u8 {
+    u8::try_from(u16::midpoint(u16::from(first), u16::from(second)))
+        .expect("the midpoint of RAW8 samples remains RAW8")
+}
+
+fn average4(first: u8, second: u8, third: u8, fourth: u8) -> u8 {
+    let average = (u16::from(first) + u16::from(second) + u16::from(third) + u16::from(fourth)) / 4;
+    u8::try_from(average).expect("the average of RAW8 samples remains RAW8")
 }
 
 impl Default for MonochromeProcessor {
@@ -144,4 +225,33 @@ fn sample(raw: &[u8], x: usize, y: usize) -> u8 {
 const fn luminance(red: u8, green: u8, blue: u8) -> u8 {
     let weighted = 77 * red as u16 + 150 * green as u16 + 29 * blue as u16;
     ((weighted + 128) >> 8) as u8
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn block_processing_matches_the_bilinear_reference_at_every_pixel() {
+        let raw = (0..HEIGHT)
+            .flat_map(|y| {
+                (0..WIDTH).map(move |x| {
+                    u8::try_from((x * 17 + y * 31 + (x * y) % 251) % 256)
+                        .expect("pattern value is bounded to RAW8")
+                })
+            })
+            .collect::<Vec<_>>();
+        let mut processor = MonochromeProcessor::new();
+        let output = processor.process_validated(1, &raw);
+
+        for y in 0..HEIGHT {
+            for x in 0..WIDTH {
+                assert_eq!(
+                    output.data()[y * WIDTH + x],
+                    reconstructed_luminance(&raw, x, y),
+                    "bilinear luminance mismatch at ({x}, {y})"
+                );
+            }
+        }
+    }
 }

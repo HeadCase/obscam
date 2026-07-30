@@ -72,7 +72,7 @@ fn publication_keeps_only_the_newest_pending_generation() {
 }
 
 #[test]
-fn completed_output_is_discardable_when_a_newer_generation_arrives() {
+fn claimed_output_remains_committable_when_newer_work_arrives() {
     let mut camera = deterministic_camera();
     let mut processor = MonochromeProcessor::new();
     let mailbox = LatestFrameMailbox::new();
@@ -84,10 +84,31 @@ fn completed_output_is_discardable_when_a_newer_generation_arrives() {
     let second = camera.capture_next(100).expect("newer source generation");
     mailbox.publish(&processor.process(&second));
 
-    assert!(mailbox.is_obsolete(executing.generation()));
+    assert!(
+        mailbox.is_current(&executing),
+        "newer same-epoch work replaces only pending work"
+    );
     mailbox.recycle(executing);
     let replacement = mailbox.take().expect("newest publication remains");
     assert_eq!(replacement.generation(), 2);
+}
+
+#[test]
+fn new_epoch_fences_claimed_and_pending_output() {
+    let mut camera = deterministic_camera();
+    let mut processor = MonochromeProcessor::new();
+    let mailbox = LatestFrameMailbox::new();
+
+    let first = camera.capture_next(100).expect("first source generation");
+    mailbox.publish(&processor.process(&first));
+    let claimed = mailbox.take().expect("first publication starts");
+
+    let second = camera.capture_next(100).expect("second source generation");
+    mailbox.publish(&processor.process(&second));
+    mailbox.begin_new_epoch();
+
+    assert!(!mailbox.is_current(&claimed));
+    assert!(mailbox.take().is_none(), "old pending work was fenced");
 }
 
 fn deterministic_camera() -> DeterministicCamera {
