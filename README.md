@@ -15,15 +15,17 @@ explicitly required; they are not implementation precedent.
 
 ## Current status
 
-The production `obscam` Rust service now boots without camera or media
-dependencies and serves a truthful unavailable viewer. Its fixed-size,
-RAM-only bootstrap state gives every process an explicit runtime epoch and
-reports capture, encoder, and relay availability independently through
-`/api/v1/runtime` and `/api/v1/health`.
+The production `obscam` Rust service now owns the continuously warm camera,
+reconstructs default neutral monochrome directly from full-resolution RAW8,
+and feeds one supervised FFmpeg hardware-H.264 publication. Pinned MediaMTX
+fans that stream directly to origin-aware WHEP browser sessions. The service
+still boots its HTTP contracts truthfully when camera or media components are
+unavailable.
 
-The embedded browser application is compiled from vanilla TypeScript. Until a
-trustworthy frame is exactly correlated, it displays `Unavailable` and leaves
-frame age, cadence, source generation, and visible latency unknown.
+The embedded browser application is compiled from vanilla TypeScript. It can
+show the complete native frame without asserting frame identity; until
+GRE-217 adds exact correlation, frame age, cadence, source generation, and
+visible latency remain unknown.
 
 See:
 

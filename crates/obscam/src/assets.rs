@@ -15,6 +15,10 @@ const MODEL: &str = include_str!(concat!(
     env!("CARGO_MANIFEST_DIR"),
     "/../../web/dist/model.js"
 ));
+const WHEP: &str = include_str!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../../web/dist/whep.js"
+));
 const STYLES: &str = include_str!(concat!(
     env!("CARGO_MANIFEST_DIR"),
     "/../../web/dist/styles.css"
@@ -30,6 +34,10 @@ pub(crate) async fn app() -> Response<Body> {
 
 pub(crate) async fn model() -> Response<Body> {
     response("text/javascript; charset=utf-8", MODEL)
+}
+
+pub(crate) async fn whep() -> Response<Body> {
+    response("text/javascript; charset=utf-8", WHEP)
 }
 
 pub(crate) async fn styles() -> Response<Body> {

@@ -330,6 +330,7 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "uuid",
+ "zwo-asi",
 ]
 
 [[package]]

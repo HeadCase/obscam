@@ -1,0 +1,22 @@
+logLevel: info
+logDestinations: [stdout]
+
+rtsp: yes
+rtspTransports: [tcp]
+rtspAddress: 127.0.0.1:8554
+
+rtmp: no
+hls: no
+srt: no
+moq: no
+
+webrtc: yes
+webrtcAddress: :8889
+webrtcEncryption: no
+webrtcLocalUDPAddress: :8189
+webrtcIPsFromInterfaces: yes
+
+paths:
+  obscam:
+    source: publisher
+    overridePublisher: false

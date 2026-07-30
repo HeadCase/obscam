@@ -11,6 +11,7 @@ pub struct Config {
     bind_address: SocketAddr,
     whep_port: NonZeroU16,
     whep_path: WhepPath,
+    camera_source: CameraSourceKind,
 }
 
 impl Config {
@@ -24,7 +25,8 @@ impl Config {
         let bind_address = environment_value("OBSCAM_BIND_ADDRESS", "0.0.0.0:8080")?;
         let whep_port = environment_value("OBSCAM_WHEP_PORT", "8889")?;
         let whep_path = environment_value("OBSCAM_WHEP_PATH", "/obscam/whep")?;
-        Self::parse(&bind_address, &whep_port, &whep_path)
+        let camera_source = environment_value("OBSCAM_CAMERA_SOURCE", "production")?;
+        Self::parse_with_camera_source(&bind_address, &whep_port, &whep_path, &camera_source)
     }
 
     /// Parses and validates the complete startup configuration.
@@ -38,6 +40,20 @@ impl Config {
         whep_port: &str,
         whep_path: &str,
     ) -> Result<Self, ConfigError> {
+        Self::parse_with_camera_source(bind_address, whep_port, whep_path, "production")
+    }
+
+    /// Parses the complete startup configuration with an explicit camera boundary.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ConfigError`] when any host or camera-source value is invalid.
+    pub fn parse_with_camera_source(
+        bind_address: &str,
+        whep_port: &str,
+        whep_path: &str,
+        camera_source: &str,
+    ) -> Result<Self, ConfigError> {
         let bind_address = bind_address
             .parse()
             .map_err(|_| ConfigError::InvalidBindAddress)?;
@@ -47,11 +63,17 @@ impl Config {
             .and_then(NonZeroU16::new)
             .ok_or(ConfigError::InvalidWhepPort)?;
         let whep_path = WhepPath::parse(whep_path)?;
+        let camera_source = match camera_source {
+            "production" => CameraSourceKind::Production,
+            "deterministic" => CameraSourceKind::Deterministic,
+            _ => return Err(ConfigError::InvalidCameraSource),
+        };
 
         Ok(Self {
             bind_address,
             whep_port,
             whep_path,
+            camera_source,
         })
     }
 
@@ -73,9 +95,24 @@ impl Config {
         self.whep_path.as_str()
     }
 
+    /// Explicit camera hardware boundary selected for this process.
+    #[must_use]
+    pub const fn camera_source(&self) -> CameraSourceKind {
+        self.camera_source
+    }
+
     pub(crate) fn whep_path_value(&self) -> WhepPath {
         self.whep_path.clone()
     }
+}
+
+/// Camera boundary selected at startup.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum CameraSourceKind {
+    /// Exact production ASI662MC owner.
+    Production,
+    /// Feature-gated deterministic development and acceptance substitute.
+    Deterministic,
 }
 
 /// A bounded path that cannot supply its own media authority.
@@ -132,4 +169,7 @@ pub enum ConfigError {
     /// WHEP path would exceed the fixed runtime-state bound.
     #[error("OBSCAM_WHEP_PATH must not exceed 256 bytes")]
     WhepPathTooLong,
+    /// Camera source is not one of the two explicit boundary selections.
+    #[error("OBSCAM_CAMERA_SOURCE must be production or deterministic")]
+    InvalidCameraSource,
 }

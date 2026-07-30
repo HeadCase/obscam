@@ -24,22 +24,24 @@ fn router(state: RuntimeState) -> Router {
         .route("/", get(assets::index))
         .route("/assets/app.js", get(assets::app))
         .route("/assets/model.js", get(assets::model))
+        .route("/assets/whep.js", get(assets::whep))
         .route("/assets/styles.css", get(assets::styles))
         .route("/api/v1/runtime", get(runtime))
         .route("/api/v1/health", get(health))
         .with_state(state)
 }
 
-async fn runtime(State(state): State<RuntimeState>) -> Json<RuntimeState> {
-    Json(state)
+async fn runtime(State(state): State<RuntimeState>) -> Json<crate::runtime::RuntimeSnapshot> {
+    Json(state.snapshot())
 }
 
 async fn health(State(state): State<RuntimeState>) -> Json<Health> {
+    let snapshot = state.snapshot();
     Json(Health {
         schema_version: SCHEMA_VERSION,
-        runtime_epoch: state.runtime_epoch(),
+        runtime_epoch: snapshot.runtime_epoch,
         service: ServiceState::Ready,
-        components: state.components().clone(),
+        components: snapshot.components,
     })
 }
 

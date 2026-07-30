@@ -68,6 +68,7 @@ async fn production_assets_expose_the_complete_unavailable_viewer_shell() {
     assert!(head.contains("content-type: text/html"), "{head}");
     assert!(html.contains("data-viewer-status>Unavailable"));
     assert!(html.contains("data-viewer-frame"));
+    assert!(html.contains("data-viewer-video"));
     assert!(html.contains("data-control=\"take-control\""));
     assert!(html.contains("data-control=\"snapshot\""));
     assert!(html.contains("data-control=\"treatment-monochrome\""));
@@ -92,6 +93,14 @@ async fn production_assets_expose_the_complete_unavailable_viewer_shell() {
         "{style_head}"
     );
     assert!(style.contains(".viewer"));
+    assert!(style.contains("object-fit: contain"));
+
+    let (whep_head, whep) = get(address, "/assets/whep.js").await;
+    assert!(
+        whep_head.contains("content-type: text/javascript"),
+        "{whep_head}"
+    );
+    assert!(whep.contains("RTCPeerConnection"));
 }
 
 async fn spawn_service() -> SocketAddr {
