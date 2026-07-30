@@ -3,17 +3,19 @@
 ## Implemented path
 
 The continuously warm camera worker consumes the production `CameraSource`
-contract, applies the default 10 ms/gain 100 settings, and converts each
-validated 1920×1080 RAW8 RGGB generation directly to I420. Missing colour
+contract, applies the default 10 ms/gain 100 settings, and copies each newest
+validated 1920×1080 RAW8 RGGB generation into one replaceable pending slot. A
+separate processing worker converts that generation directly to I420 and
+discards its completed output if capture advanced while it was executing. Missing colour
 samples use fixed bilinear interpolation at the native frame edges as well as
 the interior. Full-range BT.601 integer coefficients (`77R + 150G + 29B`) form
 the luma plane; both quarter-resolution chroma planes remain neutral 128. No
 intermediate RGB frame or temporal image history exists.
 
-One two-buffer mailbox separates processing from publication. It owns at most
-one pending generation, overwrites pending obsolete work in place, and lets the
-encoder discard a taken generation if newer work arrives before publication.
-All processing and mailbox buffers are allocated once and reused.
+Two two-buffer mailboxes separate capture from processing and processing from
+publication. Each owns at most one pending generation, overwrites obsolete work
+in place, and fences completed work against the newest input before the next
+seam. All processing and mailbox buffers are allocated once and reused.
 
 Rust starts one long-lived FFmpeg child with native I420 input,
 `h264_v4l2m2m`, 1.5 Mbps bitrate/maxrate/buffer, 20 fps input timing, a
@@ -53,6 +55,8 @@ with MediaMTX, and displays it in a muted `playsinline` video element with
 The test used the real Raspberry Pi 4 service process, distro FFmpeg 5.1.9,
 real `h264_v4l2m2m`, pinned MediaMTX v1.19.3, and the explicit
 `OBSCAM_CAMERA_SOURCE=deterministic` hardware-edge substitute.
+The substitute is wall-paced at the qualified 20 fps monitoring ceiling in
+this deployed seam; its focused fault tests retain virtual time.
 
 - MediaMTX started only RTSP on `127.0.0.1:8554` and WHEP/WebRTC on ports 8889
   and 8189.
@@ -66,6 +70,8 @@ real `h264_v4l2m2m`, pinned MediaMTX v1.19.3, and the explicit
   four independent readers of the same single H.264 track.
 - Computed video presentation was `object-fit: contain`. The only console error
   was the pre-existing missing `/favicon.ico` noted by GRE-211.
+- The 390×844 mobile and 1440×900 desktop viewports had no horizontal or
+  vertical document overflow while presenting the complete native video.
 
 Exact source-generation-to-browser-presentation correlation is intentionally
 deferred to GRE-217. Until that contract exists, presentation does not claim

@@ -30,6 +30,7 @@ fn deterministic_rggb_becomes_full_resolution_neutral_i420_without_a_bayer_grid(
     assert_eq!(y[1079 * WIDTH + 1919], 120, "bottom-right edge");
     assert_eq!(y[1079 * WIDTH], 126, "bottom-left edge");
     assert_eq!(y[1919], 133, "top-right edge");
+    assert_eq!(y[0], 240, "top-left edge");
     assert!(
         output.data()[Y_BYTES..].iter().all(|sample| *sample == 128),
         "monochrome I420 chroma must be neutral"

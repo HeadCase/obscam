@@ -17,7 +17,7 @@ explicitly required; they are not implementation precedent.
 
 The production `obscam` Rust service now owns the continuously warm camera,
 reconstructs default neutral monochrome directly from full-resolution RAW8,
-and feeds one supervised FFmpeg hardware-H.264 publication. Pinned MediaMTX
+and feeds one long-lived FFmpeg hardware-H.264 publication. Pinned MediaMTX
 fans that stream directly to origin-aware WHEP browser sessions. The service
 still boots its HTTP contracts truthfully when camera or media components are
 unavailable.

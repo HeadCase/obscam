@@ -19,7 +19,14 @@ impl MonochromeProcessor {
 
     /// Converts one validated RAW8 RGGB generation without an intermediate RGB frame.
     pub fn process<'a>(&'a mut self, source: &FrameGeneration<'_>) -> MonochromeFrame<'a> {
-        let raw = source.data();
+        self.process_validated(source.generation(), source.data())
+    }
+
+    pub(crate) fn process_validated<'a>(
+        &'a mut self,
+        generation: u64,
+        raw: &[u8],
+    ) -> MonochromeFrame<'a> {
         for y in 0..HEIGHT {
             for x in 0..WIDTH {
                 let (red, green, blue) = reconstruct(raw, x, y);
@@ -27,7 +34,7 @@ impl MonochromeProcessor {
             }
         }
         MonochromeFrame {
-            generation: source.generation(),
+            generation,
             data: &self.output,
         }
     }
