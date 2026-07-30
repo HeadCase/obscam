@@ -6,10 +6,10 @@
 The production `CameraOwner` and feature-gated `DeterministicCamera` implement
 that same contract and return the same borrowed `FrameGeneration` type.
 
-The substitute exists only when `zwo-asi/camera-substitute` is compiled. The
-service retains `production` as its implicit source, rejects unknown source
-names, and accepts `OBSCAM_CAMERA_SOURCE=deterministic` only when the service's
-`camera-substitute` feature is explicitly compiled.
+The substitute exists only when `zwo-asi/camera-substitute` is compiled and is
+selected only by explicitly constructing a `DeterministicScenario` and passing
+it to `DeterministicCamera::connect`. The production service has no substitute
+configuration or fallback, so a production build cannot select it silently.
 
 ## Deterministic behavior
 
@@ -23,9 +23,10 @@ names, and accepts `OBSCAM_CAMERA_SOURCE=deterministic` only when the service's
 - Timeout, interruption, disconnect, and malformed frames never advance the
   trustworthy source generation.
 - The generated mosaic contains gain-sensitive RGGB values, asymmetric spatial
-  coordinates, and a 64-bit high-contrast generation barcode in its first two
-  rows. Together these make Bayer, crop, rotation, stale-generation, and
-  source-correlation mistakes observable.
+  coordinates, a generation-dependent value at every pixel, and a 64-bit
+  high-contrast generation barcode in its first two rows. Together these make
+  Bayer, crop, rotation, torn/stale-generation, and source-correlation mistakes
+  observable.
 
 No encoder, relay, browser-delivery, snapshot, recording, persistence, or
 secondary media path is part of the substitute.
@@ -34,8 +35,6 @@ secondary media path is part of the substitute.
 
 ```console
 cargo test -p zwo-asi --features 'sdk-stub,camera-substitute' --test deterministic_camera
-cargo test -p obscam --test config
-cargo test -p obscam --features camera-substitute --test config
 ```
 
 ## Completed verification
@@ -57,6 +56,5 @@ existing HTTP-contract tests require a loopback listener; all tests passed.
 Mac Playwright verified the real Rust service over the approved WireGuard route
 at mobile 390×844 and desktop 1440×900 viewports. Both rendered truthful
 `Unavailable` state without overflow. Runtime and health returned HTTP 200,
-reported independently unavailable components and `latestFrame: null`, and did
-not expose camera-source selection in the browser contract. The only console
-error was the known pre-existing `/favicon.ico` 404.
+reported independently unavailable components and `latestFrame: null`. The
+only console error was the known pre-existing `/favicon.ico` 404.

@@ -191,13 +191,17 @@ impl CameraSource for DeterministicCamera {
             return Err(CaptureError::Timeout);
         }
         self.pending_delay_us = None;
-        self.generation = self.generation.saturating_add(1);
+        let generation = self.generation.saturating_add(1);
         let buffer = &mut self.buffers[self.next_buffer];
         fill_pattern(
             buffer,
-            self.generation,
+            generation,
             self.settings.expect("capturing source has settings").gain(),
         );
+        if self.interrupted.swap(false, Ordering::AcqRel) {
+            return Err(CaptureError::Interrupted);
+        }
+        self.generation = generation;
         self.next_buffer = (self.next_buffer + 1) % BUFFER_COUNT;
         Ok(FrameGeneration {
             generation: self.generation,
@@ -215,6 +219,8 @@ impl CameraSource for DeterministicCamera {
 
 fn fill_pattern(buffer: &mut [u8], generation: u64, gain: i64) {
     let gain_boost = u8::try_from(gain / 20).expect("validated gain boost fits u8");
+    let generation_offset =
+        u8::try_from(generation.saturating_sub(1) % 31).expect("generation marker fits u8");
     for y in 0..HEIGHT {
         for x in 0..WIDTH {
             let coordinate = u8::try_from(((x / 64) * 3 + (y / 64) * 5) % 31)
@@ -224,13 +230,17 @@ fn fill_pattern(buffer: &mut [u8], generation: u64, gain: i64) {
                 (1, 1) => 32,
                 _ => 96,
             };
-            buffer[y * WIDTH + x] = bayer_base + coordinate + gain_boost;
+            buffer[y * WIDTH + x] = bayer_base + coordinate + gain_boost + generation_offset;
         }
     }
 
     for x in 0..128 {
         let bit = (generation >> (x / 2)) & 1;
-        let marker = if bit == 1 { 240 } else { 16 };
+        let marker = if bit == 1 {
+            240 - generation_offset
+        } else {
+            16 + generation_offset
+        };
         buffer[x] = marker;
         buffer[WIDTH + x] = marker;
     }

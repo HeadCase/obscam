@@ -85,8 +85,37 @@ fn generated_pattern_identifies_orientation_bayer_gain_and_generation() {
     camera.start().expect("restart");
     let second = camera.capture_next(100).expect("second frame");
     let sample = |x: usize, y: usize| second.data()[y * 1920 + x];
-    assert_eq!(sample(256, 256), 191, "gain changes the pattern");
-    assert_eq!((sample(0, 0), sample(2, 0)), (16, 240));
+    assert_eq!(
+        sample(256, 256),
+        192,
+        "gain and generation change the pattern"
+    );
+    assert_eq!((sample(0, 0), sample(2, 0)), (17, 239));
+}
+
+#[test]
+fn every_pixel_marks_adjacent_generation_boundaries() {
+    let mut camera =
+        DeterministicCamera::connect(DeterministicScenario::new([])).expect("camera present");
+    camera
+        .configure(Settings::new(10_000, 0).expect("valid settings"))
+        .expect("configure");
+    camera.start().expect("start");
+
+    let first = camera
+        .capture_next(100)
+        .expect("first frame")
+        .data()
+        .to_vec();
+    let second = camera.capture_next(100).expect("second frame");
+
+    assert!(
+        first
+            .iter()
+            .zip(second.data())
+            .all(|(first, second)| first != second),
+        "a generation splice must be observable anywhere in the frame"
+    );
 }
 
 #[test]

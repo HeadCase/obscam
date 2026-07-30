@@ -18,7 +18,6 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
         bind_address = %config.bind_address(),
         whep_port = config.whep_port(),
         whep_path = config.whep_path(),
-        camera_source = ?config.camera_source(),
         "ObsCam browser service ready"
     );
 
