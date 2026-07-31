@@ -1,0 +1,28 @@
+[Unit]
+Description=ObsCam MediaMTX WebRTC relay
+StartLimitIntervalSec=0
+
+[Service]
+Type=exec
+DynamicUser=yes
+ExecStart=/usr/local/bin/mediamtx /etc/obscam/mediamtx.yml
+Restart=on-failure
+RestartSec=5s
+
+# MediaMTX receives RTP only over loopback and serves browsers only through the
+# observatory LAN and the ObsCam WireGuard interface. Keep this as an allow-list.
+RestrictNetworkInterfaces=lo eth0 wg0
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectHome=yes
+ProtectSystem=strict
+CapabilityBoundingSet=
+
+StandardOutput=journal
+StandardError=journal
+LogRateLimitIntervalSec=30s
+LogRateLimitBurst=200
+
+[Install]
+WantedBy=multi-user.target

@@ -1,9 +1,12 @@
 # Local Production Startup
 
-This is the temporary manual startup procedure until GRE-224 and GRE-226
-install independently supervised appliance services and qualified releases.
+This is the temporary production startup procedure until GRE-224 and GRE-226
+complete independently supervised appliance services and qualified releases.
 It runs the real ASI662MC, the release-mode Rust application, hardware H.264,
-and the pinned MediaMTX binary. It is not a deterministic test stack.
+and the pinned MediaMTX binary. MediaMTX already uses a narrow temporary systemd
+unit because a foreground wildcard listener cannot enforce the required
+interface boundary. ObsCam remains a manual foreground process. This is not a
+deterministic test stack.
 
 ## Prerequisites
 
@@ -13,6 +16,9 @@ and the pinned MediaMTX binary. It is not a deterministic test stack.
 - `/etc/obscam/mediamtx.yml` is the installed host configuration. It matches
   the checked production media path while advertising only the permitted
   `wg0` and LAN addresses.
+- `/etc/systemd/system/obscam-mediamtx.service` matches the checked-in temporary
+  unit. Its interface allow-list is the enforcement boundary that permits
+  loopback RTP ingestion plus LAN and `wg0` browser access.
 - The release binary must be built from the intended checkout.
 
 Verify the installed relay:
@@ -21,6 +27,9 @@ Verify the installed relay:
 mediamtx --version
 sha256sum /usr/local/bin/mediamtx
 sed -n '$p' deploy/mediamtx-linux-arm64.sha256
+cmp --silent deploy/mediamtx.yml /etc/obscam/mediamtx.yml
+cmp --silent deploy/systemd/obscam-mediamtx.service \
+  /etc/systemd/system/obscam-mediamtx.service
 ```
 
 Build the browser assets and production application after changing either:
@@ -32,19 +41,30 @@ cargo build --release -p obscam
 
 ## Start
 
+Install the reviewed temporary boundary after either checked-in deployment file
+changes:
+
+```sh
+sudo install -D -m 0644 deploy/mediamtx.yml /etc/obscam/mediamtx.yml
+sudo install -D -m 0644 deploy/systemd/obscam-mediamtx.service \
+  /etc/systemd/system/obscam-mediamtx.service
+sudo systemctl daemon-reload
+```
+
 Use two terminals. Start MediaMTX first only for clearer logs; ObsCam does not
 depend on startup ordering.
 
 Terminal one runs:
 
 ```sh
-mediamtx /etc/obscam/mediamtx.yml
+sudo systemctl start obscam-mediamtx.service
+sudo journalctl --follow --unit obscam-mediamtx.service
 ```
 
 The installed host configuration disables interface discovery and advertises
-only `10.164.190.1` and `192.168.1.200`. MediaMTX must not inspect or advertise
-protected `wg1` (`192.168.4.9`), and that interface is never a browser route or
-fallback.
+only `10.164.190.1` and `192.168.1.200`. The systemd unit independently limits
+the process to `lo`, `eth0`, and `wg0`. Protected `wg1` (`192.168.4.9`) is never
+a browser route or fallback and must not be inspected, advertised, or tested.
 
 Terminal two runs the production application with its default real-camera
 configuration:
@@ -84,5 +104,12 @@ log and the browser-facing WHEP check are the current relay evidence.
 
 ## Stop
 
-Press `Ctrl-C` once in the ObsCam terminal and once in the MediaMTX terminal.
-Both are manual foreground processes until GRE-224 supplies supervision.
+Press `Ctrl-C` once in the ObsCam terminal, then stop the temporary relay unit:
+
+```sh
+sudo systemctl stop obscam-mediamtx.service
+```
+
+GRE-224 owns the complete installer, final service identity decisions, reboot
+and recovery qualification, and integration of this temporary MediaMTX unit
+into the independently supervised appliance service set.

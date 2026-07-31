@@ -57,12 +57,17 @@ UUID was accepted on the appliance's non-secure HTTP origin. This check caught
 and corrected an initial dependency on `crypto.randomUUID()`, replacing it with
 an RFC 4122 v4 UUID generated through `crypto.getRandomValues()`.
 
-Complete media-presentation evidence could not be rerun safely. Although the
-installed MediaMTX v1.19.3 binary matched the repository checksum, launching it
-with `/etc/obscam/mediamtx.yml` caused its runtime output to advertise the
-protected `wg1` address. ObsCam and MediaMTX were stopped immediately; that
-interface and its configuration were not inspected or modified. Consequently,
-live exact and unknown callback reporting, rendered rolling values, JSON
-download interaction, and mobile viewport behavior remain blocked graphical
-checks rather than inferred passes. The pre-existing `/favicon.ico` 404 was
-also present.
+The checked-in MediaMTX configuration had interface discovery enabled despite
+the startup guide claiming otherwise. It is now disabled, and the only static
+browser hosts are `10.164.190.1` and `192.168.1.200`. The temporary MediaMTX
+systemd unit additionally allows only `lo`, `eth0`, and `wg0`; static deployment
+tests protect both boundaries. The installed files matched the reviewed files,
+systemd loaded the exact interface restriction, and MediaMTX v1.19.3 remained
+active with zero restarts under a dynamic unprivileged identity. A Mac browser
+reached its HTTP listener over both the LAN and permitted WireGuard addresses.
+
+Complete media-presentation evidence has not yet been rerun because ObsCam was
+not started during the isolation check. Live exact and unknown callback
+reporting, rendered rolling values, JSON download interaction, and mobile
+viewport behavior therefore remain blocked graphical checks rather than
+inferred passes. The pre-existing `/favicon.ico` 404 was also present.
