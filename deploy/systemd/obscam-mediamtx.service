@@ -1,18 +1,21 @@
 [Unit]
 Description=ObsCam MediaMTX WebRTC relay
 StartLimitIntervalSec=0
+Requires=obscam-media-network.service
+After=obscam-media-network.service
 
 [Service]
 Type=exec
 DynamicUser=yes
 ExecStart=/usr/local/bin/mediamtx /etc/obscam/mediamtx.yml
+NetworkNamespacePath=/run/netns/obscam-media
 Restart=on-failure
 RestartSec=5s
 
-# MediaMTX receives RTP only over loopback and serves browsers only through the
-# observatory LAN and the ObsCam WireGuard interface. Keep this as an allow-list.
-RestrictNetworkInterfaces=lo eth0 wg0
-RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+# Pion requires netlink for ICE setup. Inside this namespace it can discover
+# only the private media veth and loopback; browser endpoints are exact-address
+# translations owned by obscam-media-network.service.
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK
 NoNewPrivileges=yes
 PrivateTmp=yes
 ProtectHome=yes

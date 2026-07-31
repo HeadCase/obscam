@@ -48,7 +48,7 @@ server. This caps reporting traffic and memory without increasing media latency.
   arithmetic, bounded 32-observation batching, authoritative rendering, and
   malformed-response rejection.
 
-## Browser evidence and environment limitation — 2026-07-31
+## Browser and deployed-stack evidence — 2026-07-31
 
 The Mac Playwright browser reached the release Rust service over the permitted
 `http://10.164.190.1:8080` WireGuard route. Runtime and clock reads succeeded,
@@ -58,26 +58,41 @@ and corrected an initial dependency on `crypto.randomUUID()`, replacing it with
 an RFC 4122 v4 UUID generated through `crypto.getRandomValues()`.
 
 The checked-in MediaMTX configuration had interface discovery enabled despite
-the startup guide claiming otherwise. It is now disabled, and the only static
-browser hosts are `10.164.190.1` and `192.168.1.200`. The temporary MediaMTX
-systemd unit additionally allows only `lo`, `eth0`, and `wg0`; static deployment
-tests protect both boundaries. The installed files matched the reviewed files,
-systemd loaded the exact interface restriction, and MediaMTX v1.19.3 remained
-active with zero restarts under a dynamic unprivileged identity. A Mac browser
-reached its HTTP listener over both the LAN and permitted WireGuard addresses.
+the startup guide claiming otherwise. Candidate advertisement from discovered
+interfaces is now disabled, and the only static browser hosts are
+`10.164.190.1` and `192.168.1.200`. The namespace described below is the
+independent enforcement boundary for Pion's unavoidable interface enumeration.
 
-Complete media-presentation verification could not finish. Starting ObsCam
-after the initial isolation check exposed a deeper blocker: the real capture
-and hardware encoder reported ready and MediaMTX accepted the H.264 RTP stream,
-but each browser WHEP POST returned HTTP 400. MediaMTX reported
-`error getting local interfaces` because the unit correctly denied netlink.
-Pinned Pion ICE v4.3.0 unconditionally enumerates local interfaces while
-constructing every peer connection, even when MediaMTX interface-derived
-candidate advertisement is disabled. Granting host netlink access would violate
-the protected-interface boundary, so ObsCam and MediaMTX were stopped.
+That failure was resolved without granting host interface visibility. MediaMTX
+now runs in `obscam-media`, containing only `lo` and the private `media0` veth.
+Pion receives netlink inside that namespace. Exact-destination rules translate
+WHEP TCP/8889 and ICE UDP/8189 only for `10.164.190.1` and `192.168.1.200`; Rust
+relays unchanged observed RTP/RTCP to `169.254.218.2`. Forwarding permits
+established service flows and new ICE only toward the approved browser networks;
+other namespace forwarding and host access are dropped. Deployment tests cover
+the namespace, addresses, ports, owned-veth matching, and fail-closed policy.
 
-Live exact and unknown callback reporting, rendered rolling values, JSON
-download interaction, and mobile viewport behavior remain blocked rather than
-inferred passes. A true network namespace containing only the media loopback or
-veth boundary is required before WHEP verification can resume. The pre-existing
-`/favicon.ico` 404 was also present.
+The real ASI662MC capture and hardware encoder reported ready. MediaMTX v1.19.3
+reported the H.264 stream online with one track, established peer connections,
+and remained active with zero restarts. On the Mac browser, WHEP returned HTTP
+201, video played at native 1920×1080, and the rolling display accumulated both
+exact and conservative unknown samples. The service-quality endpoint returned
+HTTP 200 with the fixed 16-client/512-sample limits, and the JSON download
+completed. Desktop 1440×900 and mobile 390×844 layouts had no horizontal
+overflow. The pre-existing `/favicon.ico` 404 remained the only current-page
+console error after the process was stable.
+
+Review-driven recovery verification then stopped and recreated only the owned
+namespace and MediaMTX unit while the real Rust camera/encoder process remained
+running. Native video and advancing service-quality samples resumed without
+restarting the camera owner. A request initiated inside the namespace toward
+the host service gateway was blocked, while WHEP/ICE still passed through the
+tightened forwarding policy.
+
+Both approved destination addresses completed WHEP and video playback. The
+`192.168.1.200` attempt nevertheless produced a WireGuard-range peer-reflexive
+source in MediaMTX, proving that the Mac routed it through WireGuard. It verifies
+the exact LAN destination mapping but not physical-LAN ingress. A device
+actually attached to the observatory LAN remains the required Andrew-path check;
+this is an environment gap, not a substitute failure for GRE-218's implemented
+service-quality contract.

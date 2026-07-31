@@ -9,9 +9,9 @@ srt: no
 moq: no
 
 webrtc: yes
-webrtcAddress: :8889
+webrtcAddress: 169.254.218.2:8889
 webrtcEncryption: no
-webrtcLocalUDPAddress: :8189
+webrtcLocalUDPAddress: 169.254.218.2:8189
 webrtcIPsFromInterfaces: no
 webrtcAdditionalHosts:
   - 10.164.190.1
@@ -19,12 +19,12 @@ webrtcAdditionalHosts:
 
 paths:
   obscam:
-    source: udp+rtp://127.0.0.1:5004
+    source: udp+rtp://169.254.218.2:5004
     rtpSDP: |
       v=0
       o=- 0 0 IN IP4 127.0.0.1
       s=ObsCam
-      c=IN IP4 127.0.0.1
+      c=IN IP4 169.254.218.2
       t=0 0
       m=video 5004 RTP/AVP 96
       a=rtpmap:96 H264/90000

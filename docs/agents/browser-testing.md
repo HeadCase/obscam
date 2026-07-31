@@ -25,6 +25,10 @@ ObsCam on 10.164.190.1:<service-port>
   `10.164.190.1`.
 - When the LAN route is appropriate, the only fallback service address is
   `192.168.1.200`.
+- Navigating to the LAN address does not by itself prove physical-LAN ingress;
+  record the observed client route. A browser whose source remains in the
+  WireGuard range verifies the LAN destination mapping, not an Andrew-style
+  device physically attached to the observatory LAN.
 - `localhost` or `127.0.0.1` in a Playwright navigation refers to the Mac, not
   the Pi, and must not be used for the Pi-hosted service.
 
