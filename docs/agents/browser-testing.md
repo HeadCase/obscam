@@ -54,6 +54,30 @@ route or fallback.
    both permitted service routes have been checked. Never involve `wg1` in that
    diagnosis.
 
+## Playwright MCP Constraints
+
+Code passed to `browser_run_code_unsafe` executes in a restricted VM rather
+than a normal Node.js module. Do not assume Node globals such as `URL` or
+`setTimeout` exist there. Prefer Playwright-owned operations such as
+`page.waitForTimeout()` and compare `response.url()` as a string. In particular,
+an exception thrown from an asynchronous page event listener can escape the
+tool call and terminate the Playwright MCP process; keep listener callbacks
+minimal, avoid unavailable globals, and remove temporary listeners when the
+check finishes.
+
+The MCP Chrome session does not reliably report a page as hidden when another
+page is brought to the front. To exercise ObsCam's foreground-reconnect browser
+contract deterministically, install a test-controlled `document.visibilityState`
+getter on that isolated test page and dispatch `visibilitychange` for hidden
+and visible transitions. Assert the observable contract: a new media
+connection, Reconnecting before Live, and advancing video after reconnection.
+Do not claim that this technique verifies native window-manager tab semantics.
+
+MCP console and network history can include earlier navigations and failed
+diagnostic runs. Acceptance checks should attach fresh page listeners before
+navigation and judge only events collected by those listeners. Use all-session
+MCP logs for diagnosis, not as isolated pass/fail evidence.
+
 ## Repository Playwright Suite
 
 The repeatable graphical acceptance suite lives in `web/e2e`. Run it from an
