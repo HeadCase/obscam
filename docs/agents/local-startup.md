@@ -44,6 +44,12 @@ cargo build --release -p obscam
 Install the reviewed temporary boundary after either checked-in deployment file
 changes:
 
+Before the first install, stop if either destination already exists with
+different content. Preserve a recoverable copy and obtain explicit operator
+approval to adopt that path; these commands are only authorized for absent,
+matching, or explicitly adopted destinations. GRE-224 must turn this manual
+boundary into an ownership-enforcing installer.
+
 ```sh
 sudo install -D -m 0644 deploy/mediamtx.yml /etc/obscam/mediamtx.yml
 sudo install -D -m 0644 deploy/systemd/obscam-mediamtx.service \
