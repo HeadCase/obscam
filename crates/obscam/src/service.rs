@@ -24,7 +24,7 @@ use crate::{
     authority::LEASE_DURATION_MS,
     runtime::{Components, RuntimeState, SCHEMA_VERSION},
     service_quality::{
-        ConnectionRequest, ConnectionResponse, PresentationReport, ServiceQualityError,
+        ConnectionRequest, ConnectionResponse, PresentationBatch, ServiceQualityError,
         ServiceQualityResponse,
     },
     settings::SettingsEvent,
@@ -519,11 +519,11 @@ async fn begin_media_connection(
 
 async fn report_presentation(
     State(state): State<RuntimeState>,
-    Json(report): Json<PresentationReport>,
+    Json(report): Json<PresentationBatch>,
 ) -> Result<StatusCode, ServiceQualityApiError> {
     state
         .service_quality()
-        .record(report, unix_time_us())
+        .record_batch(report, unix_time_us())
         .map(|()| StatusCode::NO_CONTENT)
         .map_err(Into::into)
 }

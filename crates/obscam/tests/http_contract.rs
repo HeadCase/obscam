@@ -87,12 +87,14 @@ async fn browser_reports_unknown_presentation_into_authoritative_scoped_evidence
         "clientId": client_id,
         "runtimeEpoch": EPOCH,
         "connectionGeneration": 1,
-        "streamEpoch": null,
-        "presentedFrames": 1,
-        "presentedAtUnixUs": now,
-        "clockUncertaintyUs": 1_000,
-        "visibility": "visible",
-        "correlation": "unknown",
+        "samples": [{
+            "streamEpoch": null,
+            "presentedFrames": 1,
+            "presentedAtUnixUs": now,
+            "clockUncertaintyUs": 1_000,
+            "visibility": "visible",
+            "correlation": "unknown",
+        }],
     });
     let (head, body) = request_json(address, "POST", "/api/v1/service-quality", &report).await;
     assert!(head.starts_with("HTTP/1.1 204 No Content"), "{head}");
@@ -153,12 +155,14 @@ async fn media_connection_generation_is_explicit_and_stale_reports_are_rejected(
         "clientId": client_id,
         "runtimeEpoch": EPOCH,
         "connectionGeneration": 1,
-        "streamEpoch": null,
-        "presentedFrames": 1,
-        "presentedAtUnixUs": now,
-        "clockUncertaintyUs": 1_000,
-        "visibility": "visible",
-        "correlation": "unknown",
+        "samples": [{
+            "streamEpoch": null,
+            "presentedFrames": 1,
+            "presentedAtUnixUs": now,
+            "clockUncertaintyUs": 1_000,
+            "visibility": "visible",
+            "correlation": "unknown",
+        }],
     });
     let (head, _) = request_json(address, "POST", "/api/v1/service-quality", &stale).await;
     assert!(head.starts_with("HTTP/1.1 409 Conflict"), "{head}");

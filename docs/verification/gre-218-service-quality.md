@@ -30,9 +30,10 @@ nearest-rank min/p50/p95/p99/max over retained samples.
 aggregate. Its optional `clientId` query returns the same response shape scoped
 to one browser. The browser reads that response at 2 Hz, renders only values
 from it, and downloads the same parsed response as JSON. Presentation reports
-are serialized with at most one replaceable pending observation, preventing a
-slow diagnostic request from growing a browser-side queue; skipped callback
-ordinals remain explicit.
+are sent in bounded batches of at most 32 observations on a 250 ms cadence.
+The browser retains at most 32 pending observations and drops the oldest under
+backpressure; skipped callback ordinals remain explicit and are counted by the
+server. This caps reporting traffic and memory without increasing media latency.
 
 ## Automated evidence
 
@@ -44,7 +45,8 @@ ordinals remain explicit.
   stale-generation rejection, unknown-sample nullability, response limits,
   client-scoped and combined aggregates, and production asset delivery.
 - TypeScript tests validate fixed limits, scoped client identity, aggregate
-  arithmetic, authoritative rendering, and malformed-response rejection.
+  arithmetic, bounded 32-observation batching, authoritative rendering, and
+  malformed-response rejection.
 
 ## Browser evidence and environment limitation — 2026-07-31
 
@@ -56,11 +58,11 @@ and corrected an initial dependency on `crypto.randomUUID()`, replacing it with
 an RFC 4122 v4 UUID generated through `crypto.getRandomValues()`.
 
 Complete media-presentation evidence could not be rerun safely. Although the
-installed MediaMTX v1.19.3 binary matched the repository checksum and was
-started with the prescribed host configuration, its runtime output advertised
-the protected `wg1` address contrary to the repository's documented
-expectation. ObsCam and MediaMTX were stopped immediately; that interface and
-configuration were not inspected or modified. Consequently, live exact and
-unknown callback reporting, rendered rolling values, JSON download interaction,
-and mobile viewport behavior remain blocked graphical checks rather than
-inferred passes. The pre-existing `/favicon.ico` 404 was also present.
+installed MediaMTX v1.19.3 binary matched the repository checksum, launching it
+with `/etc/obscam/mediamtx.yml` caused its runtime output to advertise the
+protected `wg1` address. ObsCam and MediaMTX were stopped immediately; that
+interface and its configuration were not inspected or modified. Consequently,
+live exact and unknown callback reporting, rendered rolling values, JSON
+download interaction, and mobile viewport behavior remain blocked graphical
+checks rather than inferred passes. The pre-existing `/favicon.ico` 404 was
+also present.

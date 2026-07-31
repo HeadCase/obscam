@@ -1,14 +1,17 @@
 const SCHEMA_VERSION = 1;
 const CLIENT_STORAGE_KEY = "obscam.service-quality.client.v1";
 const EVIDENCE_REFRESH_MS = 500;
+const REPORT_INTERVAL_MS = 250;
+const MAX_REPORT_BATCH = 32;
 export class ServiceQualityClient {
     runtimeEpoch;
     clock;
     evidence;
     clientId;
     connectionGeneration = 0;
-    pending = null;
+    pending = [];
     reporting = false;
+    reportTimer = null;
     lastEvidenceAtMs = 0;
     constructor(runtimeEpoch, clock, evidence) {
         this.runtimeEpoch = runtimeEpoch;
@@ -23,14 +26,14 @@ export class ServiceQualityClient {
         return client;
     }
     report(observation) {
-        this.pending = {
+        if (this.pending.length === MAX_REPORT_BATCH) {
+            this.pending.shift();
+        }
+        this.pending.push({
             ...observation,
             presentedAtUnixUs: Date.now() * 1_000 + this.clock.offsetUs
-        };
-        if (!this.reporting) {
-            this.reporting = true;
-            void this.drain();
-        }
+        });
+        this.scheduleReport();
     }
     async beginConnection() {
         const response = await fetch("/api/v1/service-quality/connections", {
@@ -55,17 +58,27 @@ export class ServiceQualityClient {
         }
         this.connectionGeneration = value.connectionGeneration;
     }
-    async drain() {
+    scheduleReport() {
+        if (this.reporting || this.reportTimer !== null || this.pending.length === 0) {
+            return;
+        }
+        this.reportTimer = window.setTimeout(() => {
+            this.reportTimer = null;
+            void this.flush();
+        }, REPORT_INTERVAL_MS);
+    }
+    async flush() {
+        if (this.reporting || this.pending.length === 0) {
+            return;
+        }
+        this.reporting = true;
+        const observations = this.pending.splice(0, MAX_REPORT_BATCH);
         try {
-            while (this.pending !== null) {
-                const observation = this.pending;
-                this.pending = null;
-                await this.send(observation);
-                const now = Date.now();
-                if (now - this.lastEvidenceAtMs >= EVIDENCE_REFRESH_MS) {
-                    this.lastEvidenceAtMs = now;
-                    this.evidence(await this.fetchEvidence());
-                }
+            await this.send(observations);
+            const now = Date.now();
+            if (now - this.lastEvidenceAtMs >= EVIDENCE_REFRESH_MS) {
+                this.lastEvidenceAtMs = now;
+                this.evidence(await this.fetchEvidence());
             }
         }
         catch (error) {
@@ -73,13 +86,10 @@ export class ServiceQualityClient {
         }
         finally {
             this.reporting = false;
-            if (this.pending !== null) {
-                this.reporting = true;
-                void this.drain();
-            }
+            this.scheduleReport();
         }
     }
-    async send(observation) {
+    async send(observations) {
         const response = await fetch("/api/v1/service-quality", {
             method: "POST",
             cache: "no-store",
@@ -89,15 +99,17 @@ export class ServiceQualityClient {
                 clientId: this.clientId,
                 runtimeEpoch: this.runtimeEpoch,
                 connectionGeneration: this.connectionGeneration,
-                streamEpoch: observation.streamEpoch,
-                ...(observation.rtpTimestamp === undefined
-                    ? {}
-                    : { rtpTimestamp: observation.rtpTimestamp }),
-                presentedFrames: observation.presentedFrames,
-                presentedAtUnixUs: observation.presentedAtUnixUs,
-                clockUncertaintyUs: this.clock.uncertaintyUs,
-                visibility: observation.visibility,
-                correlation: observation.correlation
+                samples: observations.map((observation) => ({
+                    streamEpoch: observation.streamEpoch,
+                    ...(observation.rtpTimestamp === undefined
+                        ? {}
+                        : { rtpTimestamp: observation.rtpTimestamp }),
+                    presentedFrames: observation.presentedFrames,
+                    presentedAtUnixUs: observation.presentedAtUnixUs,
+                    clockUncertaintyUs: this.clock.uncertaintyUs,
+                    visibility: observation.visibility,
+                    correlation: observation.correlation
+                }))
             })
         });
         if (!response.ok) {
