@@ -17,7 +17,7 @@ was exact or unknown. Exact claims are independently resolved against Rust's
 currently retained runtime/stream/RTP mapping. Missing, evicted, conflicting,
 or mismatched mappings become unknown. Unknown samples retain only the facts
 that remain known and never receive source/settings identity, treatment,
-dimensions, latency, or uncertainty.
+dimensions, or latency; they retain the browser's measured clock uncertainty.
 
 Compatible samples partition by client connection, runtime epoch, stream epoch,
 settings generation, treatment, native dimensions, and visibility. Source
