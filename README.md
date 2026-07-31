@@ -38,6 +38,7 @@ the curated exposure choices, a 0–600 gain detent in steps of 50, and either
 See:
 
 - `docs/agents/architecture.md` for binding local architecture guardrails
+- `docs/agents/local-startup.md` for temporary manual production startup
 - `docs/agents/issue-tracker.md` for the Linear workflow
 
 ## Quality gate
