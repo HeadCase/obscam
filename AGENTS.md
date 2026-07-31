@@ -24,6 +24,12 @@ Historical evidence and deleted implementations remain in Git history, not the
 active tree. Do not inspect or recover them unless the user explicitly requests
 historical investigation.
 
+### Temporary production startup
+
+Until GRE-224 and GRE-226 provide managed appliance services and qualified
+release activation, follow `docs/agents/local-startup.md`. Do not improvise a
+custom media stack or allow browser testing to inspect or advertise `wg1`.
+
 ## Decision Policy
 
 - Always propose before implementing.

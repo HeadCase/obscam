@@ -4,6 +4,7 @@ mod assets;
 mod authority;
 mod colour;
 mod config;
+mod correlation;
 mod encoder;
 mod latest;
 mod monochrome;
@@ -18,6 +19,7 @@ pub use authority::{
 };
 pub use colour::ColourProcessor;
 pub use config::{CameraSourceKind, Config, ConfigError};
+pub use correlation::{CorrelationError, CorrelationMapping, CorrelationTracker, FrameSubmission};
 pub use encoder::FfmpegEncoder;
 pub use latest::{LatestFrameMailbox, PublishedFrame};
 pub use monochrome::{MonochromeFrame, MonochromeProcessor, ProcessedFrame};

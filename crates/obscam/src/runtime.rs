@@ -3,7 +3,9 @@ use std::sync::{Arc, RwLock};
 use serde::Serialize;
 use uuid::Uuid;
 
-use crate::{AuthorityGate, Config, SettingsController, config::WhepPath};
+use crate::{
+    AuthorityGate, Config, SettingsController, config::WhepPath, correlation::CorrelationState,
+};
 
 pub(crate) const SCHEMA_VERSION: u8 = 1;
 
@@ -13,6 +15,7 @@ pub struct RuntimeState {
     snapshot: Arc<RwLock<RuntimeSnapshot>>,
     authority: AuthorityGate,
     settings: SettingsController,
+    correlation: CorrelationState,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -67,6 +70,7 @@ impl RuntimeState {
             })),
             authority: AuthorityGate::new(),
             settings: SettingsController::new(config.default_settings()),
+            correlation: CorrelationState::new(runtime_epoch),
         }
     }
 
@@ -107,6 +111,10 @@ impl RuntimeState {
     #[must_use]
     pub fn settings(&self) -> SettingsController {
         self.settings.clone()
+    }
+
+    pub(crate) fn correlation(&self) -> CorrelationState {
+        self.correlation.clone()
     }
 
     /// Revokes authority when the camera backend restarts or runtime recovery begins.

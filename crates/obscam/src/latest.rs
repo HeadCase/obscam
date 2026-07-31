@@ -6,7 +6,7 @@ use std::{
     time::Duration,
 };
 
-use crate::MonochromeFrame;
+use crate::{MonochromeFrame, correlation::CapturedFrameMetadata};
 use zwo_asi::{HEIGHT, WIDTH};
 
 const I420_BYTES: usize = WIDTH * HEIGHT * 3 / 2;
@@ -43,6 +43,16 @@ impl LatestFrameMailbox {
 
     pub(crate) fn publish_in_epoch(&self, epoch: MediaEpoch, frame: &MonochromeFrame<'_>) {
         self.inner.publish(epoch, frame.generation(), frame.data());
+    }
+
+    pub(crate) fn publish_captured(
+        &self,
+        epoch: MediaEpoch,
+        frame: &MonochromeFrame<'_>,
+        metadata: CapturedFrameMetadata,
+    ) {
+        self.inner
+            .publish_with_metadata(epoch, frame.generation(), frame.data(), Some(metadata));
     }
 
     pub(crate) fn commit_if_current<T>(
@@ -136,6 +146,16 @@ impl LatestBufferMailbox {
     }
 
     pub(crate) fn publish(&self, epoch: MediaEpoch, generation: u64, data: &[u8]) {
+        self.publish_with_metadata(epoch, generation, data, None);
+    }
+
+    pub(crate) fn publish_with_metadata(
+        &self,
+        epoch: MediaEpoch,
+        generation: u64,
+        data: &[u8],
+        metadata: Option<CapturedFrameMetadata>,
+    ) {
         let identity = FrameIdentity { epoch, generation };
         if !self.epoch_fence.is_current(epoch) {
             return;
@@ -155,6 +175,7 @@ impl LatestBufferMailbox {
                 .expect("one buffer remains while the consumer owns at most one")
         });
         pending.identity = identity;
+        pending.metadata = metadata;
         pending.data.copy_from_slice(data);
         state.pending = Some(pending);
         state.newest = Some(identity);
@@ -230,6 +251,7 @@ struct State {
 
 pub(crate) struct BufferGeneration {
     identity: FrameIdentity,
+    metadata: Option<CapturedFrameMetadata>,
     data: Box<[u8]>,
 }
 
@@ -244,6 +266,10 @@ impl BufferGeneration {
 
     pub(crate) const fn data(&self) -> &[u8] {
         &self.data
+    }
+
+    pub(crate) const fn metadata(&self) -> Option<CapturedFrameMetadata> {
+        self.metadata
     }
 }
 
@@ -262,6 +288,10 @@ impl PublishedFrame {
     pub const fn data(&self) -> &[u8] {
         self.0.data()
     }
+
+    pub(crate) const fn metadata(&self) -> Option<CapturedFrameMetadata> {
+        self.0.metadata()
+    }
 }
 
 fn new_buffer(buffer_bytes: usize) -> BufferGeneration {
@@ -270,6 +300,7 @@ fn new_buffer(buffer_bytes: usize) -> BufferGeneration {
             epoch: MediaEpoch(0),
             generation: 0,
         },
+        metadata: None,
         data: vec![0; buffer_bytes].into_boxed_slice(),
     }
 }

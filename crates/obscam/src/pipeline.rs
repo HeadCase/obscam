@@ -4,7 +4,7 @@ use std::{
     path::Path,
     sync::Arc,
     thread,
-    time::{Duration, Instant},
+    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
 use zwo_asi::{CameraOwner, CameraSource, CaptureError, HEIGHT, WIDTH};
@@ -15,6 +15,7 @@ use zwo_asi::{DeterministicCamera, DeterministicScenario};
 use crate::{
     ColourProcessor, ComponentReadiness, FfmpegEncoder, LatestFrameMailbox, MonochromeProcessor,
     RuntimeState, Treatment,
+    correlation::CapturedFrameMetadata,
     latest::{EpochFence, LatestBufferMailbox},
 };
 
@@ -130,7 +131,19 @@ fn capture(
         let started = Instant::now();
         let epoch = raw.current_epoch();
         match source.capture_next(100) {
-            Ok(frame) => raw.publish(epoch, frame.generation(), frame.data()),
+            Ok(frame) => {
+                let applied = settings.snapshot().applied();
+                raw.publish_with_metadata(
+                    epoch,
+                    frame.generation(),
+                    frame.data(),
+                    Some(CapturedFrameMetadata {
+                        settings_generation: applied.generation(),
+                        treatment: applied.settings().treatment(),
+                        exposure_completed_at_unix_us: unix_time_us(),
+                    }),
+                );
+            }
             Err(CaptureError::Timeout | CaptureError::Interrupted) => {}
             Err(error) => {
                 settings.begin_recovery();
@@ -241,11 +254,23 @@ fn spawn_processing(
                     }
                 };
                 if raw.is_current_epoch(epoch) {
-                    processed.publish_in_epoch(epoch, &output);
+                    if let Some(metadata) = source.metadata() {
+                        processed.publish_captured(epoch, &output, metadata);
+                    } else {
+                        processed.publish_in_epoch(epoch, &output);
+                    }
                 }
                 raw.recycle(source);
             }
         })
+}
+
+pub(crate) fn unix_time_us() -> u64 {
+    let micros = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_micros();
+    u64::try_from(micros).unwrap_or(u64::MAX)
 }
 
 fn spawn_encoder(
@@ -255,31 +280,68 @@ fn spawn_encoder(
     thread::Builder::new()
         .name("obscam-encoder".into())
         .spawn(move || {
-            let mut encoder = match FfmpegEncoder::start(Path::new("ffmpeg")) {
-                Ok(encoder) => encoder,
-                Err(error) => {
-                    tracing::error!(%error, "qualified FFmpeg hardware encoder unavailable");
-                    return;
-                }
-            };
+            let correlation = runtime.correlation();
+            let mut encoder = None;
+            let mut completed = None;
             loop {
-                let Some(frame) = mailbox.wait_take(Duration::from_secs(1)) else {
-                    continue;
-                };
-                let publication =
-                    mailbox.commit_if_current(&frame, |current| encoder.publish(current));
-                let Some(publication) = publication else {
-                    mailbox.recycle(frame);
-                    continue;
-                };
-                if let Err(error) = publication {
-                    runtime.set_encoder_readiness(ComponentReadiness::Unavailable);
-                    tracing::error!(%error, "FFmpeg hardware publication stopped");
-                    mailbox.recycle(frame);
-                    return;
+                let next = mailbox.wait_take(if completed.is_some() {
+                    Duration::from_millis(500)
+                } else {
+                    Duration::from_secs(1)
+                });
+                if let Some(frame) = next {
+                    if let Some(previous) = completed.take() {
+                        mailbox.recycle(previous);
+                    }
+                    if encoder.is_none() {
+                        encoder = match FfmpegEncoder::start_correlated(
+                            Path::new("ffmpeg"),
+                            correlation.clone(),
+                        ) {
+                            Ok(encoder) => Some(encoder),
+                            Err(error) => {
+                                runtime.set_encoder_readiness(ComponentReadiness::Unavailable);
+                                tracing::error!(%error, "qualified FFmpeg hardware encoder unavailable");
+                                mailbox.recycle(frame);
+                                return;
+                            }
+                        };
+                    }
+                    let publication = mailbox.commit_if_current(&frame, |current| {
+                        encoder
+                            .as_mut()
+                            .expect("current media epoch has an encoder")
+                            .publish(current)
+                    });
+                    let Some(publication) = publication else {
+                        mailbox.recycle(frame);
+                        continue;
+                    };
+                    if let Err(error) = publication {
+                        runtime.set_encoder_readiness(ComponentReadiness::Unavailable);
+                        tracing::error!(%error, "FFmpeg hardware publication stopped");
+                        mailbox.recycle(frame);
+                        return;
+                    }
+                    runtime.set_encoder_readiness(ComponentReadiness::Ready);
+                    completed = Some(frame);
+                } else if let Some(frame) = completed.as_ref() {
+                    let publication = mailbox.commit_if_current(frame, |current| {
+                        encoder
+                            .as_mut()
+                            .expect("completed frame has an encoder")
+                            .repeat(current)
+                    });
+                    if let Some(Err(error)) = publication {
+                        runtime.set_encoder_readiness(ComponentReadiness::Unavailable);
+                        tracing::error!(%error, "FFmpeg hardware repeat stopped");
+                        return;
+                    }
+                    if publication.is_none() {
+                        let stale = completed.take().expect("completed frame exists");
+                        mailbox.recycle(stale);
+                    }
                 }
-                runtime.set_encoder_readiness(ComponentReadiness::Ready);
-                mailbox.recycle(frame);
             }
         })
 }

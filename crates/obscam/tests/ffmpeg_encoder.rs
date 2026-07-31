@@ -48,9 +48,9 @@ fn one_ffmpeg_child_receives_native_i420_with_the_qualified_hardware_profile() {
     assert!(has_pair(&arguments, "-video_size", "1920x1080"));
     assert!(has_pair(&arguments, "-framerate", "20"));
     assert!(has_pair(&arguments, "-g", "20"));
-    assert!(has_pair(&arguments, "-f", "rtsp"));
-    assert!(has_pair(&arguments, "-rtsp_transport", "tcp"));
-    assert!(arguments.contains(&"rtsp://127.0.0.1:8554/obscam"));
+    assert!(has_pair(&arguments, "-f", "rtp"));
+    assert!(has_pair(&arguments, "-payload_type", "96"));
+    assert!(arguments.contains(&"rtp://127.0.0.1:5002?rtcpport=5003&pkt_size=1200"));
     assert!(!arguments.contains(&"libx264"));
     assert!(!arguments.contains(&"mjpeg"));
     assert_eq!(
