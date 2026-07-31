@@ -111,6 +111,7 @@ fn capture(
     }
     settings.mark_camera_ready();
     runtime.set_capture_readiness(ComponentReadiness::Ready);
+    let mut capture_in_progress = false;
 
     loop {
         match apply_pending_settings(&mut source, &settings, |generation| {
@@ -128,6 +129,15 @@ fn capture(
                 runtime.set_capture_readiness(ComponentReadiness::Ready);
             }
         }
+        if !capture_in_progress {
+            let applied = settings.snapshot().applied();
+            runtime.capture_started(
+                applied.generation(),
+                applied.settings().exposure_ms(),
+                unix_time_us(),
+            );
+            capture_in_progress = true;
+        }
         let started = Instant::now();
         let epoch = raw.current_epoch();
         match source.capture_next(100) {
@@ -143,8 +153,10 @@ fn capture(
                         exposure_completed_at_unix_us: unix_time_us(),
                     }),
                 );
+                capture_in_progress = false;
             }
-            Err(CaptureError::Timeout | CaptureError::Interrupted) => {}
+            Err(CaptureError::Timeout) => {}
+            Err(CaptureError::Interrupted) => capture_in_progress = false,
             Err(error) => {
                 settings.begin_recovery();
                 runtime.set_capture_readiness(ComponentReadiness::Unavailable);
@@ -326,20 +338,14 @@ fn spawn_encoder(
                     runtime.set_encoder_readiness(ComponentReadiness::Ready);
                     completed = Some(frame);
                 } else if let Some(frame) = completed.as_ref() {
-                    let publication = mailbox.commit_if_current(frame, |current| {
-                        encoder
-                            .as_mut()
-                            .expect("completed frame has an encoder")
-                            .repeat(current)
-                    });
-                    if let Some(Err(error)) = publication {
+                    let publication = encoder
+                        .as_mut()
+                        .expect("completed frame has an encoder")
+                        .repeat(frame);
+                    if let Err(error) = publication {
                         runtime.set_encoder_readiness(ComponentReadiness::Unavailable);
                         tracing::error!(%error, "FFmpeg hardware repeat stopped");
                         return;
-                    }
-                    if publication.is_none() {
-                        let stale = completed.take().expect("completed frame exists");
-                        mailbox.recycle(stale);
                     }
                 }
             }

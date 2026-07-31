@@ -72,3 +72,43 @@ fn missing_ffmpeg_program_fails_without_an_alternate_encoder() {
 
     assert_eq!(error.kind(), std::io::ErrorKind::NotFound);
 }
+
+#[test]
+fn completed_frame_remains_repeatable_across_a_settings_epoch() {
+    let directory = std::env::temp_dir().join(format!("obscam-repeat-test-{}", Uuid::new_v4()));
+    fs::create_dir(&directory).expect("create test directory");
+    let program = directory.join("fake-ffmpeg");
+    let input = directory.join("input");
+    fs::write(
+        &program,
+        format!("#!/bin/sh\ncat > '{}'\n", input.display()),
+    )
+    .expect("write fake FFmpeg");
+    fs::set_permissions(&program, fs::Permissions::from_mode(0o700)).expect("make executable");
+
+    let mut camera =
+        DeterministicCamera::connect(DeterministicScenario::new([])).expect("camera present");
+    camera
+        .configure(Settings::new(10_000, 0).expect("settings"))
+        .expect("configure");
+    camera.start().expect("start");
+    let source = camera.capture_next(100).expect("source generation");
+    let mut processor = MonochromeProcessor::new();
+    let mailbox = LatestFrameMailbox::new();
+    mailbox.publish(&processor.process(&source));
+    let frame = mailbox.take().expect("processed generation");
+
+    let mut encoder = FfmpegEncoder::start(&program).expect("start fake FFmpeg");
+    encoder.publish(&frame).expect("publish completed frame");
+    mailbox.begin_new_epoch();
+    encoder
+        .publish(&frame)
+        .expect("repeat last completed frame after settings boundary");
+    encoder.finish().expect("finish fake FFmpeg");
+
+    assert_eq!(
+        fs::metadata(input).expect("captured I420 input").len(),
+        2 * 1920 * 1080 * 3 / 2
+    );
+    fs::remove_dir_all(directory).expect("remove test directory");
+}

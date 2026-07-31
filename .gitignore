@@ -9,6 +9,8 @@
 
 # Browser tooling
 /node_modules/
+/playwright-report/
+/test-results/
 
 # Runtime output
 /logs/

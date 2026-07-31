@@ -42,6 +42,20 @@ test("a callback matches only exact retained RTP metadata", () => {
   );
 });
 
+test("an exact current-stream presentation survives qualified hardware pipeline delay", () => {
+  let state = initialPresentationState(runtimeEpoch, 2);
+  state = reducePresentation(state, { type: "mapping", mapping: parseFrameMapping(mapping) }).state;
+
+  assert.equal(
+    reducePresentation(state, {
+      type: "presented",
+      rtpTimestamp: mapping.rtpTimestamp,
+      nowUnixUs: mapping.submittedAtUnixUs + 1_500_000
+    }).presented?.sourceGeneration,
+    81
+  );
+});
+
 test("epoch changes, conflicts, and stale mappings fail closed", () => {
   let state = initialPresentationState(runtimeEpoch, 2);
   state = reducePresentation(state, { type: "mapping", mapping: parseFrameMapping(mapping) }).state;

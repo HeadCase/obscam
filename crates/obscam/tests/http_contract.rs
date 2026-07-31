@@ -22,6 +22,7 @@ async fn unavailable_runtime_contract_omits_unproven_frame_facts() {
     assert_eq!(response["media"]["whepPort"], 8889);
     assert_eq!(response["media"]["whepPath"], "/obscam/whep");
     assert_eq!(response["latestFrame"], Value::Null);
+    assert_eq!(response["capture"], Value::Null);
     assert_eq!(response["components"]["capture"]["state"], "unavailable");
     assert_eq!(response["components"]["encoder"]["state"], "unavailable");
     assert_eq!(response["components"]["relay"]["state"], "unavailable");
@@ -243,6 +244,13 @@ async fn production_assets_expose_the_complete_unavailable_viewer_shell() {
         "{whep_head}"
     );
     assert!(whep.contains("RTCPeerConnection"));
+
+    let (viewer_head, viewer) = get(address, "/assets/viewer.js").await;
+    assert!(
+        viewer_head.contains("content-type: text/javascript"),
+        "{viewer_head}"
+    );
+    assert!(viewer.contains("reduceViewer"));
 }
 
 async fn spawn_service() -> SocketAddr {

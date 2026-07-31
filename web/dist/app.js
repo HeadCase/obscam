@@ -1,8 +1,9 @@
-import { deriveViewerState, deriveWhepUrl, parseRuntimeContract } from "./model.js";
-import { ControlClient } from "./control.js";
+import { deriveWhepUrl, parseRuntimeContract } from "./model.js";
+import { ControlClient, readStoredCredentials } from "./control.js";
 import { startWhep } from "./whep.js";
-import { initialPresentationState, reducePresentation } from "./presentation.js";
+import { acceptsMediaPresentation, initialViewerState, parseLifecycleFacts, reduceViewer, viewerProjection } from "./viewer.js";
 import { ServiceQualityClient, downloadServiceQuality, serviceQualityText } from "./service-quality.js";
+const LIVENESS_TICK_MS = 100;
 async function boot() {
     const status = requiredElement("[data-viewer-status]");
     const detail = requiredElement("[data-viewer-detail]");
@@ -28,105 +29,174 @@ async function boot() {
             throw new Error(`runtime request failed with ${response.status}`);
         }
         const runtime = parseRuntimeContract(await response.json());
-        const viewer = deriveViewerState(runtime);
-        let latestSettings = { exposureMs: 500, gain: 100, treatment: "monochrome" };
-        let presentation = initialPresentationState(runtime.runtimeEpoch);
-        let qualityEvidence = null;
+        let viewer = initialViewerState(runtime.runtimeEpoch, readStoredCredentials());
         let quality = null;
-        let control;
-        control = new ControlClient(runtime.runtimeEpoch, (state) => {
-            if (state.connection === "disconnected") {
-                presentation = reducePresentation(presentation, {
-                    type: "reconnected",
-                    streamEpoch: presentation.streamEpoch
-                }).state;
-            }
-            latestSettings = state.settings.pending?.settings ?? state.settings.applied.settings;
-            renderControl(state, takeControl, controlStatus, exposureButtons, gain, gainOutput, monochrome, colour);
-        }, (mapping) => {
-            presentation = reducePresentation(presentation, { type: "mapping", mapping }).state;
-        });
-        takeControl.addEventListener("click", () => control.toggleAuthority());
-        for (const button of exposureButtons) {
-            button.addEventListener("click", () => {
-                control.setSettings({ ...latestSettings, exposureMs: Number(button.dataset.exposureMs) });
+        let qualityRuntimeEpoch = null;
+        let mediaSession = null;
+        let stopPresentedFrames = null;
+        let mediaAttempt = 0;
+        const render = () => {
+            const projection = viewerProjection(viewer);
+            status.textContent = projection.status;
+            detail.textContent = projection.detail;
+            serviceStatus.textContent = projection.status;
+            serviceDetail.textContent = projection.detail;
+            unavailable.hidden = viewer.trustworthyFrame !== null;
+            renderControl(viewer.control, takeControl, controlStatus, exposureButtons, gain, gainOutput, monochrome, colour);
+        };
+        const connectQuality = async () => {
+            const targetEpoch = viewer.runtimeEpoch;
+            const client = await ServiceQualityClient.connect(targetEpoch, (evidence) => {
+                if (viewer.runtimeEpoch !== targetEpoch)
+                    return;
+                qualityDetail.textContent = serviceQualityText(evidence);
+                qualityDownload.disabled = false;
+                dispatch({
+                    type: "evidence",
+                    p99DeliveryUs: currentDeliveryP99Us(evidence),
+                    response: evidence
+                });
             });
-        }
-        gain.addEventListener("change", () => {
-            control.setSettings({ ...latestSettings, gain: Number(gain.value) });
-        });
-        monochrome.addEventListener("click", () => {
-            control.setSettings({ ...latestSettings, treatment: "monochrome" });
-        });
-        colour.addEventListener("click", () => {
-            control.setSettings({ ...latestSettings, treatment: "colour" });
-        });
-        control.start();
-        window.addEventListener("pagehide", () => control.close(), { once: true });
-        status.textContent = viewer.status;
-        detail.textContent = unavailableDetail(runtime.components);
-        video.addEventListener("playing", () => {
-            unavailable.hidden = true;
-        }, { once: true });
-        try {
+            if (viewer.runtimeEpoch === targetEpoch) {
+                quality = client;
+                qualityRuntimeEpoch = targetEpoch;
+            }
+        };
+        const connectMedia = async (reconnection) => {
+            const attempt = ++mediaAttempt;
+            const connectionGeneration = dispatch({ type: "media_connecting" }).state
+                .mediaConnectionGeneration;
+            stopPresentedFrames?.();
+            stopPresentedFrames = null;
+            const previous = mediaSession;
+            mediaSession = null;
+            if (previous !== null) {
+                await previous.close();
+            }
             try {
-                quality = await ServiceQualityClient.connect(runtime.runtimeEpoch, (evidence) => {
-                    qualityEvidence = evidence;
-                    qualityDetail.textContent = serviceQualityText(evidence);
-                    qualityDownload.disabled = false;
-                });
-                qualityDownload.addEventListener("click", () => {
-                    if (qualityEvidence !== null && quality !== null) {
-                        downloadServiceQuality(qualityEvidence, quality.clientId);
-                    }
-                });
+                if (qualityRuntimeEpoch !== viewer.runtimeEpoch) {
+                    await connectQuality();
+                }
+                else if (reconnection && quality !== null) {
+                    await quality.reconnect();
+                }
             }
             catch (error) {
                 qualityDetail.textContent = "Quality evidence unavailable";
                 console.error("ObsCam service-quality connection failed", error);
             }
-            const session = await startWhep(video, deriveWhepUrl(runtime.media, window.location.href));
-            presentation = reducePresentation(presentation, {
-                type: "reconnected",
-                streamEpoch: presentation.streamEpoch
-            }).state;
-            watchPresentedFrames(video, (metadata) => {
-                const transition = reducePresentation(presentation, {
-                    type: "presented",
-                    ...(metadata.rtpTimestamp === undefined ? {} : { rtpTimestamp: metadata.rtpTimestamp }),
-                    nowUnixUs: Date.now() * 1_000
-                });
-                presentation = transition.state;
-                quality?.report({
-                    correlation: transition.presented === null ? "unknown" : "exact",
-                    streamEpoch: transition.presented?.streamEpoch ??
-                        (presentation.streamEpoch === 0 ? null : presentation.streamEpoch),
-                    ...(transition.presented === null || metadata.rtpTimestamp === undefined
-                        ? {}
-                        : { rtpTimestamp: metadata.rtpTimestamp }),
-                    presentedFrames: metadata.presentedFrames,
-                    visibility: document.visibilityState === "visible" ? "visible" : "hidden"
-                });
-                if (transition.presented !== null) {
-                    control.markVisible(transition.presented.settingsGeneration);
-                    status.textContent = "Visible";
-                    detail.textContent = `Generation ${transition.presented.sourceGeneration}`;
-                    serviceStatus.textContent = "Visible";
-                    serviceDetail.textContent = `Generation ${transition.presented.sourceGeneration}`;
+            try {
+                const session = await startWhep(video, deriveWhepUrl(runtime.media, window.location.href));
+                if (attempt !== mediaAttempt) {
+                    await session.close();
+                    return;
                 }
-                else {
-                    status.textContent = "Unknown";
-                    detail.textContent = "Frame correlation unavailable";
-                    serviceStatus.textContent = "Unknown";
-                    serviceDetail.textContent = "Frame correlation unavailable";
+                mediaSession = session;
+                dispatch({ type: "media_connected" });
+                stopPresentedFrames = watchPresentedFrames(video, (metadata) => {
+                    presentedFrame(connectionGeneration, metadata);
+                });
+            }
+            catch (error) {
+                if (attempt === mediaAttempt) {
+                    dispatch({ type: "media_disconnected" });
+                    console.error("ObsCam WHEP connection failed", error);
+                }
+            }
+        };
+        const dispatch = (event) => {
+            const transition = reduceViewer(viewer, event);
+            viewer = transition.state;
+            render();
+            if (transition.effects.includes("reconnect_media")) {
+                void connectMedia(true);
+            }
+            return transition;
+        };
+        const controlTransition = (event) => {
+            const transition = dispatch({ type: "control", event });
+            return { state: transition.state.control, storage: transition.controlStorage };
+        };
+        const presentedFrame = (mediaConnectionGeneration, metadata) => {
+            const currentMedia = acceptsMediaPresentation(viewer, mediaConnectionGeneration);
+            const nowUnixUs = currentServerUnixUs(quality, qualityRuntimeEpoch, viewer.runtimeEpoch);
+            if (nowUnixUs !== null) {
+                dispatch({
+                    type: "presented",
+                    mediaConnectionGeneration,
+                    ...(metadata.rtpTimestamp === undefined ? {} : { rtpTimestamp: metadata.rtpTimestamp }),
+                    nowUnixUs
+                });
+            }
+            const exact = currentMedia &&
+                nowUnixUs !== null &&
+                !viewer.awaitingCurrentPresentation &&
+                viewer.correlationLostAtUnixUs === null &&
+                viewer.trustworthyFrame !== null;
+            quality?.report({
+                correlation: exact ? "exact" : "unknown",
+                streamEpoch: exact ? viewer.trustworthyFrame?.streamEpoch ?? null :
+                    viewer.presentation.streamEpoch === 0 ? null : viewer.presentation.streamEpoch,
+                ...(exact && metadata.rtpTimestamp !== undefined
+                    ? { rtpTimestamp: metadata.rtpTimestamp }
+                    : {}),
+                presentedFrames: metadata.presentedFrames,
+                visibility: document.visibilityState === "visible" ? "visible" : "hidden"
+            });
+        };
+        const control = new ControlClient(() => viewer.runtimeEpoch, () => viewer.control, controlTransition, (mapping) => dispatch({ type: "mapping", mapping }), (value) => dispatch({ type: "lifecycle", facts: parseLifecycleFacts(value) }));
+        takeControl.addEventListener("click", () => control.toggleAuthority());
+        for (const button of exposureButtons) {
+            button.addEventListener("click", () => {
+                control.setSettings({
+                    ...selectedSettings(viewer.control),
+                    exposureMs: Number(button.dataset.exposureMs)
+                });
+            });
+        }
+        gain.addEventListener("change", () => {
+            control.setSettings({ ...selectedSettings(viewer.control), gain: Number(gain.value) });
+        });
+        monochrome.addEventListener("click", () => {
+            control.setSettings({ ...selectedSettings(viewer.control), treatment: "monochrome" });
+        });
+        colour.addEventListener("click", () => {
+            control.setSettings({ ...selectedSettings(viewer.control), treatment: "colour" });
+        });
+        render();
+        control.start();
+        try {
+            await connectQuality();
+            qualityDownload.addEventListener("click", () => {
+                if (viewer.evidence.response !== null && quality !== null) {
+                    downloadServiceQuality(viewer.evidence.response, quality.clientId);
                 }
             });
-            window.addEventListener("pagehide", () => void session.close(), { once: true });
         }
         catch (error) {
-            detail.textContent = "Media unavailable";
-            console.error("ObsCam WHEP connection failed", error);
+            qualityDetail.textContent = "Quality evidence unavailable";
+            console.error("ObsCam service-quality connection failed", error);
         }
+        document.addEventListener("visibilitychange", () => {
+            dispatch({
+                type: "visibility",
+                visibility: document.visibilityState === "visible" ? "visible" : "hidden"
+            });
+        });
+        const tick = window.setInterval(() => {
+            const nowUnixUs = currentServerUnixUs(quality, qualityRuntimeEpoch, viewer.runtimeEpoch);
+            if (nowUnixUs !== null) {
+                dispatch({ type: "tick", nowUnixUs });
+            }
+        }, LIVENESS_TICK_MS);
+        window.addEventListener("pagehide", () => {
+            window.clearInterval(tick);
+            mediaAttempt += 1;
+            control.close();
+            stopPresentedFrames?.();
+            void mediaSession?.close();
+        }, { once: true });
+        await connectMedia(false);
     }
     catch (error) {
         status.textContent = "Unavailable";
@@ -134,17 +204,42 @@ async function boot() {
         console.error("ObsCam viewer bootstrap failed", error);
     }
 }
+function currentServerUnixUs(quality, qualityRuntimeEpoch, runtimeEpoch) {
+    return quality !== null && qualityRuntimeEpoch === runtimeEpoch ? quality.nowUnixUs() : null;
+}
+function currentDeliveryP99Us(response) {
+    const client = response.clients[0];
+    if (client === undefined)
+        return null;
+    const candidates = client.partitions
+        .filter((partition) => partition.connectionGeneration === client.connectionGeneration &&
+        partition.visibility === "visible" &&
+        partition.exactCorrelation > 0 &&
+        partition.latencyUs !== null)
+        .map((partition) => partition.latencyUs?.p99 ?? 0);
+    return candidates.length === 0 ? null : Math.max(...candidates);
+}
+function selectedSettings(state) {
+    return state.settings.pending?.settings ?? state.settings.applied.settings;
+}
 function watchPresentedFrames(video, presented) {
+    let callbackId = null;
     const callback = (_now, metadata) => {
         presented(metadata);
-        video.requestVideoFrameCallback(callback);
+        callbackId = video.requestVideoFrameCallback(callback);
     };
-    video.requestVideoFrameCallback(callback);
+    callbackId = video.requestVideoFrameCallback(callback);
+    return () => {
+        if (callbackId !== null) {
+            video.cancelVideoFrameCallback(callbackId);
+            callbackId = null;
+        }
+    };
 }
 function renderControl(state, takeControl, controlStatus, exposureButtons, gain, gainOutput, monochrome, colour) {
     takeControl.disabled = state.connection !== "connected" || state.pendingIntent;
     takeControl.textContent = state.ownership === "you" ? "Release control" : "Take control";
-    const settings = state.settings.pending?.settings ?? state.settings.applied.settings;
+    const settings = selectedSettings(state);
     const settingsDisabled = !state.mayMutate || state.pendingIntent;
     for (const button of exposureButtons) {
         button.disabled = settingsDisabled;
@@ -158,52 +253,33 @@ function renderControl(state, takeControl, controlStatus, exposureButtons, gain,
     monochrome.setAttribute("aria-pressed", String(settings.treatment === "monochrome"));
     colour.setAttribute("aria-pressed", String(settings.treatment === "colour"));
     controlStatus.textContent =
-        state.connection === "disconnected"
-            ? "Control reconnecting"
-            : state.settings.pending !== null
-                ? "Applying settings"
-                : state.ownership === "you"
-                    ? "You have control"
-                    : state.ownership === "another_viewer"
-                        ? "Another viewer has control"
-                        : "No one has control";
+        state.connection === "disconnected" ? "Control reconnecting" :
+            state.settings.pending !== null ? "Applying settings" :
+                state.ownership === "you" ? "You have control" :
+                    state.ownership === "another_viewer" ? "Another viewer has control" : "No one has control";
 }
 function requiredInput(selector) {
     const element = document.querySelector(selector);
-    if (element === null) {
+    if (element === null)
         throw new Error(`viewer shell is missing ${selector}`);
-    }
     return element;
 }
 function requiredVideo(selector) {
     const element = document.querySelector(selector);
-    if (element === null) {
+    if (element === null)
         throw new Error(`viewer shell is missing ${selector}`);
-    }
     return element;
 }
 function requiredButton(selector) {
     const element = document.querySelector(selector);
-    if (element === null) {
+    if (element === null)
         throw new Error(`viewer shell is missing ${selector}`);
-    }
     return element;
-}
-function unavailableDetail(components) {
-    const unavailable = [
-        ["Capture", components.capture.state],
-        ["Encoder", components.encoder.state],
-        ["Relay", components.relay.state]
-    ]
-        .filter(([, state]) => state === "unavailable")
-        .map(([name]) => name);
-    return `${unavailable.join(" · ")} unavailable`;
 }
 function requiredElement(selector) {
     const element = document.querySelector(selector);
-    if (element === null) {
+    if (element === null)
         throw new Error(`viewer shell is missing ${selector}`);
-    }
     return element;
 }
 void boot();

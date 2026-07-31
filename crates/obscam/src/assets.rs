@@ -3,6 +3,8 @@ use axum::{
     http::{Response, header},
 };
 
+// Browser build outputs are embedded so each Rust binary is one qualified asset set.
+
 const INDEX: &str = include_str!(concat!(
     env!("CARGO_MANIFEST_DIR"),
     "/../../web/dist/index.html"
@@ -30,6 +32,10 @@ const SERVICE_QUALITY: &str = include_str!(concat!(
 const WHEP: &str = include_str!(concat!(
     env!("CARGO_MANIFEST_DIR"),
     "/../../web/dist/whep.js"
+));
+const VIEWER: &str = include_str!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../../web/dist/viewer.js"
 ));
 const STYLES: &str = include_str!(concat!(
     env!("CARGO_MANIFEST_DIR"),
@@ -62,6 +68,10 @@ pub(crate) async fn service_quality() -> Response<Body> {
 
 pub(crate) async fn whep() -> Response<Body> {
     response("text/javascript; charset=utf-8", WHEP)
+}
+
+pub(crate) async fn viewer() -> Response<Body> {
+    response("text/javascript; charset=utf-8", VIEWER)
 }
 
 pub(crate) async fn styles() -> Response<Body> {
