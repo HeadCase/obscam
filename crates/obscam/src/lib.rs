@@ -11,6 +11,7 @@ mod monochrome;
 mod pipeline;
 mod runtime;
 mod service;
+mod service_quality;
 mod settings;
 
 pub use authority::{

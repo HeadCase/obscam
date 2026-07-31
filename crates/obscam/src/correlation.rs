@@ -86,6 +86,14 @@ pub struct CorrelationMapping {
 }
 
 impl CorrelationMapping {
+    pub(crate) const fn runtime_epoch(self) -> Uuid {
+        self.submission.runtime_epoch
+    }
+
+    pub(crate) const fn stream_epoch(self) -> u64 {
+        self.submission.stream_epoch
+    }
+
     /// Observed 90 kHz RTP timestamp.
     #[must_use]
     pub const fn rtp_timestamp(self) -> u32 {
@@ -96,6 +104,22 @@ impl CorrelationMapping {
     #[must_use]
     pub const fn source_generation(self) -> u64 {
         self.submission.source_generation
+    }
+
+    pub(crate) const fn settings_generation(self) -> u64 {
+        self.submission.settings_generation
+    }
+
+    pub(crate) const fn treatment(self) -> Treatment {
+        self.submission.treatment
+    }
+
+    pub(crate) const fn dimensions(self) -> (u16, u16) {
+        (self.submission.width, self.submission.height)
+    }
+
+    pub(crate) const fn exposure_completed_at_unix_us(self) -> u64 {
+        self.submission.exposure_completed_at_unix_us
     }
 
     /// Whether this input was a bounded repeat of the completed generation.
@@ -229,6 +253,17 @@ impl CorrelationState {
 
     pub(crate) fn subscribe(&self) -> broadcast::Receiver<CorrelationMapping> {
         self.updates.subscribe()
+    }
+
+    pub(crate) fn lookup(
+        &self,
+        stream_epoch: u64,
+        rtp_timestamp: u32,
+    ) -> Option<CorrelationMapping> {
+        let inner = self.inner.lock().expect("correlation mutex poisoned");
+        (inner.stream_epoch == stream_epoch)
+            .then(|| inner.tracker.lookup(rtp_timestamp).copied())
+            .flatten()
     }
 }
 

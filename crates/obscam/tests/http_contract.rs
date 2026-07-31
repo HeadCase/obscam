@@ -1,4 +1,5 @@
 use std::net::SocketAddr;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use obscam::{ComponentReadiness, Config, RuntimeState};
 use serde_json::Value;
@@ -61,6 +62,117 @@ async fn component_readiness_is_exposed_independently() {
 }
 
 #[tokio::test]
+async fn browser_reports_unknown_presentation_into_authoritative_scoped_evidence() {
+    let address = spawn_service().await;
+    let client_id = Uuid::from_u128(42);
+    let connection = post_json(
+        address,
+        "/api/v1/service-quality/connections",
+        serde_json::json!({
+            "schemaVersion": 1,
+            "clientId": client_id,
+            "runtimeEpoch": EPOCH,
+        }),
+    )
+    .await;
+    assert_eq!(connection["connectionGeneration"], 1);
+    assert_eq!(connection["reconnects"], 0);
+
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("current time")
+        .as_micros();
+    let report = serde_json::json!({
+        "schemaVersion": 1,
+        "clientId": client_id,
+        "runtimeEpoch": EPOCH,
+        "connectionGeneration": 1,
+        "streamEpoch": null,
+        "presentedFrames": 1,
+        "presentedAtUnixUs": now,
+        "clockUncertaintyUs": 1_000,
+        "visibility": "visible",
+        "correlation": "unknown",
+    });
+    let (head, body) = request_json(address, "POST", "/api/v1/service-quality", &report).await;
+    assert!(head.starts_with("HTTP/1.1 204 No Content"), "{head}");
+    assert!(body.is_empty());
+
+    let evidence = get_json(
+        address,
+        &format!("/api/v1/service-quality?clientId={client_id}"),
+    )
+    .await;
+    assert_eq!(evidence["limits"]["clients"], 16);
+    assert_eq!(evidence["limits"]["samplesPerClient"], 512);
+    assert_eq!(evidence["clients"].as_array().expect("clients").len(), 1);
+    assert_eq!(evidence["clients"][0]["sampleCount"], 1);
+    assert_eq!(evidence["clients"][0]["exactCorrelation"], 0);
+    assert_eq!(evidence["clients"][0]["unknownCorrelation"], 1);
+    assert_eq!(
+        evidence["clients"][0]["samples"][0]["sourceGeneration"],
+        Value::Null
+    );
+    assert_eq!(
+        evidence["clients"][0]["samples"][0]["latencyUs"],
+        Value::Null
+    );
+    assert_eq!(evidence["combined"]["sampleCount"], 1);
+}
+
+#[tokio::test]
+async fn media_connection_generation_is_explicit_and_stale_reports_are_rejected() {
+    let address = spawn_service().await;
+    let client_id = Uuid::from_u128(42);
+    let connection_request = serde_json::json!({
+        "schemaVersion": 1,
+        "clientId": client_id,
+        "runtimeEpoch": EPOCH,
+    });
+    post_json(
+        address,
+        "/api/v1/service-quality/connections",
+        connection_request.clone(),
+    )
+    .await;
+    let second = post_json(
+        address,
+        "/api/v1/service-quality/connections",
+        connection_request,
+    )
+    .await;
+    assert_eq!(second["connectionGeneration"], 2);
+    assert_eq!(second["reconnects"], 1);
+
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("current time")
+        .as_micros();
+    let stale = serde_json::json!({
+        "schemaVersion": 1,
+        "clientId": client_id,
+        "runtimeEpoch": EPOCH,
+        "connectionGeneration": 1,
+        "streamEpoch": null,
+        "presentedFrames": 1,
+        "presentedAtUnixUs": now,
+        "clockUncertaintyUs": 1_000,
+        "visibility": "visible",
+        "correlation": "unknown",
+    });
+    let (head, _) = request_json(address, "POST", "/api/v1/service-quality", &stale).await;
+    assert!(head.starts_with("HTTP/1.1 409 Conflict"), "{head}");
+}
+
+#[tokio::test]
+async fn clock_contract_uses_the_runtime_schema() {
+    let address = spawn_service().await;
+    let response = get_json(address, "/api/v1/clock").await;
+    assert_eq!(response["schemaVersion"], 1);
+    assert!(response["serverUnixUs"].as_u64().is_some());
+}
+
+#[tokio::test]
 async fn production_assets_expose_the_complete_unavailable_viewer_shell() {
     let address = spawn_service().await;
 
@@ -106,6 +218,13 @@ async fn production_assets_expose_the_complete_unavailable_viewer_shell() {
     );
     assert!(presentation.contains("reducePresentation"));
 
+    let (quality_head, quality) = get(address, "/assets/service-quality.js").await;
+    assert!(
+        quality_head.contains("content-type: text/javascript"),
+        "{quality_head}"
+    );
+    assert!(quality.contains("ServiceQualityClient"));
+
     let (style_head, style) = get(address, "/assets/styles.css").await;
     assert!(
         style_head.contains("content-type: text/css"),
@@ -146,6 +265,40 @@ async fn get_json(address: SocketAddr, path: &str) -> Value {
     let (head, body) = get(address, path).await;
     assert!(head.starts_with("HTTP/1.1 200 OK"), "{head}");
     serde_json::from_str(&body).expect("JSON response body")
+}
+
+async fn post_json(address: SocketAddr, path: &str, body: Value) -> Value {
+    let (head, body) = request_json(address, "POST", path, &body).await;
+    assert!(head.starts_with("HTTP/1.1 200 OK"), "{head}");
+    serde_json::from_str(&body).expect("JSON response body")
+}
+
+async fn request_json(
+    address: SocketAddr,
+    method: &str,
+    path: &str,
+    body: &Value,
+) -> (String, String) {
+    let body = serde_json::to_string(body).expect("serialize request");
+    let mut stream = TcpStream::connect(address)
+        .await
+        .expect("connect to test service");
+    let request = format!(
+        "{method} {path} HTTP/1.1\r\nHost: {address}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+        body.len()
+    );
+    stream
+        .write_all(request.as_bytes())
+        .await
+        .expect("write request");
+    let mut response = Vec::new();
+    stream
+        .read_to_end(&mut response)
+        .await
+        .expect("read response");
+    let response = String::from_utf8(response).expect("UTF-8 HTTP response");
+    let (head, body) = response.split_once("\r\n\r\n").expect("HTTP response");
+    (head.to_owned(), body.to_owned())
 }
 
 async fn get(address: SocketAddr, path: &str) -> (String, String) {

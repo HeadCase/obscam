@@ -5,6 +5,7 @@ use uuid::Uuid;
 
 use crate::{
     AuthorityGate, Config, SettingsController, config::WhepPath, correlation::CorrelationState,
+    service_quality::ServiceQualityState,
 };
 
 pub(crate) const SCHEMA_VERSION: u8 = 1;
@@ -16,6 +17,7 @@ pub struct RuntimeState {
     authority: AuthorityGate,
     settings: SettingsController,
     correlation: CorrelationState,
+    service_quality: ServiceQualityState,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -50,6 +52,7 @@ impl RuntimeState {
         encoder: ComponentReadiness,
         relay: ComponentReadiness,
     ) -> Self {
+        let correlation = CorrelationState::new(runtime_epoch);
         Self {
             snapshot: Arc::new(RwLock::new(RuntimeSnapshot {
                 schema_version: SCHEMA_VERSION,
@@ -70,7 +73,8 @@ impl RuntimeState {
             })),
             authority: AuthorityGate::new(),
             settings: SettingsController::new(config.default_settings()),
-            correlation: CorrelationState::new(runtime_epoch),
+            service_quality: ServiceQualityState::new(runtime_epoch, correlation.clone()),
+            correlation,
         }
     }
 
@@ -115,6 +119,10 @@ impl RuntimeState {
 
     pub(crate) fn correlation(&self) -> CorrelationState {
         self.correlation.clone()
+    }
+
+    pub(crate) fn service_quality(&self) -> ServiceQualityState {
+        self.service_quality.clone()
     }
 
     /// Revokes authority when the camera backend restarts or runtime recovery begins.
