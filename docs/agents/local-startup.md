@@ -8,6 +8,15 @@ unit because a foreground wildcard listener cannot enforce the required
 interface boundary. ObsCam remains a manual foreground process. This is not a
 deterministic test stack.
 
+> [!CAUTION]
+> This procedure is temporarily suspended. A real WHEP attempt proved that
+> MediaMTX/Pion requires netlink access to enumerate local interfaces when it
+> creates every ICE peer connection. The checked-in unit blocks that access,
+> so WHEP returns HTTP 400; granting host netlink access would violate the
+> protected-interface boundary. Do not start ObsCam or MediaMTX through this
+> procedure until an accepted network-namespace boundary replaces the current
+> unit. GRE-224 owns that deployment decision.
+
 ## Prerequisites
 
 - Run commands from the repository root.

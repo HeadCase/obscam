@@ -66,8 +66,18 @@ systemd loaded the exact interface restriction, and MediaMTX v1.19.3 remained
 active with zero restarts under a dynamic unprivileged identity. A Mac browser
 reached its HTTP listener over both the LAN and permitted WireGuard addresses.
 
-Complete media-presentation evidence has not yet been rerun because ObsCam was
-not started during the isolation check. Live exact and unknown callback
-reporting, rendered rolling values, JSON download interaction, and mobile
-viewport behavior therefore remain blocked graphical checks rather than
-inferred passes. The pre-existing `/favicon.ico` 404 was also present.
+Complete media-presentation verification could not finish. Starting ObsCam
+after the initial isolation check exposed a deeper blocker: the real capture
+and hardware encoder reported ready and MediaMTX accepted the H.264 RTP stream,
+but each browser WHEP POST returned HTTP 400. MediaMTX reported
+`error getting local interfaces` because the unit correctly denied netlink.
+Pinned Pion ICE v4.3.0 unconditionally enumerates local interfaces while
+constructing every peer connection, even when MediaMTX interface-derived
+candidate advertisement is disabled. Granting host netlink access would violate
+the protected-interface boundary, so ObsCam and MediaMTX were stopped.
+
+Live exact and unknown callback reporting, rendered rolling values, JSON
+download interaction, and mobile viewport behavior remain blocked rather than
+inferred passes. A true network namespace containing only the media loopback or
+veth boundary is required before WHEP verification can resume. The pre-existing
+`/favicon.ico` 404 was also present.
