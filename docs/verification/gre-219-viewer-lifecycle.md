@@ -67,8 +67,9 @@ MediaMTX v1.19.3, and the Mac Playwright Chromium browser over the permitted
 - Restoring 500 ms advanced settings generation 2 and returned to Live.
 - Foreground return advanced the client media-connection generation from 1 to
   2, exercising the immediate reconnect effect.
-- Mobile 390x844 and desktop 1440x900 viewports had no horizontal or vertical
-  overflow. The final page had no console errors or warnings.
+- Mobile 390x844 and desktop 1440x900 viewports had no horizontal overflow;
+  operator controls remained reachable. The final page had no console errors
+  or warnings.
 
 After review hardening, the same production stack was rerun. The 30 s setting
 entered Capturing immediately and remained Capturing with unknown freshness
@@ -77,6 +78,40 @@ the settings transition; the viewer then reported Stale because exact browser
 correlation was not refreshed within its grace period, rather than inventing a
 Live claim. The 390x844 viewport again had no horizontal overflow, and the
 browser reported no console errors or warnings.
+
+## Playwright acceptance follow-up -- 2026-07-31
+
+A repository-owned Playwright suite now runs from the operator Mac against the
+deployed Pi service. It covers stable native viewing, independent gain,
+exposure, and treatment changes, short-to-long and long-to-short exposure
+transitions, retained video, authority takeover, responsive layout, browser
+errors, failed requests, and foreground reconnection. Settings tests restore
+the tuple they observed and release authority.
+
+The first stable-viewing scenario reproduced a real failure twice: the default
+500 ms view oscillated from Live to Stale while native video kept playing. A
+browser-side WebSocket and video-callback probe showed exact mappings arriving
+roughly 1.01--1.05 seconds after submission, just outside the prior one-second
+mapping window. A focused regression now qualifies a current-stream exact
+presentation at 1.5 seconds, while the existing bounded mapping retention and
+runtime, stream, and media-generation fences continue to reject old sessions.
+
+After increasing that exact-mapping window to two seconds, the unchanged
+deployed scenario observed twelve consecutive Live samples over six seconds;
+native 1920x1080 video advanced 6.098 seconds. The deployed interaction checks
+also passed for gain-only, exposure-only, treatment-only, authority takeover,
+100 ms to 30 s to 100 ms, retained-video progress, mobile/desktop layout, and
+clean console/network behavior.
+
+The restarted Mac Playwright MCP keeps multiple pages reported as visible, so
+the reconnect scenario drives the browser's `visibilitychange` contract with a
+controlled `document.visibilityState` rather than depending on window-manager
+tab semantics. Against the deployed stack it observed two service-quality
+connection attempts, recorded Reconnecting before returning to Live, and saw
+the resumed video advance from 0 to 0.566 seconds. This completes the deployed
+run of every scenario in the repository-owned suite. The Pi does not install a
+local Chromium executable; the checked-in `npm run test:browser` runner remains
+for the operator Mac, while agents execute its scenarios through the Mac MCP.
 
 Safari, Zen, physical-LAN ingress, four-viewer load, and the production field
 soak remain release-promotion evidence owned by the parent specification; they

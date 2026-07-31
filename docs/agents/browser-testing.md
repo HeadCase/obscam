@@ -54,6 +54,28 @@ route or fallback.
    both permitted service routes have been checked. Never involve `wg1` in that
    diagnosis.
 
+## Repository Playwright Suite
+
+The repeatable graphical acceptance suite lives in `web/e2e`. Run it from an
+operator-Mac checkout while the intended release build and MediaMTX are running
+on the Pi:
+
+```sh
+npm ci
+npx playwright install chromium
+OBSCAM_BASE_URL=http://10.164.190.1:8080 npm run test:browser
+```
+
+Use `http://192.168.1.200:8080` only for the permitted LAN fallback described
+above. The suite is serial because camera settings and control authority are
+shared appliance state. Every settings test restores the tuple it observed and
+releases authority. Playwright retains traces, screenshots, and video for a
+failing test in `test-results`, with the HTML report in `playwright-report`.
+
+The browser suite is a required quality gate for browser behavior changes. A
+Pi-side typecheck or reducer test does not substitute for running Chromium on
+the Mac against the deployed Rust, FFmpeg, and MediaMTX path.
+
 ## GRE-211 Known-Good Check
 
 The truthful unavailable viewer was verified from the Mac browser against

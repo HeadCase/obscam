@@ -1,5 +1,8 @@
 const MAX_MAPPINGS = 128;
-const MAX_MAPPING_AGE_US = 1_000_000;
+// The qualified Pi hardware pipeline can present an exact RTP mapping just over
+// one second after FFmpeg submission. Stream/media-generation fences and the
+// bounded mapping window still reject callbacks from prior sessions.
+const MAX_MAPPING_AGE_US = 2_000_000;
 export function initialPresentationState(runtimeEpoch, streamEpoch = 0) {
     return { runtimeEpoch, streamEpoch, mappings: [], poisonedTimestamps: [] };
 }
