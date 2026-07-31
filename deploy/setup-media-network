@@ -1,0 +1,47 @@
+#!/bin/sh
+set -eu
+
+namespace=obscam-media
+host_link=obscam-media0
+namespace_link=media0
+rules=/etc/obscam/obscam-media.nft
+
+remove_owned_network() {
+    if /usr/sbin/nft list table inet obscam_media >/dev/null 2>&1; then
+        /usr/sbin/nft delete table inet obscam_media
+    fi
+    if /usr/sbin/ip netns list | /usr/bin/grep -Eq "^${namespace}( |$)"; then
+        /usr/sbin/ip netns delete "${namespace}"
+    elif /usr/sbin/ip link show "${host_link}" >/dev/null 2>&1; then
+        /usr/sbin/ip link delete "${host_link}"
+    fi
+}
+
+case "${1:-}" in
+    start)
+        if [ "$(/usr/sbin/sysctl -n net.ipv4.ip_forward)" != 1 ]; then
+            echo "net.ipv4.ip_forward must already be enabled" >&2
+            exit 1
+        fi
+        remove_owned_network
+        trap remove_owned_network EXIT
+        /usr/sbin/ip netns add "${namespace}"
+        /usr/sbin/ip link add "${host_link}" type veth peer name "${namespace_link}"
+        /usr/sbin/ip address add 169.254.218.1/30 dev "${host_link}"
+        /usr/sbin/ip link set "${host_link}" up
+        /usr/sbin/ip link set "${namespace_link}" netns "${namespace}"
+        /usr/sbin/ip -n "${namespace}" address add 169.254.218.2/30 dev "${namespace_link}"
+        /usr/sbin/ip -n "${namespace}" link set lo up
+        /usr/sbin/ip -n "${namespace}" link set "${namespace_link}" up
+        /usr/sbin/ip -n "${namespace}" route add default via 169.254.218.1
+        /usr/sbin/nft --file "${rules}"
+        trap - EXIT
+        ;;
+    stop)
+        remove_owned_network
+        ;;
+    *)
+        echo "usage: $0 start|stop" >&2
+        exit 2
+        ;;
+esac

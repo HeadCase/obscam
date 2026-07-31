@@ -16,8 +16,9 @@ use crate::{PublishedFrame, correlation::CorrelationState};
 
 const RTP_INPUT_ADDRESS: &str = "127.0.0.1:5002";
 const RTCP_INPUT_ADDRESS: &str = "127.0.0.1:5003";
-const RTP_RELAY_ADDRESS: &str = "127.0.0.1:5004";
-const RTCP_RELAY_ADDRESS: &str = "127.0.0.1:5005";
+const RTP_RELAY_ADDRESS: &str = "169.254.218.2:5004";
+const RTCP_RELAY_ADDRESS: &str = "169.254.218.2:5005";
+const RELAY_BIND_ADDRESS: &str = "0.0.0.0:0";
 const RTP_URL: &str = "rtp://127.0.0.1:5002?rtcpport=5003&pkt_size=1200";
 const RTP_CLOCK_STEP: u64 = 4_500;
 const RTP_PAYLOAD_TYPE: u8 = 96;
@@ -225,6 +226,8 @@ impl RtpObserver {
     ) -> io::Result<Self> {
         let media_socket = bound_socket(RTP_INPUT_ADDRESS)?;
         let control_socket = bound_socket(RTCP_INPUT_ADDRESS)?;
+        let media_relay_socket = relay_socket()?;
+        let control_relay_socket = relay_socket()?;
         let media_relay = parse_address(RTP_RELAY_ADDRESS)?;
         let control_relay = parse_address(RTCP_RELAY_ADDRESS)?;
         let stop = Arc::new(AtomicBool::new(false));
@@ -239,6 +242,7 @@ impl RtpObserver {
             .spawn(move || {
                 relay_rtp(
                     &media_socket,
+                    &media_relay_socket,
                     media_relay,
                     &rtp_sender,
                     &media_stop,
@@ -254,6 +258,7 @@ impl RtpObserver {
             .spawn(move || {
                 relay_rtcp(
                     &control_socket,
+                    &control_relay_socket,
                     control_relay,
                     &report_sender,
                     &control_stop,
@@ -377,6 +382,7 @@ fn pair_timestamps(
 
 fn relay_rtp(
     socket: &UdpSocket,
+    relay_socket: &UdpSocket,
     relay: SocketAddr,
     timestamps: &SyncSender<u32>,
     stop: &AtomicBool,
@@ -385,6 +391,7 @@ fn relay_rtp(
 ) {
     let mut packet = [0_u8; 2_048];
     let mut previous_sequence = None;
+    let mut relay_available = true;
     while !stop.load(Ordering::Acquire) {
         let Ok(length) = socket.recv(&mut packet) else {
             continue;
@@ -398,18 +405,25 @@ fn relay_rtp(
         }
         previous_sequence = Some(sequence);
         observed_packets.fetch_add(1, Ordering::AcqRel);
-        let _ = socket.send_to(&packet[..length], relay);
-        if let Some(timestamp) = timestamp
-            && timestamps.try_send(timestamp).is_err()
-        {
-            evidence_valid.store(false, Ordering::Release);
-            return;
+        if !forward_packet(
+            relay_socket,
+            &packet[..length],
+            relay,
+            "RTP",
+            &mut relay_available,
+            evidence_valid,
+        ) {
+            continue;
+        }
+        if let Some(timestamp) = timestamp {
+            submit_evidence(timestamps, timestamp, evidence_valid);
         }
     }
 }
 
 fn relay_rtcp(
     socket: &UdpSocket,
+    relay_socket: &UdpSocket,
     relay: SocketAddr,
     reports: &SyncSender<(u32, u32)>,
     stop: &AtomicBool,
@@ -417,6 +431,7 @@ fn relay_rtcp(
     observed_packets: &AtomicU32,
 ) {
     let mut packet = [0_u8; 2_048];
+    let mut relay_available = true;
     while !stop.load(Ordering::Acquire) {
         let Ok(length) = socket.recv(&mut packet) else {
             continue;
@@ -425,13 +440,67 @@ fn relay_rtcp(
             evidence_valid.store(false, Ordering::Release);
             continue;
         };
-        let _ = socket.send_to(&packet[..length], relay);
+        if !forward_packet(
+            relay_socket,
+            &packet[..length],
+            relay,
+            "RTCP",
+            &mut relay_available,
+            evidence_valid,
+        ) {
+            continue;
+        }
         let observed = observed_packets.load(Ordering::Acquire);
-        if reports.try_send((sender_packets, observed)).is_err() {
+        submit_evidence(reports, (sender_packets, observed), evidence_valid);
+    }
+}
+
+fn submit_evidence<T>(sender: &SyncSender<T>, value: T, evidence_valid: &AtomicBool) {
+    if evidence_valid.load(Ordering::Acquire) && sender.try_send(value).is_err() {
+        evidence_valid.store(false, Ordering::Release);
+    }
+}
+
+fn forward_packet(
+    socket: &UdpSocket,
+    packet: &[u8],
+    relay: SocketAddr,
+    protocol: &'static str,
+    available: &mut bool,
+    evidence_valid: &AtomicBool,
+) -> bool {
+    match socket.send_to(packet, relay) {
+        Ok(_) => {
+            if relay_transition(available, true) == RelayTransition::Recovered {
+                tracing::info!(protocol, %relay, "media relay recovered");
+            }
+            true
+        }
+        Err(error) => {
             evidence_valid.store(false, Ordering::Release);
-            return;
+            if relay_transition(available, false) == RelayTransition::Lost {
+                tracing::warn!(protocol, %error, %relay, "media relay unavailable; retrying");
+            }
+            false
         }
     }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum RelayTransition {
+    Stable,
+    Lost,
+    Recovered,
+}
+
+fn relay_transition(available: &mut bool, succeeded: bool) -> RelayTransition {
+    let transition = match (*available, succeeded) {
+        (true, false) => RelayTransition::Lost,
+        (false, true) => RelayTransition::Recovered,
+        _ => RelayTransition::Stable,
+    };
+    *available = succeeded;
+    transition
 }
 
 fn rtp_packet(packet: &[u8]) -> Option<(u16, Option<u32>)> {
@@ -469,6 +538,10 @@ fn bound_socket(address: &str) -> io::Result<UdpSocket> {
     let socket = UdpSocket::bind(address)?;
     socket.set_read_timeout(Some(Duration::from_millis(100)))?;
     Ok(socket)
+}
+
+fn relay_socket() -> io::Result<UdpSocket> {
+    UdpSocket::bind(RELAY_BIND_ADDRESS)
 }
 
 fn parse_address(address: &str) -> io::Result<SocketAddr> {
@@ -521,5 +594,46 @@ mod tests {
         assert_eq!(sender_report_packet_count(&packet), Some(123));
         packet[4..8].copy_from_slice(&1_u32.to_be_bytes());
         assert_eq!(sender_report_packet_count(&packet), None);
+    }
+
+    #[test]
+    fn relay_socket_leaves_source_selection_to_the_private_veth_route() {
+        let address = parse_address(RELAY_BIND_ADDRESS).expect("relay bind address");
+
+        assert!(address.ip().is_unspecified());
+        assert_eq!(address.port(), 0);
+    }
+
+    #[test]
+    fn relay_loss_is_retried_and_recovery_is_reported_once() {
+        let mut available = true;
+
+        assert_eq!(
+            relay_transition(&mut available, false),
+            RelayTransition::Lost
+        );
+        assert_eq!(
+            relay_transition(&mut available, false),
+            RelayTransition::Stable
+        );
+        assert_eq!(
+            relay_transition(&mut available, true),
+            RelayTransition::Recovered
+        );
+        assert_eq!(
+            relay_transition(&mut available, true),
+            RelayTransition::Stable
+        );
+    }
+
+    #[test]
+    fn disconnected_correlation_channel_cannot_stop_media_relay() {
+        let (sender, receiver) = mpsc::sync_channel(1);
+        drop(receiver);
+        let evidence_valid = AtomicBool::new(true);
+
+        submit_evidence(&sender, 1_u32, &evidence_valid);
+        assert!(!evidence_valid.load(Ordering::Acquire));
+        submit_evidence(&sender, 2_u32, &evidence_valid);
     }
 }

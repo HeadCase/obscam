@@ -85,7 +85,9 @@ input {
   position: absolute;
   top: max(0.75rem, env(safe-area-inset-top));
   left: max(0.75rem, env(safe-area-inset-left));
+  max-width: calc(100vw - 1.5rem);
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 0.55rem;
   padding: 0.45rem 0.65rem;
@@ -94,6 +96,16 @@ input {
   background: rgb(8 10 12 / 88%);
   font-size: 0.78rem;
   backdrop-filter: blur(12px);
+}
+
+.status-bar__quality {
+  color: #b8c0c8;
+}
+
+.status-bar__download {
+  min-height: auto;
+  padding: 0.2rem 0.45rem;
+  font-size: 0.72rem;
 }
 
 .status-bar__mark {

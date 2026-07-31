@@ -14,7 +14,7 @@ pub const EXPOSURE_CHOICES_MS: [u32; 14] = [
 ];
 
 /// One of the two deliberately neutral production image treatments.
-#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[derive(Clone, Copy, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Treatment {
     /// Full-resolution neutral luminance with neutral chroma.

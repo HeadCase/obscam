@@ -1,0 +1,14 @@
+[Unit]
+Description=ObsCam isolated media network
+Before=obscam-mediamtx.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/local/libexec/obscam/setup-media-network start
+ExecStop=/usr/local/libexec/obscam/setup-media-network stop
+CapabilityBoundingSet=CAP_NET_ADMIN CAP_SYS_ADMIN
+NoNewPrivileges=yes
+
+[Install]
+WantedBy=multi-user.target

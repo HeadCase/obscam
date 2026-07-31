@@ -20,6 +20,14 @@ if the two differ.
   recovery.
 - MediaMTX independently provides direct WHEP/WebRTC fan-out from one shared
   H.264 stream.
+- MediaMTX runs inside the dedicated `obscam-media` network namespace. Pion may
+  enumerate only namespace loopback and the private point-to-point media veth;
+  exact-destination host translation exposes WHEP TCP/8889 and ICE UDP/8189
+  only at `10.164.190.1` and `192.168.1.200`. Rust relays observed RTP/RTCP over
+  that veth. Forwarding admits established service traffic and new ICE only to
+  the approved browser networks; other namespace ingress, host access, and
+  forwarding are dropped. Host-interface discovery is not part of the media
+  path.
 - MediaMTX `v1.19.3` for Linux ARM64 is the deployment pin. Its binary checksum,
   checked-in configuration, and deployed-stack smoke check advance together;
   ambient host versions are not accepted. MoQ remains explicitly disabled.

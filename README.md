@@ -18,8 +18,10 @@ explicitly required; they are not implementation precedent.
 The production `obscam` Rust service now owns the continuously warm camera,
 reconstructs default neutral monochrome directly from full-resolution RAW8,
 and feeds one long-lived FFmpeg hardware-H.264 publication through a bounded
-local RTP observer. Pinned MediaMTX ingests the unchanged observed stream and
-fans it directly to origin-aware WHEP browser sessions. The service
+local RTP observer. Rust relays that unchanged stream over a private veth to
+pinned MediaMTX in its dedicated network namespace; exact-address translation
+exposes WHEP only on the approved ObsCam service addresses. MediaMTX fans the
+stream directly to origin-aware browser sessions. The service
 still boots its HTTP contracts truthfully when camera or media components are
 unavailable.
 

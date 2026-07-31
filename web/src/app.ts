@@ -6,6 +6,12 @@ import {
   reducePresentation,
   type PresentationState
 } from "./presentation.js";
+import {
+  ServiceQualityClient,
+  downloadServiceQuality,
+  serviceQualityText,
+  type ServiceQualityResponse
+} from "./service-quality.js";
 
 async function boot(): Promise<void> {
   const status = requiredElement("[data-viewer-status]");
@@ -13,6 +19,8 @@ async function boot(): Promise<void> {
   const unavailable = requiredElement("[data-viewer-unavailable]");
   const serviceStatus = requiredElement("[data-service-status]");
   const serviceDetail = requiredElement("[data-service-detail]");
+  const qualityDetail = requiredElement("[data-service-quality]");
+  const qualityDownload = requiredButton("[data-service-quality-download]");
   const video = requiredVideo("[data-viewer-video]");
   const takeControl = requiredButton("[data-control=\"take-control\"]");
   const controlStatus = requiredElement("[data-control-status]");
@@ -36,6 +44,8 @@ async function boot(): Promise<void> {
     const viewer = deriveViewerState(runtime);
     let latestSettings: CameraSettings = { exposureMs: 500, gain: 100, treatment: "monochrome" };
     let presentation: PresentationState = initialPresentationState(runtime.runtimeEpoch);
+    let qualityEvidence: ServiceQualityResponse | null = null;
+    let quality: ServiceQualityClient | null = null;
     let control: ControlClient;
     control = new ControlClient(runtime.runtimeEpoch, (state) => {
       if (state.connection === "disconnected") {
@@ -85,6 +95,21 @@ async function boot(): Promise<void> {
       { once: true }
     );
     try {
+      try {
+        quality = await ServiceQualityClient.connect(runtime.runtimeEpoch, (evidence) => {
+          qualityEvidence = evidence;
+          qualityDetail.textContent = serviceQualityText(evidence);
+          qualityDownload.disabled = false;
+        });
+        qualityDownload.addEventListener("click", () => {
+          if (qualityEvidence !== null && quality !== null) {
+            downloadServiceQuality(qualityEvidence, quality.clientId);
+          }
+        });
+      } catch (error: unknown) {
+        qualityDetail.textContent = "Quality evidence unavailable";
+        console.error("ObsCam service-quality connection failed", error);
+      }
       const session = await startWhep(video, deriveWhepUrl(runtime.media, window.location.href));
       presentation = reducePresentation(presentation, {
         type: "reconnected",
@@ -97,6 +122,17 @@ async function boot(): Promise<void> {
           nowUnixUs: Date.now() * 1_000
         });
         presentation = transition.state;
+        quality?.report({
+          correlation: transition.presented === null ? "unknown" : "exact",
+          streamEpoch:
+            transition.presented?.streamEpoch ??
+            (presentation.streamEpoch === 0 ? null : presentation.streamEpoch),
+          ...(transition.presented === null || metadata.rtpTimestamp === undefined
+            ? {}
+            : { rtpTimestamp: metadata.rtpTimestamp }),
+          presentedFrames: metadata.presentedFrames,
+          visibility: document.visibilityState === "visible" ? "visible" : "hidden"
+        });
         if (transition.presented !== null) {
           control.markVisible(transition.presented.settingsGeneration);
           status.textContent = "Visible";

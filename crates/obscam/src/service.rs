@@ -1,13 +1,17 @@
-use std::{io, time::Instant};
+use std::{
+    io,
+    time::{Instant, SystemTime, UNIX_EPOCH},
+};
 
 use axum::{
     Json, Router,
     extract::{
-        State,
+        Query, State,
         ws::{Message, WebSocket, WebSocketUpgrade},
     },
-    response::Response,
-    routing::get,
+    http::StatusCode,
+    response::{IntoResponse, Response},
+    routing::{get, post},
 };
 use serde::{Deserialize, Serialize};
 use tokio::net::TcpListener;
@@ -19,6 +23,10 @@ use crate::{
     CorrelationMapping, SettingsController, SettingsFailure, SettingsSnapshot, Treatment, assets,
     authority::LEASE_DURATION_MS,
     runtime::{Components, RuntimeState, SCHEMA_VERSION},
+    service_quality::{
+        ConnectionRequest, ConnectionResponse, PresentationBatch, ServiceQualityError,
+        ServiceQualityResponse,
+    },
     settings::SettingsEvent,
 };
 
@@ -38,10 +46,20 @@ fn router(state: RuntimeState) -> Router {
         .route("/assets/control.js", get(assets::control))
         .route("/assets/model.js", get(assets::model))
         .route("/assets/presentation.js", get(assets::presentation))
+        .route("/assets/service-quality.js", get(assets::service_quality))
         .route("/assets/whep.js", get(assets::whep))
         .route("/assets/styles.css", get(assets::styles))
         .route("/api/v1/runtime", get(runtime))
         .route("/api/v1/health", get(health))
+        .route("/api/v1/clock", get(clock))
+        .route(
+            "/api/v1/service-quality",
+            get(service_quality).post(report_presentation),
+        )
+        .route(
+            "/api/v1/service-quality/connections",
+            post(begin_media_connection),
+        )
         .route("/api/v1/control", get(control))
         .with_state(state)
 }
@@ -479,6 +497,98 @@ async fn health(State(state): State<RuntimeState>) -> Json<Health> {
         service: ServiceState::Ready,
         components: snapshot.components,
     })
+}
+
+async fn clock() -> Json<ClockResponse> {
+    Json(ClockResponse {
+        schema_version: SCHEMA_VERSION,
+        server_unix_us: unix_time_us(),
+    })
+}
+
+async fn begin_media_connection(
+    State(state): State<RuntimeState>,
+    Json(request): Json<ConnectionRequest>,
+) -> Result<Json<ConnectionResponse>, ServiceQualityApiError> {
+    state
+        .service_quality()
+        .begin_connection(request)
+        .map(Json)
+        .map_err(Into::into)
+}
+
+async fn report_presentation(
+    State(state): State<RuntimeState>,
+    Json(report): Json<PresentationBatch>,
+) -> Result<StatusCode, ServiceQualityApiError> {
+    state
+        .service_quality()
+        .record_batch(report, unix_time_us())
+        .map(|()| StatusCode::NO_CONTENT)
+        .map_err(Into::into)
+}
+
+async fn service_quality(
+    State(state): State<RuntimeState>,
+    Query(query): Query<ServiceQualityQuery>,
+) -> Json<ServiceQualityResponse> {
+    Json(state.service_quality().response(query.client_id))
+}
+
+fn unix_time_us() -> u64 {
+    let micros = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_micros();
+    u64::try_from(micros).unwrap_or(u64::MAX)
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ClockResponse {
+    schema_version: u8,
+    server_unix_us: u64,
+}
+
+#[derive(Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ServiceQualityQuery {
+    client_id: Option<Uuid>,
+}
+
+struct ServiceQualityApiError(ServiceQualityError);
+
+impl From<ServiceQualityError> for ServiceQualityApiError {
+    fn from(value: ServiceQualityError) -> Self {
+        Self(value)
+    }
+}
+
+impl IntoResponse for ServiceQualityApiError {
+    fn into_response(self) -> Response {
+        let status = match self.0 {
+            ServiceQualityError::UnknownClient => StatusCode::NOT_FOUND,
+            ServiceQualityError::StaleConnection => StatusCode::CONFLICT,
+            ServiceQualityError::UnsupportedSchema
+            | ServiceQualityError::RuntimeMismatch
+            | ServiceQualityError::InvalidReport => StatusCode::BAD_REQUEST,
+        };
+        (
+            status,
+            Json(ErrorResponse {
+                schema_version: SCHEMA_VERSION,
+                error: self.0.to_string(),
+            }),
+        )
+            .into_response()
+    }
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ErrorResponse {
+    schema_version: u8,
+    error: String,
 }
 
 #[derive(Serialize)]

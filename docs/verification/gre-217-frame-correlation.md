@@ -10,7 +10,8 @@ epoch, source and settings generations, treatment, native dimensions,
 exposure completion, submission time, and whether the write is a repeat.
 
 FFmpeg emits H.264 RTP on localhost. Rust forwards the RTP and RTCP packets
-unchanged to the pinned MediaMTX RTP source. FFmpeg's direct `muxer <-`
+unchanged over the private media veth to the pinned MediaMTX RTP source in the
+dedicated `obscam-media` network namespace. FFmpeg's direct `muxer <-`
 timestamp evidence identifies the exact 90 kHz input-timeline index, while the
 RTP marker packet supplies the corresponding actual RTP timestamp. The observer
 validates RTP version, payload type, SSRC, and sequence continuity without
@@ -20,6 +21,11 @@ PTS and marker streams. Every subsequent pair must also agree with the anchored
 RTP delta. Queue pressure, packet loss, or disagreement permanently stops
 correlation for that stream epoch while media forwarding continues. It never
 substitutes frame arrival order or the newest server generation.
+
+If the private-veth route is temporarily unavailable, Rust keeps consuming the
+qualified FFmpeg stream and retries each relay send without flooding logs. Media
+forwarding resumes when the route returns; correlation remains conservatively
+unknown for that stream epoch because missing packets cannot be reconstructed.
 
 The bounded correlator rejects evicted inputs, timestamp resets, fractional or
 half-space ambiguous gaps, stale observations, and conflicting timestamps.
