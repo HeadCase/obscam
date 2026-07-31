@@ -52,6 +52,11 @@ custom media stack or allow browser testing to inspect or advertise `wg1`.
 - All changes enter `develop` through a pull request from the feature branch.
 - If work begins while `develop` or `main` is checked out, create the feature
   branch before staging or committing any change.
+- GitHub CLI credentials are available in the host execution context, not the
+  command sandbox. Run `gh` and GitHub network operations outside the sandbox.
+  A sandboxed authentication failure is not authoritative: rerun
+  `gh auth status` outside the sandbox before diagnosing credentials. Never run
+  `gh auth login` or `gh auth refresh` solely because a sandboxed check failed.
 
 ## Response Style
 
