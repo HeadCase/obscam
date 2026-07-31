@@ -1,6 +1,7 @@
 use std::sync::{Arc, RwLock};
 
 use serde::Serialize;
+use tokio::sync::broadcast;
 use uuid::Uuid;
 
 use crate::{
@@ -18,6 +19,7 @@ pub struct RuntimeState {
     settings: SettingsController,
     correlation: CorrelationState,
     service_quality: ServiceQualityState,
+    lifecycle_updates: broadcast::Sender<()>,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -28,6 +30,31 @@ pub(crate) struct RuntimeSnapshot {
     media: MediaDescriptor,
     pub(crate) components: Components,
     latest_frame: Option<LatestFrame>,
+    capture: Option<CaptureProgress>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct LifecycleSnapshot {
+    pub(crate) runtime_epoch: Uuid,
+    pub(crate) components: Components,
+    pub(crate) recovery: Option<RecoveryComponent>,
+    pub(crate) capture: Option<CaptureProgress>,
+}
+
+#[derive(Clone, Copy, Debug, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum RecoveryComponent {
+    Capture,
+    Encoder,
+}
+
+#[derive(Clone, Copy, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct CaptureProgress {
+    settings_generation: u64,
+    exposure_ms: u32,
+    started_at_unix_us: u64,
 }
 
 impl RuntimeState {
@@ -53,6 +80,7 @@ impl RuntimeState {
         relay: ComponentReadiness,
     ) -> Self {
         let correlation = CorrelationState::new(runtime_epoch);
+        let (lifecycle_updates, _) = broadcast::channel(32);
         Self {
             snapshot: Arc::new(RwLock::new(RuntimeSnapshot {
                 schema_version: SCHEMA_VERSION,
@@ -70,12 +98,20 @@ impl RuntimeState {
                     relay: ComponentStatus::from_readiness(relay, UnavailableReason::NotObserved),
                 },
                 latest_frame: None,
+                capture: None,
             })),
             authority: AuthorityGate::new(),
             settings: SettingsController::new(config.default_settings()),
             service_quality: ServiceQualityState::new(runtime_epoch, correlation.clone()),
             correlation,
+            lifecycle_updates,
         }
+    }
+
+    /// Returns the epoch that fences all runtime-local facts.
+    #[must_use]
+    pub fn runtime_epoch(&self) -> Uuid {
+        self.snapshot().runtime_epoch
     }
 
     pub(crate) fn snapshot(&self) -> RuntimeSnapshot {
@@ -89,12 +125,15 @@ impl RuntimeState {
         if readiness == ComponentReadiness::Unavailable {
             self.authority.revoke();
         }
-        self.snapshot
-            .write()
-            .expect("runtime state lock poisoned")
-            .components
-            .capture =
-            ComponentStatus::from_readiness(readiness, UnavailableReason::NoCameraSource);
+        {
+            let mut snapshot = self.snapshot.write().expect("runtime state lock poisoned");
+            snapshot.components.capture =
+                ComponentStatus::from_readiness(readiness, UnavailableReason::NoCameraSource);
+            if readiness == ComponentReadiness::Unavailable {
+                snapshot.capture = None;
+            }
+        }
+        self.notify_lifecycle();
     }
 
     pub(crate) fn set_encoder_readiness(&self, readiness: ComponentReadiness) {
@@ -103,6 +142,29 @@ impl RuntimeState {
             .expect("runtime state lock poisoned")
             .components
             .encoder = ComponentStatus::from_readiness(readiness, UnavailableReason::NoFrame);
+        self.notify_lifecycle();
+    }
+
+    /// Records the authoritative start of the currently progressing exposure.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the runtime-state lock was poisoned by another thread.
+    pub fn capture_started(
+        &self,
+        settings_generation: u64,
+        exposure_ms: u32,
+        started_at_unix_us: u64,
+    ) {
+        self.snapshot
+            .write()
+            .expect("runtime state lock poisoned")
+            .capture = Some(CaptureProgress {
+            settings_generation,
+            exposure_ms,
+            started_at_unix_us,
+        });
+        self.notify_lifecycle();
     }
 
     /// Returns the one runtime-local mutation authority gate.
@@ -123,6 +185,24 @@ impl RuntimeState {
 
     pub(crate) fn service_quality(&self) -> ServiceQualityState {
         self.service_quality.clone()
+    }
+
+    pub(crate) fn lifecycle_snapshot(&self) -> LifecycleSnapshot {
+        let snapshot = self.snapshot();
+        LifecycleSnapshot {
+            runtime_epoch: snapshot.runtime_epoch,
+            recovery: snapshot.components.recovery(),
+            components: snapshot.components,
+            capture: snapshot.capture,
+        }
+    }
+
+    pub(crate) fn subscribe_lifecycle(&self) -> broadcast::Receiver<()> {
+        self.lifecycle_updates.subscribe()
+    }
+
+    fn notify_lifecycle(&self) {
+        let _ = self.lifecycle_updates.send(());
     }
 
     /// Revokes authority when the camera backend restarts or runtime recovery begins.
@@ -152,6 +232,18 @@ pub(crate) struct Components {
     capture: ComponentStatus,
     encoder: ComponentStatus,
     relay: ComponentStatus,
+}
+
+impl Components {
+    fn recovery(&self) -> Option<RecoveryComponent> {
+        if matches!(self.capture, ComponentStatus::Unavailable { .. }) {
+            Some(RecoveryComponent::Capture)
+        } else if matches!(self.encoder, ComponentStatus::Unavailable { .. }) {
+            Some(RecoveryComponent::Encoder)
+        } else {
+            None
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, Serialize)]

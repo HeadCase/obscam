@@ -1,4 +1,5 @@
 use std::net::SocketAddr;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use futures_util::{SinkExt, StreamExt};
 use obscam::{Config, RuntimeState};
@@ -159,6 +160,34 @@ async fn complete_tuple_is_accepted_then_applied_and_invalid_detents_are_rejecte
         receive_type(&mut socket, "rejected").await["reason"],
         "camera_unavailable"
     );
+}
+
+#[tokio::test]
+async fn lifecycle_facts_are_sent_initially_and_when_capture_progresses() {
+    let (address, state) = spawn_service_with_state().await;
+    let (mut socket, _) = connect_async(format!("ws://{address}/api/v1/control"))
+        .await
+        .expect("control connection");
+
+    let initial = receive_type(&mut socket, "lifecycle").await;
+    assert_eq!(initial["runtimeEpoch"], state.runtime_epoch().to_string());
+    assert_eq!(initial["components"]["capture"]["state"], "unavailable");
+    assert_eq!(initial["recovery"], "capture");
+    assert_eq!(initial["capture"], Value::Null);
+
+    let started_at_unix_us = u64::try_from(
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("current time")
+            .as_micros(),
+    )
+    .expect("current time fits u64");
+    state.capture_started(7, 30_000, started_at_unix_us);
+
+    let progress = receive_type(&mut socket, "lifecycle").await;
+    assert_eq!(progress["capture"]["settingsGeneration"], 7);
+    assert_eq!(progress["capture"]["exposureMs"], 30_000);
+    assert_eq!(progress["capture"]["startedAtUnixUs"], started_at_unix_us);
 }
 
 async fn spawn_service() -> SocketAddr {

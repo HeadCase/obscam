@@ -1,8 +1,17 @@
-type UnavailableReason = "no_camera_source" | "no_frame" | "not_observed";
+/** Fixed reasons that justify an unavailable runtime component claim. */
+export type UnavailableReason = "no_camera_source" | "no_frame" | "not_observed";
 
-type ComponentStatus =
+/** One authoritative Rust component fact at a browser contract boundary. */
+export type ComponentStatus =
   | { state: "ready" }
   | { state: "unavailable"; reason: UnavailableReason };
+
+/** Independently reported capture, encoder, and currently-unobserved relay facts. */
+export interface RuntimeComponents {
+  capture: ComponentStatus;
+  encoder: ComponentStatus;
+  relay: ComponentStatus;
+}
 
 /** Version-one bootstrap facts supplied by the Rust service. */
 export interface RuntimeContract {
@@ -12,11 +21,7 @@ export interface RuntimeContract {
     whepPort: number;
     whepPath: string;
   };
-  components: {
-    capture: ComponentStatus;
-    encoder: ComponentStatus;
-    relay: ComponentStatus;
-  };
+  components: RuntimeComponents;
   latestFrame: null;
 }
 
@@ -66,14 +71,7 @@ export function parseRuntimeContract(value: unknown): RuntimeContract {
   ) {
     throw new Error("invalid media descriptor");
   }
-  if (
-    !isRecord(value.components) ||
-    !isComponentStatus(value.components.capture, "no_camera_source") ||
-    !isComponentStatus(value.components.encoder, "no_frame") ||
-    !isComponentStatus(value.components.relay, "not_observed")
-  ) {
-    throw new Error("invalid component state");
-  }
+  const components = parseRuntimeComponents(value.components);
   if (value.latestFrame !== null) {
     throw new Error("untrusted frame contract");
   }
@@ -85,12 +83,25 @@ export function parseRuntimeContract(value: unknown): RuntimeContract {
       whepPort: value.media.whepPort,
       whepPath: value.media.whepPath
     },
-    components: {
-      capture: parseComponentStatus(value.components.capture, "no_camera_source"),
-      encoder: parseComponentStatus(value.components.encoder, "no_frame"),
-      relay: parseComponentStatus(value.components.relay, "not_observed")
-    },
+    components,
     latestFrame: null
+  };
+}
+
+/** Validates and normalizes independently reported component facts. */
+export function parseRuntimeComponents(value: unknown): RuntimeComponents {
+  if (
+    !isRecord(value) ||
+    !isComponentStatus(value.capture, "no_camera_source") ||
+    !isComponentStatus(value.encoder, "no_frame") ||
+    !isComponentStatus(value.relay, "not_observed")
+  ) {
+    throw new Error("invalid component state");
+  }
+  return {
+    capture: parseComponentStatus(value.capture, "no_camera_source"),
+    encoder: parseComponentStatus(value.encoder, "no_frame"),
+    relay: parseComponentStatus(value.relay, "not_observed")
   };
 }
 

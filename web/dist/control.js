@@ -263,24 +263,25 @@ export function parseControlMessage(value) {
 /** Owns the browser effects around the pure control reducer. */
 export class ControlClient {
     runtimeEpoch;
-    onState;
+    controlState;
+    onControlEvent;
     onFrameMapping;
-    state;
+    onLifecycle;
     socket = null;
     renewal = null;
     leaseWatchdog = null;
     reconnect = null;
     stopped = false;
-    constructor(runtimeEpoch, onState, onFrameMapping = () => { }) {
+    constructor(runtimeEpoch, controlState, onControlEvent, onFrameMapping = () => { }, onLifecycle = () => { }) {
         this.runtimeEpoch = runtimeEpoch;
-        this.onState = onState;
+        this.controlState = controlState;
+        this.onControlEvent = onControlEvent;
         this.onFrameMapping = onFrameMapping;
-        this.state = initialControlState(readStoredCredentials(), runtimeEpoch);
+        this.onLifecycle = onLifecycle;
     }
     start() {
         this.stopped = false;
         this.connect();
-        this.onState(this.state);
     }
     close() {
         this.stopped = true;
@@ -289,27 +290,30 @@ export class ControlClient {
         this.socket = null;
     }
     toggleAuthority() {
-        if (this.state.connection !== "connected" || this.state.pendingIntent) {
+        const state = this.controlState();
+        if (state.connection !== "connected" || state.pendingIntent) {
             return;
         }
         this.transition({ type: "intent_queued" });
-        if (this.state.ownership === "you" && this.state.credentials !== null) {
-            this.sendCredentials("release", this.state.credentials);
+        const current = this.controlState();
+        if (current.ownership === "you" && current.credentials !== null) {
+            this.sendCredentials("release", current.credentials);
         }
         else {
             this.send({ schemaVersion: 1, type: "take" });
         }
     }
     setSettings(settings) {
-        if (!this.state.mayMutate || this.state.pendingIntent || this.state.credentials === null) {
+        const state = this.controlState();
+        if (!state.mayMutate || state.pendingIntent || state.credentials === null) {
             return;
         }
         this.transition({ type: "intent_queued" });
         this.send({
             schemaVersion: 1,
             type: "set_settings",
-            generation: this.state.credentials.generation,
-            secret: this.state.credentials.secret,
+            generation: state.credentials.generation,
+            secret: state.credentials.secret,
             settings
         });
     }
@@ -327,8 +331,9 @@ export class ControlClient {
         this.socket = socket;
         socket.addEventListener("open", () => {
             this.transition({ type: "connected" });
-            if (this.state.credentials !== null) {
-                this.sendCredentials("resume", this.state.credentials);
+            const state = this.controlState();
+            if (state.credentials !== null) {
+                this.sendCredentials("resume", state.credentials);
             }
         });
         socket.addEventListener("message", (event) => {
@@ -342,6 +347,9 @@ export class ControlClient {
                 const value = JSON.parse(event.data);
                 if (isRecord(value) && value.type === "frame_mapping") {
                     this.onFrameMapping(parseFrameMapping(value));
+                }
+                else if (isRecord(value) && value.type === "lifecycle") {
+                    this.onLifecycle(value);
                 }
                 else {
                     this.acceptServerMessage(parseControlMessage(value));
@@ -361,7 +369,7 @@ export class ControlClient {
             this.transition({
                 type: "granted",
                 credentials: {
-                    runtimeEpoch: this.runtimeEpoch,
+                    runtimeEpoch: this.runtimeEpoch(),
                     generation: message.generation,
                     secret: message.secret
                 }
@@ -379,23 +387,22 @@ export class ControlClient {
             (message.type === "rejected" && ["not_holder", "expired"].includes(message.reason))) {
             this.clearAuthorityTimers();
         }
-        else if (message.type === "authority" && this.state.ownership !== "you") {
+        else if (message.type === "authority" && this.controlState().ownership !== "you") {
             this.clearAuthorityTimers();
         }
     }
     transition(event) {
-        const transition = reduceControl(this.state, event);
-        this.state = transition.state;
-        persistCredentials(transition.storage, this.state.credentials);
-        this.onState(this.state);
+        const transition = this.onControlEvent(event);
+        persistCredentials(transition.storage, transition.state.credentials);
     }
     startRenewal() {
         if (this.renewal !== null) {
             return;
         }
         this.renewal = window.setInterval(() => {
-            if (this.state.mayMutate && this.state.credentials !== null) {
-                this.sendCredentials("renew", this.state.credentials);
+            const state = this.controlState();
+            if (state.mayMutate && state.credentials !== null) {
+                this.sendCredentials("renew", state.credentials);
             }
         }, RENEWAL_INTERVAL_MS);
     }
@@ -467,7 +474,8 @@ function withDerivedMutationPermission(state) {
         mayMutate: state.connection === "connected" && state.ownership === "you"
     };
 }
-function readStoredCredentials() {
+/** Reads and validates this tab's resumable same-runtime control credential. */
+export function readStoredCredentials() {
     try {
         const value = JSON.parse(sessionStorage.getItem(STORAGE_KEY) ?? "null");
         return validCredentials(value) ? value : null;

@@ -25,12 +25,7 @@ export function parseRuntimeContract(value) {
         !isHostlessWhepPath(value.media.whepPath)) {
         throw new Error("invalid media descriptor");
     }
-    if (!isRecord(value.components) ||
-        !isComponentStatus(value.components.capture, "no_camera_source") ||
-        !isComponentStatus(value.components.encoder, "no_frame") ||
-        !isComponentStatus(value.components.relay, "not_observed")) {
-        throw new Error("invalid component state");
-    }
+    const components = parseRuntimeComponents(value.components);
     if (value.latestFrame !== null) {
         throw new Error("untrusted frame contract");
     }
@@ -41,12 +36,22 @@ export function parseRuntimeContract(value) {
             whepPort: value.media.whepPort,
             whepPath: value.media.whepPath
         },
-        components: {
-            capture: parseComponentStatus(value.components.capture, "no_camera_source"),
-            encoder: parseComponentStatus(value.components.encoder, "no_frame"),
-            relay: parseComponentStatus(value.components.relay, "not_observed")
-        },
+        components,
         latestFrame: null
+    };
+}
+/** Validates and normalizes independently reported component facts. */
+export function parseRuntimeComponents(value) {
+    if (!isRecord(value) ||
+        !isComponentStatus(value.capture, "no_camera_source") ||
+        !isComponentStatus(value.encoder, "no_frame") ||
+        !isComponentStatus(value.relay, "not_observed")) {
+        throw new Error("invalid component state");
+    }
+    return {
+        capture: parseComponentStatus(value.capture, "no_camera_source"),
+        encoder: parseComponentStatus(value.encoder, "no_frame"),
+        relay: parseComponentStatus(value.relay, "not_observed")
     };
 }
 /** Derives only claims justified by the validated bootstrap contract. */

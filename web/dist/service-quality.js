@@ -35,6 +35,14 @@ export class ServiceQualityClient {
         });
         this.scheduleReport();
     }
+    /** Begins a new server-fenced media connection generation for this tab. */
+    async reconnect() {
+        await this.beginConnection();
+    }
+    /** Returns Unix microseconds calibrated to the Rust service clock. */
+    nowUnixUs() {
+        return Date.now() * 1_000 + this.clock.offsetUs;
+    }
     async beginConnection() {
         const response = await fetch("/api/v1/service-quality/connections", {
             method: "POST",

@@ -113,6 +113,37 @@ test("presentation observations are capped and sent in one bounded batch", async
   assert.equal(reports[0].samples[31].presentedFrames, 33);
 });
 
+test("viewer timestamps use the calibrated Rust service clock", async (context) => {
+  const originalFetch = globalThis.fetch;
+  const originalNow = Date.now;
+  context.after(() => {
+    globalThis.fetch = originalFetch;
+    Date.now = originalNow;
+  });
+  let localNowMs = 1_000;
+  Date.now = () => localNowMs;
+  globalThis.fetch = async (url, options = {}) => {
+    if (url === "/api/v1/clock") {
+      localNowMs = 1_020;
+      return responseWithJson({ schemaVersion: 1, serverUnixUs: 2_010_000 });
+    }
+    if (url === "/api/v1/service-quality/connections") {
+      const request = JSON.parse(options.body);
+      return responseWithJson({
+        schemaVersion: 1,
+        clientId: request.clientId,
+        connectionGeneration: 1,
+        reconnects: 0
+      });
+    }
+    throw new Error(`unexpected request ${url}`);
+  };
+
+  const client = await ServiceQualityClient.connect(runtimeEpoch, () => {});
+  localNowMs = 1_030;
+  assert.equal(client.nowUnixUs(), 2_030_000);
+});
+
 function responseWithJson(value) {
   return { ok: true, status: 200, json: async () => value };
 }

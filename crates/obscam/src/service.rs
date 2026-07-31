@@ -22,7 +22,10 @@ use crate::{
     AuthorityCredentials, AuthorityGate, AuthorityRejection, AuthoritySnapshot, CameraSettings,
     CorrelationMapping, SettingsController, SettingsFailure, SettingsSnapshot, Treatment, assets,
     authority::LEASE_DURATION_MS,
-    runtime::{Components, RuntimeState, SCHEMA_VERSION},
+    runtime::{
+        CaptureProgress, Components, LifecycleSnapshot, RecoveryComponent, RuntimeState,
+        SCHEMA_VERSION,
+    },
     service_quality::{
         ConnectionRequest, ConnectionResponse, PresentationBatch, ServiceQualityError,
         ServiceQualityResponse,
@@ -48,6 +51,7 @@ fn router(state: RuntimeState) -> Router {
         .route("/assets/presentation.js", get(assets::presentation))
         .route("/assets/service-quality.js", get(assets::service_quality))
         .route("/assets/whep.js", get(assets::whep))
+        .route("/assets/viewer.js", get(assets::viewer))
         .route("/assets/styles.css", get(assets::styles))
         .route("/api/v1/runtime", get(runtime))
         .route("/api/v1/health", get(health))
@@ -74,22 +78,10 @@ async fn control_socket(mut socket: WebSocket, state: RuntimeState) {
     let mut updates = authority.subscribe();
     let mut settings_updates = settings.subscribe();
     let mut correlation_updates = state.correlation().subscribe();
-    if let Err(error) =
-        send_server(&mut socket, ServerMessage::authority(authority.snapshot())).await
+    let mut lifecycle_updates = state.subscribe_lifecycle();
+    if let Err(error) = send_initial_control_state(&mut socket, &state, &authority, &settings).await
     {
-        tracing::debug!(%error, "control connection closed before initial state");
-        return;
-    }
-    if let Err(error) = send_server(
-        &mut socket,
-        ServerMessage::Settings {
-            schema_version: SCHEMA_VERSION,
-            state: settings.snapshot(),
-        },
-    )
-    .await
-    {
-        tracing::debug!(%error, "control connection closed before initial settings");
+        tracing::debug!(%error, "control connection closed before initial facts");
         return;
     }
 
@@ -135,6 +127,19 @@ async fn control_socket(mut socket: WebSocket, state: RuntimeState) {
                     return;
                 }
             }
+            update = lifecycle_updates.recv() => {
+                match update {
+                    Ok(()) | Err(broadcast::error::RecvError::Lagged(_)) => {}
+                    Err(broadcast::error::RecvError::Closed) => return,
+                }
+                if let Err(error) = send_server(
+                    &mut socket,
+                    ServerMessage::lifecycle(state.lifecycle_snapshot()),
+                ).await {
+                    tracing::debug!(%error, "control connection closed while broadcasting lifecycle facts");
+                    return;
+                }
+            }
             incoming = socket.recv() => {
                 let message = match incoming {
                     Some(Ok(message)) => message,
@@ -164,6 +169,24 @@ async fn control_socket(mut socket: WebSocket, state: RuntimeState) {
             }
         }
     }
+}
+
+async fn send_initial_control_state(
+    socket: &mut WebSocket,
+    state: &RuntimeState,
+    authority: &AuthorityGate,
+    settings: &SettingsController,
+) -> Result<(), axum::Error> {
+    send_server(socket, ServerMessage::authority(authority.snapshot())).await?;
+    send_server(
+        socket,
+        ServerMessage::Settings {
+            schema_version: SCHEMA_VERSION,
+            state: settings.snapshot(),
+        },
+    )
+    .await?;
+    send_server(socket, ServerMessage::lifecycle(state.lifecycle_snapshot())).await
 }
 
 struct ControlResponse {
@@ -400,6 +423,13 @@ impl ClientMessage {
     rename_all_fields = "camelCase"
 )]
 enum ServerMessage {
+    Lifecycle {
+        schema_version: u8,
+        runtime_epoch: Uuid,
+        components: Components,
+        recovery: Option<RecoveryComponent>,
+        capture: Option<CaptureProgress>,
+    },
     FrameMapping {
         schema_version: u8,
         #[serde(flatten)]
@@ -461,6 +491,16 @@ impl ServerMessage {
             schema_version: SCHEMA_VERSION,
             state: snapshot.state(),
             generation: snapshot.generation(),
+        }
+    }
+
+    const fn lifecycle(snapshot: LifecycleSnapshot) -> Self {
+        Self::Lifecycle {
+            schema_version: SCHEMA_VERSION,
+            runtime_epoch: snapshot.runtime_epoch,
+            components: snapshot.components,
+            recovery: snapshot.recovery,
+            capture: snapshot.capture,
         }
     }
 }
