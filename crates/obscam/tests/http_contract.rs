@@ -221,6 +221,7 @@ async fn production_assets_expose_the_complete_unavailable_viewer_shell() {
     assert!(html.contains("data-viewer-status>Unavailable"));
     assert!(html.contains("data-viewer-frame"));
     assert!(html.contains("data-viewer-video"));
+    assert!(html.contains("data-viewer-retained-frame"));
     assert!(html.contains("data-service-status"));
     assert!(html.contains("data-service-detail"));
     assert!(html.contains("data-control=\"take-control\""));
@@ -250,6 +251,13 @@ async fn production_assets_expose_the_complete_unavailable_viewer_shell() {
         "{control_head}"
     );
     assert!(control.contains("ControlClient"));
+
+    let (reconnect_head, reconnect) = get(address, "/assets/reconnect.js").await;
+    assert!(
+        reconnect_head.contains("content-type: text/javascript"),
+        "{reconnect_head}"
+    );
+    assert!(reconnect.contains("ReconnectLoop"));
 
     let (presentation_head, presentation) = get(address, "/assets/presentation.js").await;
     assert!(

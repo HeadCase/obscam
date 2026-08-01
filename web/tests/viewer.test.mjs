@@ -195,6 +195,19 @@ test("a new media generation fences cached mappings until a current frame is pre
   assert.equal(viewerProjection(state).status, "Live");
 });
 
+test("stale media transport callbacks cannot change the current connection", () => {
+  let state = readyState();
+  state = dispatch(state, { type: "media_connecting", connectionGeneration: 3 });
+  assert.equal(state.mediaConnectionGeneration, 3);
+
+  state = dispatch(state, { type: "media_connected", connectionGeneration: 2 });
+  assert.equal(state.mediaConnection, "connecting");
+  state = dispatch(state, { type: "media_connected", connectionGeneration: 3 });
+  assert.equal(state.mediaConnection, "connected");
+  state = dispatch(state, { type: "media_disconnected", connectionGeneration: 2 });
+  assert.equal(state.mediaConnection, "connected");
+});
+
 test("isolated correlation loss has one second of grace then hides freshness facts", () => {
   let state = presentedState();
   const before = viewerProjection(state);
@@ -333,8 +346,14 @@ test("a coalesced source-floor jump leaves live until a recovered presentation",
 
 test("control transport is independent from live media", () => {
   let state = presentedState();
-  state = dispatch(state, { type: "control", event: { type: "connected" } });
-  state = dispatch(state, { type: "control", event: { type: "disconnected" } });
+  state = dispatch(state, {
+    type: "control",
+    event: { type: "connected", connectionGeneration: 0 }
+  });
+  state = dispatch(state, {
+    type: "control",
+    event: { type: "disconnected", connectionGeneration: 0 }
+  });
   const projection = viewerProjection(state);
   assert.equal(projection.status, "Live");
   assert.equal(projection.controlConnection, "disconnected");

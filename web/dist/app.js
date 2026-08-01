@@ -1,11 +1,13 @@
 import { deriveWhepUrl, parseRuntimeContract } from "./model.js";
 import { ControlClient, readStoredCredentials } from "./control.js";
 import { startWhep } from "./whep.js";
+import { ReconnectLoop } from "./reconnect.js";
 import { acceptsMediaPresentation, initialViewerState, parseLifecycleFacts, reduceViewer, viewerProjection } from "./viewer.js";
 import { ServiceQualityClient, downloadServiceQuality, serviceQualityText } from "./service-quality.js";
 const LIVENESS_TICK_MS = 100;
-const INITIAL_MEDIA_RETRY_MS = 250;
-const MAX_MEDIA_RETRY_MS = 5_000;
+const INITIAL_RETRY_MS = 250;
+const MAXIMUM_RETRY_MS = 5_000;
+const STABLE_CONNECTION_MS = 5_000;
 async function boot() {
     const status = requiredElement("[data-viewer-status]");
     const detail = requiredElement("[data-viewer-detail]");
@@ -15,6 +17,7 @@ async function boot() {
     const qualityDetail = requiredElement("[data-service-quality]");
     const qualityDownload = requiredButton("[data-service-quality-download]");
     const video = requiredVideo("[data-viewer-video]");
+    const retainedFrame = requiredCanvas("[data-viewer-retained-frame]");
     const takeControl = requiredButton("[data-control=\"take-control\"]");
     const controlStatus = requiredElement("[data-control-status]");
     const exposureButtons = Array.from(document.querySelectorAll("[data-exposure-ms]"));
@@ -35,9 +38,9 @@ async function boot() {
         let quality = null;
         let qualityRuntimeEpoch = null;
         let mediaSession = null;
+        let mediaAttemptCancellation = null;
         let stopPresentedFrames = null;
-        let mediaAttempt = 0;
-        let mediaRetryMs = INITIAL_MEDIA_RETRY_MS;
+        let mediaReconnect;
         const render = () => {
             const projection = viewerProjection(viewer);
             status.textContent = projection.status;
@@ -65,22 +68,23 @@ async function boot() {
                 qualityRuntimeEpoch = targetEpoch;
             }
         };
-        const connectMedia = async (reconnection) => {
-            const attempt = ++mediaAttempt;
-            const connectionGeneration = dispatch({ type: "media_connecting" }).state
-                .mediaConnectionGeneration;
+        const connectMedia = async (connectionGeneration) => {
+            mediaAttemptCancellation?.abort();
+            const cancellation = new AbortController();
+            mediaAttemptCancellation = cancellation;
+            dispatch({ type: "media_connecting", connectionGeneration });
+            if (viewer.trustworthyFrame !== null &&
+                retainedFrame.dataset.trustworthyFrame === "true") {
+                retainedFrame.hidden = false;
+            }
             stopPresentedFrames?.();
             stopPresentedFrames = null;
             const previous = mediaSession;
-            mediaSession = null;
-            if (previous !== null) {
-                await previous.close();
-            }
             try {
                 if (qualityRuntimeEpoch !== viewer.runtimeEpoch) {
                     await connectQuality();
                 }
-                else if (reconnection && quality !== null) {
+                else if (connectionGeneration > 1 && quality !== null) {
                     await quality.reconnect();
                 }
             }
@@ -89,33 +93,33 @@ async function boot() {
                 console.error("ObsCam service-quality connection failed", error);
             }
             try {
-                const session = await startWhep(video, deriveWhepUrl(runtime.media, window.location.href), () => {
-                    if (attempt !== mediaAttempt)
+                const session = await startWhep(deriveWhepUrl(runtime.media, window.location.href), () => {
+                    if (connectionGeneration !== mediaReconnect.connectionGeneration)
                         return;
-                    dispatch({ type: "media_disconnected" });
-                    void connectMedia(true);
-                });
-                if (attempt !== mediaAttempt) {
+                    dispatch({ type: "media_disconnected", connectionGeneration });
+                    mediaReconnect.failed(connectionGeneration);
+                }, cancellation.signal);
+                if (connectionGeneration !== mediaReconnect.connectionGeneration) {
                     await session.close();
                     return;
                 }
+                session.attach(video);
+                mediaAttemptCancellation = null;
                 mediaSession = session;
-                mediaRetryMs = INITIAL_MEDIA_RETRY_MS;
-                dispatch({ type: "media_connected" });
+                if (previous !== null)
+                    void previous.close();
+                mediaReconnect.connected(connectionGeneration);
+                dispatch({ type: "media_connected", connectionGeneration });
                 stopPresentedFrames = watchPresentedFrames(video, (metadata) => {
                     presentedFrame(connectionGeneration, metadata);
                 });
             }
             catch (error) {
-                if (attempt === mediaAttempt) {
-                    dispatch({ type: "media_disconnected" });
+                if (connectionGeneration === mediaReconnect.connectionGeneration &&
+                    !cancellation.signal.aborted) {
+                    dispatch({ type: "media_disconnected", connectionGeneration });
                     console.error("ObsCam WHEP connection failed", error);
-                    const retryAfterMs = mediaRetryMs;
-                    mediaRetryMs = Math.min(mediaRetryMs * 2, MAX_MEDIA_RETRY_MS);
-                    window.setTimeout(() => {
-                        if (attempt === mediaAttempt)
-                            void connectMedia(true);
-                    }, retryAfterMs);
+                    mediaReconnect.failed(connectionGeneration);
                 }
             }
         };
@@ -124,7 +128,7 @@ async function boot() {
             viewer = transition.state;
             render();
             if (transition.effects.includes("reconnect_media")) {
-                void connectMedia(true);
+                mediaReconnect.retryNow();
             }
             return transition;
         };
@@ -148,6 +152,11 @@ async function boot() {
                 !viewer.awaitingCurrentPresentation &&
                 viewer.correlationLostAtUnixUs === null &&
                 viewer.trustworthyFrame !== null;
+            if (exact && viewer.trustworthyFrame !== null) {
+                const frame = viewer.trustworthyFrame;
+                captureTrustworthyFrame(video, retainedFrame, `${frame.runtimeEpoch}:${frame.streamEpoch}:${frame.sourceGeneration}`);
+                retainedFrame.hidden = true;
+            }
             quality?.report({
                 correlation: exact ? "exact" : "unknown",
                 streamEpoch: exact ? viewer.trustworthyFrame?.streamEpoch ?? null :
@@ -160,6 +169,11 @@ async function boot() {
             });
         };
         const control = new ControlClient(() => viewer.runtimeEpoch, () => viewer.control, controlTransition, (mapping) => dispatch({ type: "mapping", mapping }), (value) => dispatch({ type: "lifecycle", facts: parseLifecycleFacts(value) }));
+        mediaReconnect = new ReconnectLoop((connectionGeneration) => void connectMedia(connectionGeneration), {
+            initialDelayMs: INITIAL_RETRY_MS,
+            maximumDelayMs: MAXIMUM_RETRY_MS,
+            stableAfterMs: STABLE_CONNECTION_MS
+        });
         takeControl.addEventListener("click", () => control.toggleAuthority());
         for (const button of exposureButtons) {
             button.addEventListener("click", () => {
@@ -193,10 +207,17 @@ async function boot() {
             console.error("ObsCam service-quality connection failed", error);
         }
         document.addEventListener("visibilitychange", () => {
+            const foreground = document.visibilityState === "visible" && viewer.visibility === "hidden";
             dispatch({
                 type: "visibility",
                 visibility: document.visibilityState === "visible" ? "visible" : "hidden"
             });
+            if (foreground)
+                control.retryNow();
+        });
+        window.addEventListener("online", () => {
+            mediaReconnect.retryNow();
+            control.retryNow();
         });
         const tick = window.setInterval(() => {
             const nowUnixUs = currentServerUnixUs(quality, qualityRuntimeEpoch, viewer.runtimeEpoch);
@@ -206,12 +227,13 @@ async function boot() {
         }, LIVENESS_TICK_MS);
         window.addEventListener("pagehide", () => {
             window.clearInterval(tick);
-            mediaAttempt += 1;
+            mediaReconnect.close();
+            mediaAttemptCancellation?.abort();
             control.close();
             stopPresentedFrames?.();
             void mediaSession?.close();
         }, { once: true });
-        await connectMedia(false);
+        mediaReconnect.start();
     }
     catch (error) {
         status.textContent = "Unavailable";
@@ -251,6 +273,20 @@ function watchPresentedFrames(video, presented) {
         }
     };
 }
+function captureTrustworthyFrame(video, retainedFrame, frameIdentity) {
+    if (retainedFrame.dataset.frameIdentity === frameIdentity)
+        return;
+    if (video.videoWidth === 0 || video.videoHeight === 0)
+        return;
+    const context = retainedFrame.getContext("2d");
+    if (context === null)
+        return;
+    retainedFrame.width = video.videoWidth;
+    retainedFrame.height = video.videoHeight;
+    context.drawImage(video, 0, 0, retainedFrame.width, retainedFrame.height);
+    retainedFrame.dataset.trustworthyFrame = "true";
+    retainedFrame.dataset.frameIdentity = frameIdentity;
+}
 function renderControl(state, takeControl, controlStatus, exposureButtons, gain, gainOutput, monochrome, colour) {
     takeControl.disabled = state.connection !== "connected" || state.pendingIntent;
     takeControl.textContent = state.ownership === "you" ? "Release control" : "Take control";
@@ -268,10 +304,16 @@ function renderControl(state, takeControl, controlStatus, exposureButtons, gain,
     monochrome.setAttribute("aria-pressed", String(settings.treatment === "monochrome"));
     colour.setAttribute("aria-pressed", String(settings.treatment === "colour"));
     controlStatus.textContent =
-        state.connection === "disconnected" ? "Control reconnecting" :
+        state.connection === "disconnected"
+            ? state.retryDelayMs === null
+                ? "Control reconnecting now"
+                : `Control reconnecting in ${formatRetryDelay(state.retryDelayMs)}` :
             state.settings.pending !== null ? "Applying settings" :
                 state.ownership === "you" ? "You have control" :
                     state.ownership === "another_viewer" ? "Another viewer has control" : "No one has control";
+}
+function formatRetryDelay(delayMs) {
+    return delayMs < 1_000 ? `${delayMs} ms` : `${(delayMs / 1_000).toFixed(1)} s`;
 }
 function requiredInput(selector) {
     const element = document.querySelector(selector);
@@ -280,6 +322,12 @@ function requiredInput(selector) {
     return element;
 }
 function requiredVideo(selector) {
+    const element = document.querySelector(selector);
+    if (element === null)
+        throw new Error(`viewer shell is missing ${selector}`);
+    return element;
+}
+function requiredCanvas(selector) {
     const element = document.querySelector(selector);
     if (element === null)
         throw new Error(`viewer shell is missing ${selector}`);

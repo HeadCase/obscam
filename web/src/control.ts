@@ -1,9 +1,12 @@
 import { parseFrameMapping, type FrameMapping } from "./presentation.js";
+import { ReconnectLoop } from "./reconnect.js";
 
 const STORAGE_KEY = "obscam.control.v1";
 const LEASE_DURATION_MS = 5_000;
 const RENEWAL_INTERVAL_MS = 2_000;
-const RECONNECT_DELAY_MS = 500;
+const INITIAL_RECONNECT_DELAY_MS = 250;
+const MAXIMUM_RECONNECT_DELAY_MS = 5_000;
+const STABLE_CONNECTION_MS = 5_000;
 const EXPOSURE_CHOICES_MS = new Set([
   10, 20, 50, 100, 200, 300, 500, 1_000, 2_000, 5_000, 10_000, 15_000, 20_000, 30_000
 ]);
@@ -34,6 +37,8 @@ export interface StoredCredentials {
 
 export interface ControlState {
   connection: "connected" | "disconnected";
+  connectionGeneration: number;
+  retryDelayMs: number | null;
   ownership: "no_one" | "another_viewer" | "you";
   generation: number;
   credentials: StoredCredentials | null;
@@ -44,8 +49,10 @@ export interface ControlState {
 }
 
 export type ControlEvent =
-  | { type: "connected" }
-  | { type: "disconnected" }
+  | { type: "connecting"; connectionGeneration: number }
+  | { type: "connected"; connectionGeneration: number }
+  | { type: "disconnected"; connectionGeneration: number }
+  | { type: "retry_scheduled"; connectionGeneration: number; retryDelayMs: number }
   | { type: "authority"; state: "unheld" | "held"; generation: number }
   | { type: "granted"; credentials: StoredCredentials }
   | { type: "resumed"; generation: number }
@@ -102,6 +109,8 @@ export function initialControlState(
       : null;
   return withDerivedMutationPermission({
     connection: "disconnected",
+    connectionGeneration: 0,
+    retryDelayMs: null,
     ownership: "no_one",
     generation: credentials?.generation ?? 0,
     credentials,
@@ -124,17 +133,38 @@ export function reduceControl(state: ControlState, event: ControlEvent): Control
   let next: Omit<ControlState, "mayMutate"> = state;
 
   switch (event.type) {
-    case "connected":
-      next = { ...state, connection: "connected" };
-      break;
-    case "disconnected":
+    case "connecting":
+      if (event.connectionGeneration <= state.connectionGeneration) return { state, storage };
       next = {
         ...state,
         connection: "disconnected",
+        connectionGeneration: event.connectionGeneration,
+        retryDelayMs: null,
         ownership: "no_one",
         credentialsValidated: false,
         pendingIntent: false
       };
+      break;
+    case "connected": {
+      if (event.connectionGeneration !== state.connectionGeneration) return { state, storage };
+      next = { ...state, connection: "connected", retryDelayMs: null };
+      break;
+    }
+    case "disconnected": {
+      if (event.connectionGeneration !== state.connectionGeneration) return { state, storage };
+      next = {
+        ...state,
+        connection: "disconnected",
+        retryDelayMs: null,
+        ownership: "no_one",
+        credentialsValidated: false,
+        pendingIntent: false
+      };
+      break;
+    }
+    case "retry_scheduled":
+      if (event.connectionGeneration !== state.connectionGeneration) return { state, storage };
+      next = { ...state, retryDelayMs: event.retryDelayMs };
       break;
     case "granted":
       next = {
@@ -364,8 +394,8 @@ export class ControlClient {
   private socket: WebSocket | null = null;
   private renewal: number | null = null;
   private leaseWatchdog: number | null = null;
-  private reconnect: number | null = null;
   private stopped = false;
+  private readonly reconnect: ReconnectLoop;
 
   constructor(
     private readonly runtimeEpoch: () => string,
@@ -373,18 +403,43 @@ export class ControlClient {
     private readonly onControlEvent: (event: ControlEvent) => ControlTransition,
     private readonly onFrameMapping: (mapping: FrameMapping) => void = () => {},
     private readonly onLifecycle: (value: unknown) => void = () => {}
-  ) {}
+  ) {
+    this.reconnect = new ReconnectLoop(
+      (connectionGeneration) => this.connect(connectionGeneration),
+      {
+        initialDelayMs: INITIAL_RECONNECT_DELAY_MS,
+        maximumDelayMs: MAXIMUM_RECONNECT_DELAY_MS,
+        stableAfterMs: STABLE_CONNECTION_MS,
+        onRetryScheduled: (retryDelayMs) => {
+          this.transition({
+            type: "retry_scheduled",
+            connectionGeneration: this.reconnect.connectionGeneration,
+            retryDelayMs
+          });
+        }
+      }
+    );
+  }
 
   start(): void {
     this.stopped = false;
-    this.connect();
+    this.reconnect.start();
   }
 
   close(): void {
     this.stopped = true;
-    this.clearTimers();
+    this.reconnect.close();
+    this.clearAuthorityTimers();
     this.socket?.close();
     this.socket = null;
+  }
+
+  retryNow(): void {
+    const socket = this.socket;
+    this.socket = null;
+    socket?.close();
+    this.clearAuthorityTimers();
+    this.reconnect.retryNow();
   }
 
   toggleAuthority(): void {
@@ -420,17 +475,19 @@ export class ControlClient {
     this.transition({ type: "visible", settingsGeneration });
   }
 
-  private connect(): void {
+  private connect(connectionGeneration: number): void {
     if (this.stopped) {
       return;
     }
-    this.reconnect = null;
+    this.transition({ type: "connecting", connectionGeneration });
     const endpoint = new URL("/api/v1/control", window.location.href);
     endpoint.protocol = endpoint.protocol === "https:" ? "wss:" : "ws:";
     const socket = new WebSocket(endpoint);
     this.socket = socket;
     socket.addEventListener("open", () => {
-      this.transition({ type: "connected" });
+      if (this.socket !== socket) return;
+      this.reconnect.connected(connectionGeneration);
+      this.transition({ type: "connected", connectionGeneration });
       const state = this.controlState();
       if (state.credentials !== null) {
         this.sendCredentials("resume", state.credentials);
@@ -458,7 +515,7 @@ export class ControlClient {
       }
     });
     socket.addEventListener("close", () => {
-      this.disconnectAndReconnect(socket, false);
+      this.disconnectAndReconnect(socket, connectionGeneration, false);
     });
   }
 
@@ -538,11 +595,15 @@ export class ControlClient {
   private failSilentControlConnection(): void {
     const socket = this.socket;
     if (socket !== null) {
-      this.disconnectAndReconnect(socket, true);
+      this.disconnectAndReconnect(socket, this.reconnect.connectionGeneration, true);
     }
   }
 
-  private disconnectAndReconnect(socket: WebSocket, closeSocket: boolean): void {
+  private disconnectAndReconnect(
+    socket: WebSocket,
+    connectionGeneration: number,
+    closeSocket: boolean
+  ): void {
     if (this.socket !== socket) {
       return;
     }
@@ -551,10 +612,8 @@ export class ControlClient {
       socket.close();
     }
     this.clearAuthorityTimers();
-    this.transition({ type: "disconnected" });
-    if (!this.stopped) {
-      this.reconnect = window.setTimeout(() => this.connect(), RECONNECT_DELAY_MS);
-    }
+    this.transition({ type: "disconnected", connectionGeneration });
+    if (!this.stopped) this.reconnect.failed(connectionGeneration);
   }
 
   private clearLeaseWatchdog(): void {
@@ -569,13 +628,6 @@ export class ControlClient {
     this.clearLeaseWatchdog();
   }
 
-  private clearTimers(): void {
-    this.clearAuthorityTimers();
-    if (this.reconnect !== null) {
-      window.clearTimeout(this.reconnect);
-      this.reconnect = null;
-    }
-  }
 }
 
 function withDerivedMutationPermission(

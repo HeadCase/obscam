@@ -39,13 +39,22 @@ input {
   overflow: hidden;
 }
 
-.viewer__video {
+.viewer__video,
+.viewer__retained-frame {
   position: absolute;
   inset: 0;
   width: 100%;
   height: 100%;
   background: #000;
   object-fit: contain;
+}
+
+.viewer__retained-frame {
+  z-index: 1;
+}
+
+.viewer__retained-frame[hidden] {
+  display: none;
 }
 
 .viewer__frame::before {
@@ -59,7 +68,7 @@ input {
 }
 
 .viewer__unavailable {
-  z-index: 1;
+  z-index: 2;
   display: grid;
   justify-items: center;
   gap: 0.45rem;
