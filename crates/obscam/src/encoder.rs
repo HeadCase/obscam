@@ -1,4 +1,5 @@
 use std::{
+    fmt,
     io::{self, BufRead, BufReader, Read, Write},
     net::{SocketAddr, UdpSocket},
     path::Path,
@@ -6,7 +7,7 @@ use std::{
     sync::{
         Arc,
         atomic::{AtomicBool, AtomicU32, Ordering},
-        mpsc::{self, Receiver, SyncSender},
+        mpsc::{self, Receiver, RecvTimeoutError, SyncSender},
     },
     thread,
     time::Duration,
@@ -29,6 +30,7 @@ const RTP_SSRC: u32 = 1_868_722_033;
 pub struct FfmpegEncoder {
     child: Option<Child>,
     stdin: Option<ChildStdin>,
+    writer: Option<FrameWriter>,
     stderr: Option<thread::JoinHandle<()>>,
     observer: Option<RtpObserver>,
     correlation: Option<(CorrelationState, u64)>,
@@ -44,7 +46,12 @@ impl FfmpegEncoder {
     ///
     /// Returns the process spawn or pipe error. No alternate encoder is attempted.
     pub fn start(program: &Path) -> io::Result<Self> {
-        Self::spawn(program, None)
+        Self::spawn(program, None, false)
+    }
+
+    #[cfg(test)]
+    fn start_owned(program: &Path) -> io::Result<Self> {
+        Self::spawn(program, None, true)
     }
 
     pub(crate) fn start_correlated(
@@ -52,10 +59,14 @@ impl FfmpegEncoder {
         correlation: CorrelationState,
     ) -> io::Result<Self> {
         let stream_epoch = correlation.begin_stream();
-        Self::spawn(program, Some((correlation, stream_epoch)))
+        Self::spawn(program, Some((correlation, stream_epoch)), true)
     }
 
-    fn spawn(program: &Path, correlation: Option<(CorrelationState, u64)>) -> io::Result<Self> {
+    fn spawn(
+        program: &Path,
+        correlation: Option<(CorrelationState, u64)>,
+        owned_writer: bool,
+    ) -> io::Result<Self> {
         let (pts_sender, pts_receiver) = mpsc::sync_channel(128);
         let evidence_valid = Arc::new(AtomicBool::new(true));
         let observer = correlation
@@ -79,6 +90,11 @@ impl FfmpegEncoder {
             .stdin
             .take()
             .ok_or_else(|| io::Error::other("FFmpeg stdin pipe was not created"))?;
+        let (stdin, writer) = if owned_writer {
+            (None, Some(FrameWriter::start(stdin)?))
+        } else {
+            (Some(stdin), None)
+        };
         let stderr = if correlation.is_some() {
             let stderr = child
                 .stderr
@@ -90,7 +106,8 @@ impl FfmpegEncoder {
         };
         Ok(Self {
             child: Some(child),
-            stdin: Some(stdin),
+            stdin,
+            writer,
             stderr,
             observer,
             correlation,
@@ -148,8 +165,93 @@ impl FfmpegEncoder {
         self.publish_step(frame, false)
     }
 
-    pub(crate) fn repeat(&mut self, frame: &PublishedFrame) -> io::Result<()> {
-        self.publish_step(frame, true)
+    pub(crate) fn publish_owned(
+        &mut self,
+        frame: PublishedFrame,
+        repeat: bool,
+        timeout: Duration,
+    ) -> Result<PublishedFrame, OwnedPublicationError> {
+        match self
+            .child
+            .as_mut()
+            .expect("FFmpeg child is present")
+            .try_wait()
+        {
+            Ok(Some(status)) => {
+                return Err(OwnedPublicationError::new(
+                    frame,
+                    io::Error::other(format!("FFmpeg exited with status {status}")),
+                ));
+            }
+            Ok(None) => {}
+            Err(error) => return Err(OwnedPublicationError::new(frame, error)),
+        }
+        if let (Some((correlation, stream_epoch)), Some(metadata)) =
+            (&self.correlation, frame.metadata())
+        {
+            let _ = correlation.submit(
+                *stream_epoch,
+                metadata,
+                frame.generation(),
+                crate::pipeline::unix_time_us(),
+                repeat,
+            );
+        }
+        let request = WriterRequest { frame };
+        if let Err(error) = self
+            .writer
+            .as_ref()
+            .expect("correlated encoder has a frame writer")
+            .requests
+            .as_ref()
+            .expect("FFmpeg writer accepts requests")
+            .send(request)
+        {
+            return Err(OwnedPublicationError::new(
+                error.0.frame,
+                io::Error::new(io::ErrorKind::BrokenPipe, "FFmpeg writer stopped"),
+            ));
+        }
+        let response = self
+            .writer
+            .as_ref()
+            .expect("correlated encoder has a frame writer")
+            .responses
+            .recv_timeout(timeout);
+        match response {
+            Ok(response) => match response.result {
+                Ok(()) => Ok(response.frame),
+                Err(error) => Err(OwnedPublicationError::new(response.frame, error)),
+            },
+            Err(RecvTimeoutError::Disconnected) => {
+                panic!("FFmpeg writer disconnected while owning a frame")
+            }
+            Err(RecvTimeoutError::Timeout) => {
+                self.kill_child();
+                let frame = self.recover_writer_frame_after_stop();
+                Err(OwnedPublicationError::new(
+                    frame,
+                    io::Error::new(io::ErrorKind::TimedOut, "FFmpeg publication timed out"),
+                ))
+            }
+        }
+    }
+
+    fn recover_writer_frame_after_stop(&self) -> PublishedFrame {
+        self.writer
+            .as_ref()
+            .expect("correlated encoder has a frame writer")
+            .responses
+            .recv()
+            .expect("FFmpeg writer returns its owned frame after child termination")
+            .frame
+    }
+
+    fn kill_child(&mut self) {
+        if let Some(child) = self.child.as_mut() {
+            let _ = child.kill();
+            let _ = child.wait();
+        }
     }
 
     fn publish_step(&mut self, frame: &PublishedFrame, repeat: bool) -> io::Result<()> {
@@ -177,6 +279,7 @@ impl FfmpegEncoder {
     /// Returns a wait error or an error when `FFmpeg` exits unsuccessfully.
     pub fn finish(mut self) -> io::Result<()> {
         self.stdin.take();
+        self.writer.take();
         let status = self
             .child
             .take()
@@ -203,11 +306,85 @@ impl FfmpegEncoder {
 impl Drop for FfmpegEncoder {
     fn drop(&mut self) {
         self.stdin.take();
-        if let Some(mut child) = self.child.take() {
-            let _ = child.kill();
-            let _ = child.wait();
-        }
+        self.kill_child();
+        self.child.take();
+        self.writer.take();
         self.finish_helpers();
+    }
+}
+
+pub(crate) struct OwnedPublicationError {
+    frame: PublishedFrame,
+    error: io::Error,
+}
+
+impl OwnedPublicationError {
+    const fn new(frame: PublishedFrame, error: io::Error) -> Self {
+        Self { frame, error }
+    }
+
+    pub(crate) fn into_parts(self) -> (PublishedFrame, io::Error) {
+        (self.frame, self.error)
+    }
+}
+
+struct WriterRequest {
+    frame: PublishedFrame,
+}
+
+struct WriterResponse {
+    frame: PublishedFrame,
+    result: io::Result<()>,
+}
+
+struct FrameWriter {
+    requests: Option<SyncSender<WriterRequest>>,
+    responses: Receiver<WriterResponse>,
+    thread: Option<thread::JoinHandle<()>>,
+}
+
+impl fmt::Debug for FrameWriter {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("FrameWriter")
+            .finish_non_exhaustive()
+    }
+}
+
+impl FrameWriter {
+    fn start(mut stdin: ChildStdin) -> io::Result<Self> {
+        let (request_sender, request_receiver) = mpsc::sync_channel::<WriterRequest>(0);
+        let (response_sender, response_receiver) = mpsc::sync_channel(0);
+        let thread = thread::Builder::new()
+            .name("obscam-ffmpeg-input".into())
+            .spawn(move || {
+                while let Ok(request) = request_receiver.recv() {
+                    let result = stdin.write_all(request.frame.data());
+                    if response_sender
+                        .send(WriterResponse {
+                            frame: request.frame,
+                            result,
+                        })
+                        .is_err()
+                    {
+                        break;
+                    }
+                }
+            })?;
+        Ok(Self {
+            requests: Some(request_sender),
+            responses: response_receiver,
+            thread: Some(thread),
+        })
+    }
+}
+
+impl Drop for FrameWriter {
+    fn drop(&mut self) {
+        self.requests.take();
+        if let Some(thread) = self.thread.take() {
+            let _ = thread.join();
+        }
     }
 }
 
@@ -553,6 +730,44 @@ fn parse_address(address: &str) -> io::Result<SocketAddr> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(unix)]
+    #[test]
+    fn hung_ffmpeg_input_is_terminated_and_returns_the_owned_frame() {
+        use std::{fs, os::unix::fs::PermissionsExt};
+
+        use crate::{LatestFrameMailbox, MonochromeProcessor};
+        use uuid::Uuid;
+        use zwo_asi::{CameraSource, DeterministicCamera, DeterministicScenario, Settings};
+
+        let directory = std::env::temp_dir().join(format!("obscam-ffmpeg-hang-{}", Uuid::new_v4()));
+        fs::create_dir(&directory).expect("create test directory");
+        let program = directory.join("fake-ffmpeg");
+        fs::write(&program, "#!/bin/sh\nexec sleep 10\n").expect("write fake FFmpeg");
+        fs::set_permissions(&program, fs::Permissions::from_mode(0o700)).expect("make executable");
+        let mut camera =
+            DeterministicCamera::connect(DeterministicScenario::new([])).expect("camera present");
+        camera
+            .configure(Settings::new(10_000, 0).expect("settings"))
+            .expect("configure");
+        camera.start().expect("start");
+        let source = camera.capture_next(100).expect("source generation");
+        let mut processor = MonochromeProcessor::new();
+        let mailbox = LatestFrameMailbox::new();
+        mailbox.publish(&processor.process(&source));
+        let frame = mailbox.take().expect("processed generation");
+        let generation = frame.generation();
+        let mut encoder = FfmpegEncoder::start_owned(&program).expect("start fake FFmpeg");
+
+        let Err(failure) = encoder.publish_owned(frame, false, Duration::from_millis(50)) else {
+            panic!("blocked input must time out");
+        };
+        let (frame, error) = failure.into_parts();
+
+        assert_eq!(error.kind(), io::ErrorKind::TimedOut);
+        assert_eq!(frame.generation(), generation);
+        fs::remove_dir_all(directory).expect("remove test directory");
+    }
 
     #[test]
     fn parses_only_direct_muxer_video_pts_evidence() {

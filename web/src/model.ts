@@ -13,6 +13,12 @@ export interface RuntimeComponents {
   relay: ComponentStatus;
 }
 
+/** Runtime-local counters that distinguish child replacement from dropped work. */
+export interface MediaRecoveryCounters {
+  encoderReplacements: number;
+  pipelineSkips: number;
+}
+
 /** Version-one bootstrap facts supplied by the Rust service. */
 export interface RuntimeContract {
   schemaVersion: 1;
@@ -22,6 +28,7 @@ export interface RuntimeContract {
     whepPath: string;
   };
   components: RuntimeComponents;
+  mediaRecovery: MediaRecoveryCounters;
   latestFrame: null;
 }
 
@@ -72,6 +79,7 @@ export function parseRuntimeContract(value: unknown): RuntimeContract {
     throw new Error("invalid media descriptor");
   }
   const components = parseRuntimeComponents(value.components);
+  const mediaRecovery = parseMediaRecoveryCounters(value.mediaRecovery);
   if (value.latestFrame !== null) {
     throw new Error("untrusted frame contract");
   }
@@ -84,8 +92,27 @@ export function parseRuntimeContract(value: unknown): RuntimeContract {
       whepPath: value.media.whepPath
     },
     components,
+    mediaRecovery,
     latestFrame: null
   };
+}
+
+function parseMediaRecoveryCounters(value: unknown): MediaRecoveryCounters {
+  if (
+    !isRecord(value) ||
+    !nonNegativeSafeInteger(value.encoderReplacements) ||
+    !nonNegativeSafeInteger(value.pipelineSkips)
+  ) {
+    throw new Error("invalid media recovery counters");
+  }
+  return {
+    encoderReplacements: value.encoderReplacements as number,
+    pipelineSkips: value.pipelineSkips as number
+  };
+}
+
+function nonNegativeSafeInteger(value: unknown): boolean {
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
 }
 
 /** Validates and normalizes independently reported component facts. */

@@ -46,6 +46,18 @@ fn mediamtx_service_enters_the_dedicated_network_namespace() {
 }
 
 #[test]
+fn mediamtx_control_api_is_readable_only_on_the_private_media_link() {
+    let config = repository_file("deploy/mediamtx.yml");
+    let rules = repository_file("deploy/obscam-media.nft");
+
+    assert_eq!(scalar_values(&config, "api"), ["yes"]);
+    assert_eq!(scalar_values(&config, "apiAddress"), ["169.254.218.2:9997"]);
+    assert!(config.contains("ips: [\"127.0.0.1\", \"::1\", \"169.254.218.1\"]"));
+    assert!(config.contains("- action: api"));
+    assert!(!rules.contains("dport 9997"));
+}
+
+#[test]
 fn media_namespace_contains_only_a_private_point_to_point_link() {
     let setup = repository_file("deploy/setup-media-network");
     let unit = repository_file("deploy/systemd/obscam-media-network.service");

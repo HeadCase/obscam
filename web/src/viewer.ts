@@ -132,7 +132,8 @@ export function reduceViewer(state: ViewerState, event: ViewerEvent): ViewerTran
           ? initialPresentationState(event.facts.runtimeEpoch)
           : state.presentation,
         correlationLostAtUnixUs: changedEpoch ? null : state.correlationLostAtUnixUs,
-        awaitingCurrentPresentation: changedEpoch || state.awaitingCurrentPresentation
+        awaitingCurrentPresentation:
+          changedEpoch || event.facts.recovery !== null || state.awaitingCurrentPresentation
       };
       if (changedEpoch) {
         effects = ["reconnect_media"];

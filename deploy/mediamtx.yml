@@ -1,6 +1,26 @@
 logLevel: info
 logDestinations: [stdout]
 
+# Read-only readiness evidence for the Rust owner. The listener exists only on
+# the namespace-private veth and is not translated to a browser-facing address.
+api: yes
+apiAddress: 169.254.218.2:9997
+authInternalUsers:
+  - user: any
+    pass:
+    ips: []
+    permissions:
+      - action: publish
+      - action: read
+      - action: playback
+  - user: any
+    pass:
+    ips: ["127.0.0.1", "::1", "169.254.218.1"]
+    permissions:
+      - action: api
+      - action: metrics
+      - action: pprof
+
 rtsp: no
 
 rtmp: no

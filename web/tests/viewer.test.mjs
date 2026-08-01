@@ -227,6 +227,26 @@ test("confirmed component failure is immediate and retains only a stale trustwor
   assert.equal(viewerProjection(state).status, "Stale");
   assert.equal(viewerProjection(state).detail, "Recovering encoder");
 
+  state = dispatch(state, {
+    type: "lifecycle",
+    facts: {
+      ...ready,
+      components: { ...ready.components, relay: { state: "unavailable", reason: "not_observed" } },
+      recovery: "relay"
+    }
+  });
+  assert.equal(viewerProjection(state).status, "Stale");
+  assert.equal(viewerProjection(state).detail, "Recovering relay");
+
+  state = dispatch(state, { type: "lifecycle", facts: ready });
+  assert.equal(viewerProjection(state).status, "Reconnecting");
+  state = dispatch(state, {
+    type: "presented",
+    rtpTimestamp: mapping.rtpTimestamp,
+    nowUnixUs: mapping.submittedAtUnixUs + 40_000
+  });
+  assert.equal(viewerProjection(state).status, "Live");
+
   const withoutFrame = dispatch(readyState(), {
     type: "lifecycle",
     facts: {
