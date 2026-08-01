@@ -68,6 +68,9 @@ export function reduceViewer(state, event) {
             break;
         }
         case "media_connecting": {
+            const connectionGeneration = event.connectionGeneration ?? state.mediaConnectionGeneration + 1;
+            if (connectionGeneration <= state.mediaConnectionGeneration)
+                break;
             const presentation = reducePresentation(state.presentation, {
                 type: "reconnected",
                 streamEpoch: state.presentation.streamEpoch
@@ -76,18 +79,26 @@ export function reduceViewer(state, event) {
                 ...state,
                 presentation,
                 mediaConnection: "connecting",
-                mediaConnectionGeneration: state.mediaConnectionGeneration + 1,
+                mediaConnectionGeneration: connectionGeneration,
                 awaitingCurrentPresentation: true,
                 correlationLostAtUnixUs: null
             };
             break;
         }
-        case "media_connected":
+        case "media_connected": {
+            const connectionGeneration = event.connectionGeneration ?? state.mediaConnectionGeneration;
+            if (connectionGeneration !== state.mediaConnectionGeneration)
+                break;
             next = { ...state, mediaConnection: "connected" };
             break;
-        case "media_disconnected":
+        }
+        case "media_disconnected": {
+            const connectionGeneration = event.connectionGeneration ?? state.mediaConnectionGeneration;
+            if (connectionGeneration !== state.mediaConnectionGeneration)
+                break;
             next = { ...state, mediaConnection: "disconnected", awaitingCurrentPresentation: true };
             break;
+        }
         case "presented": {
             if (!acceptsMediaPresentation(state, event.mediaConnectionGeneration)) {
                 break;

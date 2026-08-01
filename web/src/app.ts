@@ -8,6 +8,7 @@ import {
   type ControlTransition
 } from "./control.js";
 import { startWhep, type WhepSession } from "./whep.js";
+import { ReconnectLoop } from "./reconnect.js";
 import {
   acceptsMediaPresentation,
   initialViewerState,
@@ -25,8 +26,9 @@ import {
 } from "./service-quality.js";
 
 const LIVENESS_TICK_MS = 100;
-const INITIAL_MEDIA_RETRY_MS = 250;
-const MAX_MEDIA_RETRY_MS = 5_000;
+const INITIAL_RETRY_MS = 250;
+const MAXIMUM_RETRY_MS = 5_000;
+const STABLE_CONNECTION_MS = 5_000;
 
 async function boot(): Promise<void> {
   const status = requiredElement("[data-viewer-status]");
@@ -37,6 +39,7 @@ async function boot(): Promise<void> {
   const qualityDetail = requiredElement("[data-service-quality]");
   const qualityDownload = requiredButton("[data-service-quality-download]");
   const video = requiredVideo("[data-viewer-video]");
+  const retainedFrame = requiredCanvas("[data-viewer-retained-frame]");
   const takeControl = requiredButton("[data-control=\"take-control\"]");
   const controlStatus = requiredElement("[data-control-status]");
   const exposureButtons = Array.from(
@@ -60,9 +63,9 @@ async function boot(): Promise<void> {
     let quality: ServiceQualityClient | null = null;
     let qualityRuntimeEpoch: string | null = null;
     let mediaSession: WhepSession | null = null;
+    let mediaAttemptCancellation: AbortController | null = null;
     let stopPresentedFrames: (() => void) | null = null;
-    let mediaAttempt = 0;
-    let mediaRetryMs = INITIAL_MEDIA_RETRY_MS;
+    let mediaReconnect: ReconnectLoop;
 
     const render = (): void => {
       const projection = viewerProjection(viewer);
@@ -101,21 +104,24 @@ async function boot(): Promise<void> {
       }
     };
 
-    const connectMedia = async (reconnection: boolean): Promise<void> => {
-      const attempt = ++mediaAttempt;
-      const connectionGeneration = dispatch({ type: "media_connecting" }).state
-        .mediaConnectionGeneration;
+    const connectMedia = async (connectionGeneration: number): Promise<void> => {
+      mediaAttemptCancellation?.abort();
+      const cancellation = new AbortController();
+      mediaAttemptCancellation = cancellation;
+      dispatch({ type: "media_connecting", connectionGeneration });
+      if (
+        viewer.trustworthyFrame !== null &&
+        retainedFrame.dataset.trustworthyFrame === "true"
+      ) {
+        retainedFrame.hidden = false;
+      }
       stopPresentedFrames?.();
       stopPresentedFrames = null;
       const previous = mediaSession;
-      mediaSession = null;
-      if (previous !== null) {
-        await previous.close();
-      }
       try {
         if (qualityRuntimeEpoch !== viewer.runtimeEpoch) {
           await connectQuality();
-        } else if (reconnection && quality !== null) {
+        } else if (connectionGeneration > 1 && quality !== null) {
           await quality.reconnect();
         }
       } catch (error: unknown) {
@@ -124,33 +130,35 @@ async function boot(): Promise<void> {
       }
       try {
         const session = await startWhep(
-          video,
           deriveWhepUrl(runtime.media, window.location.href),
           () => {
-            if (attempt !== mediaAttempt) return;
-            dispatch({ type: "media_disconnected" });
-            void connectMedia(true);
-          }
+            if (connectionGeneration !== mediaReconnect.connectionGeneration) return;
+            dispatch({ type: "media_disconnected", connectionGeneration });
+            mediaReconnect.failed(connectionGeneration);
+          },
+          cancellation.signal
         );
-        if (attempt !== mediaAttempt) {
+        if (connectionGeneration !== mediaReconnect.connectionGeneration) {
           await session.close();
           return;
         }
+        session.attach(video);
+        mediaAttemptCancellation = null;
         mediaSession = session;
-        mediaRetryMs = INITIAL_MEDIA_RETRY_MS;
-        dispatch({ type: "media_connected" });
+        if (previous !== null) void previous.close();
+        mediaReconnect.connected(connectionGeneration);
+        dispatch({ type: "media_connected", connectionGeneration });
         stopPresentedFrames = watchPresentedFrames(video, (metadata) => {
           presentedFrame(connectionGeneration, metadata);
         });
       } catch (error: unknown) {
-        if (attempt === mediaAttempt) {
-          dispatch({ type: "media_disconnected" });
+        if (
+          connectionGeneration === mediaReconnect.connectionGeneration &&
+          !cancellation.signal.aborted
+        ) {
+          dispatch({ type: "media_disconnected", connectionGeneration });
           console.error("ObsCam WHEP connection failed", error);
-          const retryAfterMs = mediaRetryMs;
-          mediaRetryMs = Math.min(mediaRetryMs * 2, MAX_MEDIA_RETRY_MS);
-          window.setTimeout(() => {
-            if (attempt === mediaAttempt) void connectMedia(true);
-          }, retryAfterMs);
+          mediaReconnect.failed(connectionGeneration);
         }
       }
     };
@@ -160,7 +168,7 @@ async function boot(): Promise<void> {
       viewer = transition.state;
       render();
       if (transition.effects.includes("reconnect_media")) {
-        void connectMedia(true);
+        mediaReconnect.retryNow();
       }
       return transition;
     };
@@ -190,6 +198,15 @@ async function boot(): Promise<void> {
         !viewer.awaitingCurrentPresentation &&
         viewer.correlationLostAtUnixUs === null &&
         viewer.trustworthyFrame !== null;
+      if (exact && viewer.trustworthyFrame !== null) {
+        const frame = viewer.trustworthyFrame;
+        captureTrustworthyFrame(
+          video,
+          retainedFrame,
+          `${frame.runtimeEpoch}:${frame.streamEpoch}:${frame.sourceGeneration}`
+        );
+        retainedFrame.hidden = true;
+      }
       quality?.report({
         correlation: exact ? "exact" : "unknown",
         streamEpoch:
@@ -208,6 +225,14 @@ async function boot(): Promise<void> {
       controlTransition,
       (mapping) => dispatch({ type: "mapping", mapping }),
       (value) => dispatch({ type: "lifecycle", facts: parseLifecycleFacts(value) })
+    );
+    mediaReconnect = new ReconnectLoop(
+      (connectionGeneration) => void connectMedia(connectionGeneration),
+      {
+        initialDelayMs: INITIAL_RETRY_MS,
+        maximumDelayMs: MAXIMUM_RETRY_MS,
+        stableAfterMs: STABLE_CONNECTION_MS
+      }
     );
 
     takeControl.addEventListener("click", () => control.toggleAuthority());
@@ -244,10 +269,16 @@ async function boot(): Promise<void> {
     }
 
     document.addEventListener("visibilitychange", () => {
+      const foreground = document.visibilityState === "visible" && viewer.visibility === "hidden";
       dispatch({
         type: "visibility",
         visibility: document.visibilityState === "visible" ? "visible" : "hidden"
       });
+      if (foreground) control.retryNow();
+    });
+    window.addEventListener("online", () => {
+      mediaReconnect.retryNow();
+      control.retryNow();
     });
     const tick = window.setInterval(() => {
       const nowUnixUs = currentServerUnixUs(quality, qualityRuntimeEpoch, viewer.runtimeEpoch);
@@ -257,12 +288,13 @@ async function boot(): Promise<void> {
     }, LIVENESS_TICK_MS);
     window.addEventListener("pagehide", () => {
       window.clearInterval(tick);
-      mediaAttempt += 1;
+      mediaReconnect.close();
+      mediaAttemptCancellation?.abort();
       control.close();
       stopPresentedFrames?.();
       void mediaSession?.close();
     }, { once: true });
-    await connectMedia(false);
+    mediaReconnect.start();
   } catch (error: unknown) {
     status.textContent = "Unavailable";
     detail.textContent = "Runtime status unavailable";
@@ -314,6 +346,22 @@ function watchPresentedFrames(
   };
 }
 
+function captureTrustworthyFrame(
+  video: HTMLVideoElement,
+  retainedFrame: HTMLCanvasElement,
+  frameIdentity: string
+): void {
+  if (retainedFrame.dataset.frameIdentity === frameIdentity) return;
+  if (video.videoWidth === 0 || video.videoHeight === 0) return;
+  const context = retainedFrame.getContext("2d");
+  if (context === null) return;
+  retainedFrame.width = video.videoWidth;
+  retainedFrame.height = video.videoHeight;
+  context.drawImage(video, 0, 0, retainedFrame.width, retainedFrame.height);
+  retainedFrame.dataset.trustworthyFrame = "true";
+  retainedFrame.dataset.frameIdentity = frameIdentity;
+}
+
 function renderControl(
   state: ControlState,
   takeControl: HTMLButtonElement,
@@ -340,10 +388,17 @@ function renderControl(
   monochrome.setAttribute("aria-pressed", String(settings.treatment === "monochrome"));
   colour.setAttribute("aria-pressed", String(settings.treatment === "colour"));
   controlStatus.textContent =
-    state.connection === "disconnected" ? "Control reconnecting" :
+    state.connection === "disconnected"
+      ? state.retryDelayMs === null
+        ? "Control reconnecting now"
+        : `Control reconnecting in ${formatRetryDelay(state.retryDelayMs)}` :
       state.settings.pending !== null ? "Applying settings" :
         state.ownership === "you" ? "You have control" :
           state.ownership === "another_viewer" ? "Another viewer has control" : "No one has control";
+}
+
+function formatRetryDelay(delayMs: number): string {
+  return delayMs < 1_000 ? `${delayMs} ms` : `${(delayMs / 1_000).toFixed(1)} s`;
 }
 
 function requiredInput(selector: string): HTMLInputElement {
@@ -354,6 +409,12 @@ function requiredInput(selector: string): HTMLInputElement {
 
 function requiredVideo(selector: string): HTMLVideoElement {
   const element = document.querySelector<HTMLVideoElement>(selector);
+  if (element === null) throw new Error(`viewer shell is missing ${selector}`);
+  return element;
+}
+
+function requiredCanvas(selector: string): HTMLCanvasElement {
+  const element = document.querySelector<HTMLCanvasElement>(selector);
   if (element === null) throw new Error(`viewer shell is missing ${selector}`);
   return element;
 }

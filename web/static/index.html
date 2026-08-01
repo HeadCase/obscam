@@ -11,6 +11,7 @@
     <main class="viewer" aria-label="ObsCam observatory viewer">
       <section class="viewer__frame" data-viewer-frame aria-label="Camera frame">
         <video class="viewer__video" data-viewer-video autoplay muted playsinline></video>
+        <canvas class="viewer__retained-frame" data-viewer-retained-frame hidden></canvas>
         <div class="viewer__unavailable" data-viewer-unavailable role="status" aria-live="polite">
           <span class="viewer__status" data-viewer-status>Unavailable</span>
           <span class="viewer__detail" data-viewer-detail>Capture · Encoder · Relay unavailable</span>

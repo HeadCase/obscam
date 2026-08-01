@@ -16,10 +16,19 @@ const credentials = {
 test("a new viewer starts read-only and control loss disables mutation", () => {
   const initial = initialControlState(null);
   assert.equal(initial.connection, "disconnected");
+  assert.equal(initial.connectionGeneration, 0);
+  assert.equal(initial.retryDelayMs, null);
   assert.equal(initial.ownership, "no_one");
   assert.equal(initial.mayMutate, false);
 
-  const connected = reduceControl(initial, { type: "connected" }).state;
+  const connecting = reduceControl(initial, {
+    type: "connecting",
+    connectionGeneration: 1
+  }).state;
+  const connected = reduceControl(connecting, {
+    type: "connected",
+    connectionGeneration: 1
+  }).state;
   assert.equal(connected.mayMutate, false);
   const granted = reduceControl(connected, {
     type: "granted",
@@ -28,11 +37,27 @@ test("a new viewer starts read-only and control loss disables mutation", () => {
   assert.equal(granted.ownership, "you");
   assert.equal(granted.mayMutate, true);
 
-  const disconnected = reduceControl(granted, { type: "disconnected" }).state;
+  const disconnected = reduceControl(granted, {
+    type: "disconnected",
+    connectionGeneration: 1
+  }).state;
   assert.equal(disconnected.connection, "disconnected");
   assert.equal(disconnected.mayMutate, false);
   assert.deepEqual(disconnected.credentials, credentials);
-  const reconnected = reduceControl(disconnected, { type: "connected" }).state;
+  const waiting = reduceControl(disconnected, {
+    type: "retry_scheduled",
+    connectionGeneration: 1,
+    retryDelayMs: 375
+  }).state;
+  assert.equal(waiting.retryDelayMs, 375);
+  const nextConnecting = reduceControl(waiting, {
+    type: "connecting",
+    connectionGeneration: 2
+  }).state;
+  const reconnected = reduceControl(nextConnecting, {
+    type: "connected",
+    connectionGeneration: 2
+  }).state;
   const awaitingResume = reduceControl(reconnected, {
     type: "authority",
     state: "held",
@@ -46,8 +71,19 @@ test("a new viewer starts read-only and control loss disables mutation", () => {
   );
 });
 
+test("stale control connection callbacks cannot restore authority", () => {
+  let state = initialControlState(credentials);
+  state = reduceControl(state, { type: "connecting", connectionGeneration: 2 }).state;
+  state = reduceControl(state, { type: "connecting", connectionGeneration: 3 }).state;
+
+  const stale = reduceControl(state, { type: "connected", connectionGeneration: 2 }).state;
+  assert.equal(stale.connection, "disconnected");
+  assert.equal(stale.connectionGeneration, 3);
+  assert.equal(stale.mayMutate, false);
+});
+
 test("takeover discards displaced credentials and unsent intent", () => {
-  let state = reduceControl(initialControlState(null), { type: "connected" }).state;
+  let state = reduceControl(initialControlState(null), { type: "connected", connectionGeneration: 0 }).state;
   state = reduceControl(state, { type: "granted", credentials }).state;
   state = reduceControl(state, { type: "intent_queued" }).state;
 
@@ -64,7 +100,7 @@ test("takeover discards displaced credentials and unsent intent", () => {
 });
 
 test("server-timed expiry discards the former holder credential", () => {
-  let state = reduceControl(initialControlState(null), { type: "connected" }).state;
+  let state = reduceControl(initialControlState(null), { type: "connected", connectionGeneration: 0 }).state;
   state = reduceControl(state, { type: "granted", credentials }).state;
 
   const expired = reduceControl(state, {
@@ -79,7 +115,7 @@ test("server-timed expiry discards the former holder credential", () => {
 });
 
 test("late stale-command rejection does not overwrite newer authoritative ownership", () => {
-  let state = reduceControl(initialControlState(null), { type: "connected" }).state;
+  let state = reduceControl(initialControlState(null), { type: "connected", connectionGeneration: 0 }).state;
   state = reduceControl(state, { type: "granted", credentials }).state;
   state = reduceControl(state, {
     type: "authority",
@@ -190,7 +226,7 @@ test("presentation before applied still advances the exact target to visible", (
 });
 
 test("invalid settings rejection keeps a healthy lease", () => {
-  let state = reduceControl(initialControlState(null), { type: "connected" }).state;
+  let state = reduceControl(initialControlState(null), { type: "connected", connectionGeneration: 0 }).state;
   state = reduceControl(state, { type: "granted", credentials }).state;
   state = reduceControl(state, { type: "intent_queued" }).state;
 

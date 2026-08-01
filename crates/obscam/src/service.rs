@@ -49,6 +49,7 @@ fn router(state: RuntimeState) -> Router {
         .route("/assets/control.js", get(assets::control))
         .route("/assets/model.js", get(assets::model))
         .route("/assets/presentation.js", get(assets::presentation))
+        .route("/assets/reconnect.js", get(assets::reconnect))
         .route("/assets/service-quality.js", get(assets::service_quality))
         .route("/assets/whep.js", get(assets::whep))
         .route("/assets/viewer.js", get(assets::viewer))
