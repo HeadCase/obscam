@@ -6,7 +6,7 @@ use uuid::Uuid;
 
 use crate::{
     AuthorityGate, Config, SettingsController, config::WhepPath, correlation::CorrelationState,
-    service_quality::ServiceQualityState,
+    recovery::ValidationFailure, service_quality::ServiceQualityState,
 };
 
 pub(crate) const SCHEMA_VERSION: u8 = 1;
@@ -27,6 +27,7 @@ pub struct RuntimeState {
 pub(crate) struct RuntimeSnapshot {
     schema_version: u8,
     pub(crate) runtime_epoch: Uuid,
+    minimum_source_generation: u64,
     media: MediaDescriptor,
     pub(crate) components: Components,
     media_recovery: MediaRecoveryCounters,
@@ -38,6 +39,7 @@ pub(crate) struct RuntimeSnapshot {
 #[serde(rename_all = "camelCase")]
 pub(crate) struct LifecycleSnapshot {
     pub(crate) runtime_epoch: Uuid,
+    pub(crate) minimum_source_generation: u64,
     pub(crate) components: Components,
     pub(crate) recovery: Option<RecoveryComponent>,
     media_recovery: MediaRecoveryCounters,
@@ -57,6 +59,11 @@ pub(crate) enum RecoveryComponent {
 struct MediaRecoveryCounters {
     encoder_replacements: u64,
     pipeline_skips: u64,
+    camera_restarts: u64,
+    invalid_dimensions: u64,
+    invalid_buffer_lengths: u64,
+    invalid_generation_metadata: u64,
+    invalid_processing_output: u64,
 }
 
 #[derive(Clone, Copy, Debug, Serialize)]
@@ -95,6 +102,7 @@ impl RuntimeState {
             snapshot: Arc::new(RwLock::new(RuntimeSnapshot {
                 schema_version: SCHEMA_VERSION,
                 runtime_epoch,
+                minimum_source_generation: 1,
                 media: MediaDescriptor {
                     whep_port: config.whep_port(),
                     whep_path: config.whep_path_value(),
@@ -195,6 +203,68 @@ impl RuntimeState {
         self.notify_lifecycle();
     }
 
+    /// Records one completed camera-backend replacement.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the runtime-state lock was poisoned by another thread.
+    pub fn record_camera_restart(&self) {
+        let mut snapshot = self.snapshot.write().expect("runtime state lock poisoned");
+        snapshot.media_recovery.camera_restarts =
+            snapshot.media_recovery.camera_restarts.saturating_add(1);
+        drop(snapshot);
+        self.notify_lifecycle();
+    }
+
+    /// Increments the distinct counter for one rejected frame or processing result.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the runtime-state lock was poisoned by another thread.
+    pub fn record_validation_failure(&self, failure: ValidationFailure) {
+        let mut snapshot = self.snapshot.write().expect("runtime state lock poisoned");
+        let counter = match failure {
+            ValidationFailure::InvalidDimensions => &mut snapshot.media_recovery.invalid_dimensions,
+            ValidationFailure::InvalidBufferLength => {
+                &mut snapshot.media_recovery.invalid_buffer_lengths
+            }
+            ValidationFailure::InvalidGeneration => {
+                &mut snapshot.media_recovery.invalid_generation_metadata
+            }
+            ValidationFailure::InvalidProcessingOutput => {
+                &mut snapshot.media_recovery.invalid_processing_output
+            }
+        };
+        *counter = counter.saturating_add(1);
+        drop(snapshot);
+        self.notify_lifecycle();
+    }
+
+    /// Atomically makes camera mutation and capture facts unavailable for recovery.
+    pub fn begin_camera_recovery(&self) {
+        self.settings.begin_recovery();
+        self.set_capture_readiness(ComponentReadiness::Unavailable);
+    }
+
+    /// Restores mutation availability only after the applied tuple is capturing again.
+    pub fn complete_camera_recovery(&self) {
+        self.settings.mark_camera_ready();
+        self.set_capture_readiness(ComponentReadiness::Ready);
+    }
+
+    /// Fences browser recovery to the first runtime-monotonic post-recovery frame.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the runtime-state lock was poisoned by another thread.
+    pub fn require_source_generation(&self, generation: u64) {
+        self.snapshot
+            .write()
+            .expect("runtime state lock poisoned")
+            .minimum_source_generation = generation;
+        self.notify_lifecycle();
+    }
+
     /// Records the authoritative start of the currently progressing exposure.
     ///
     /// # Panics
@@ -241,6 +311,7 @@ impl RuntimeState {
         let snapshot = self.snapshot();
         LifecycleSnapshot {
             runtime_epoch: snapshot.runtime_epoch,
+            minimum_source_generation: snapshot.minimum_source_generation,
             recovery: snapshot.components.recovery(),
             components: snapshot.components,
             media_recovery: snapshot.media_recovery,

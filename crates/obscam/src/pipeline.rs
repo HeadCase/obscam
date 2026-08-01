@@ -1,9 +1,8 @@
 use std::{
-    fmt::Display,
     io::{self, Read, Write},
     net::{SocketAddr, TcpStream},
     path::Path,
-    sync::Arc,
+    sync::{Arc, Condvar, Mutex, mpsc},
     thread,
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
@@ -14,14 +13,15 @@ use zwo_asi::{CameraOwner, CameraSource, CaptureError, HEIGHT, WIDTH};
 use zwo_asi::{DeterministicCamera, DeterministicScenario};
 
 use crate::{
-    ColourProcessor, ComponentReadiness, FfmpegEncoder, LatestFrameMailbox, MonochromeProcessor,
-    RuntimeState, Treatment,
+    CameraRecoveryBackoff, ColourProcessor, ComponentReadiness, FfmpegEncoder, LatestFrameMailbox,
+    MonochromeProcessor, RuntimeState, Treatment, ValidationFailure, ValidationWindow,
     correlation::CapturedFrameMetadata,
     latest::{EpochFence, LatestBufferMailbox},
+    recovery::CaptureWatchdogMonitor,
+    validate_processing_output,
 };
 
 const RAW8_BYTES: usize = WIDTH * HEIGHT;
-const SETTINGS_RECOVERY_RETRY_DELAY: Duration = Duration::from_secs(1);
 const MAX_ENCODER_RECOVERY_DELAY: Duration = Duration::from_secs(5);
 const ENCODER_PUBLICATION_TIMEOUT: Duration = Duration::from_secs(2);
 const RELAY_METRICS_ADDRESS: &str = "169.254.218.2:9998";
@@ -63,6 +63,96 @@ fn encoder_recovery_jitter_ms() -> u64 {
     u64::from(getrandom::u32().unwrap_or(0) % 251)
 }
 
+fn camera_recovery_jitter_ms() -> i64 {
+    i64::from(getrandom::u32().unwrap_or(0) % 501) - 250
+}
+
+#[derive(Debug)]
+struct ProcessingGate {
+    state: Mutex<ProcessingGateState>,
+    changed: Condvar,
+}
+
+#[derive(Debug)]
+struct ProcessingGateState {
+    paused: bool,
+    active: bool,
+    reset_requested: bool,
+}
+
+impl ProcessingGate {
+    fn paused() -> Self {
+        Self {
+            state: Mutex::new(ProcessingGateState {
+                paused: true,
+                active: false,
+                reset_requested: false,
+            }),
+            changed: Condvar::new(),
+        }
+    }
+
+    fn enter(&self) -> ProcessingPermit<'_> {
+        let mut state = self.state.lock().expect("processing gate mutex poisoned");
+        while state.paused {
+            state = self
+                .changed
+                .wait(state)
+                .expect("processing gate mutex poisoned while paused");
+        }
+        assert!(!state.active, "processing gate has one worker");
+        state.active = true;
+        ProcessingPermit { gate: self }
+    }
+
+    fn pause_and_wait(&self) {
+        let mut state = self.state.lock().expect("processing gate mutex poisoned");
+        state.paused = true;
+        while state.active {
+            state = self
+                .changed
+                .wait(state)
+                .expect("processing gate mutex poisoned while draining");
+        }
+    }
+
+    fn resume(&self) {
+        self.state
+            .lock()
+            .expect("processing gate mutex poisoned")
+            .paused = false;
+        self.changed.notify_all();
+    }
+
+    fn request_reset(&self) {
+        self.state
+            .lock()
+            .expect("processing gate mutex poisoned")
+            .reset_requested = true;
+    }
+
+    fn take_reset(&self) -> bool {
+        let mut state = self.state.lock().expect("processing gate mutex poisoned");
+        std::mem::take(&mut state.reset_requested)
+    }
+}
+
+struct ProcessingPermit<'a> {
+    gate: &'a ProcessingGate,
+}
+
+impl Drop for ProcessingPermit<'_> {
+    fn drop(&mut self) {
+        let mut state = self
+            .gate
+            .state
+            .lock()
+            .expect("processing gate mutex poisoned");
+        state.active = false;
+        self.gate.changed.notify_all();
+    }
+}
+
 /// Detached continuously warm capture, processing, and publication workers.
 pub struct MediaPipeline {
     _capture: thread::JoinHandle<()>,
@@ -96,15 +186,14 @@ impl MediaPipeline {
         )
     }
 
-    fn start_with_source<S, E>(
+    fn start_with_source<S>(
         capture_thread_name: &str,
         runtime: RuntimeState,
         minimum_capture_interval: Option<Duration>,
-        connect: impl FnOnce() -> Result<S, E> + Send + 'static,
+        connect: impl Fn() -> Result<S, zwo_asi::CameraError> + Send + 'static,
     ) -> io::Result<Self>
     where
         S: CameraSource,
-        E: Display,
     {
         let epoch_fence = EpochFence::new();
         let raw = Arc::new(LatestBufferMailbox::with_epoch_fence(
@@ -112,19 +201,30 @@ impl MediaPipeline {
             epoch_fence.clone(),
         ));
         let processed = Arc::new(LatestFrameMailbox::with_epoch_fence(epoch_fence));
+        let processing_gate = Arc::new(ProcessingGate::paused());
+        let (processing_recovery, recovery_requests) = mpsc::channel();
+        let watchdog = CaptureWatchdogMonitor::spawn()?;
         let encoder = spawn_encoder(Arc::clone(&processed), runtime.clone())?;
         let relay = spawn_relay_observer(runtime.clone())?;
-        let processing =
-            spawn_processing(Arc::clone(&raw), Arc::clone(&processed), runtime.clone())?;
+        let processing = spawn_processing(
+            Arc::clone(&raw),
+            Arc::clone(&processed),
+            Arc::clone(&processing_gate),
+            processing_recovery,
+            runtime.clone(),
+        )?;
         let capture = thread::Builder::new()
             .name(capture_thread_name.into())
-            .spawn(move || match connect() {
-                Ok(source) => capture(source, &runtime, &raw, minimum_capture_interval),
-                Err(error) => {
-                    runtime.settings().begin_recovery();
-                    runtime.set_capture_readiness(ComponentReadiness::Unavailable);
-                    tracing::error!(%error, "camera source unavailable");
-                }
+            .spawn(move || {
+                supervise_capture(
+                    connect,
+                    &runtime,
+                    &raw,
+                    &processing_gate,
+                    &recovery_requests,
+                    minimum_capture_interval,
+                    &watchdog,
+                );
             })?;
         Ok(Self {
             _capture: capture,
@@ -213,42 +313,182 @@ fn relay_path_is_ready(response: &[u8]) -> bool {
         .any(|line| line == b"paths{name=\"obscam\",state=\"ready\"} 1")
 }
 
-fn capture(
-    mut source: impl CameraSource,
+fn supervise_capture<S>(
+    connect: impl Fn() -> Result<S, zwo_asi::CameraError>,
     runtime: &RuntimeState,
     raw: &LatestBufferMailbox,
+    processing_gate: &ProcessingGate,
+    processing_recovery: &mpsc::Receiver<()>,
     minimum_capture_interval: Option<Duration>,
-) {
-    let settings = runtime.settings();
-    settings.install_interrupter(source.interrupter());
-    let defaults = settings.snapshot().applied().settings();
-    if let Err(error) = source
-        .configure(defaults.camera_settings())
-        .and_then(|()| source.start())
-    {
-        settings.begin_recovery();
-        runtime.set_capture_readiness(ComponentReadiness::Unavailable);
-        tracing::error!(%error, "camera capture could not start");
-        return;
+    watchdog: &CaptureWatchdogMonitor,
+) where
+    S: CameraSource,
+{
+    let mut backoff = CameraRecoveryBackoff::new();
+    let mut recovering = false;
+    let mut source_generation = 0_u64;
+    loop {
+        thread::sleep(backoff.next_delay_with_jitter(camera_recovery_jitter_ms()));
+        let mut source = match connect() {
+            Ok(source) => source,
+            Err(error) => {
+                if error.ownership_uncertain() {
+                    tracing::error!(%error, "camera connection cleanup failed; terminating");
+                    std::process::exit(70);
+                }
+                runtime.begin_camera_recovery();
+                processing_gate.pause_and_wait();
+                tracing::error!(%error, "camera source unavailable; retrying");
+                recovering = true;
+                continue;
+            }
+        };
+        let settings = runtime.settings();
+        settings.install_interrupter(source.interrupter());
+        let applied = settings.snapshot().applied().settings();
+        if let Err(error) = source
+            .configure(applied.camera_settings())
+            .and_then(|()| source.start())
+        {
+            runtime.begin_camera_recovery();
+            processing_gate.pause_and_wait();
+            tracing::error!(%error, "camera capture could not start; retrying");
+            let teardown_token = watchdog.arm(Duration::ZERO, source.interrupter());
+            if let Err(close_error) = source.close() {
+                tracing::error!(%close_error, "camera startup cleanup failed; terminating");
+                std::process::exit(70);
+            }
+            watchdog.complete(teardown_token);
+            recovering = true;
+            continue;
+        }
+        runtime.require_source_generation(source_generation.saturating_add(1));
+        runtime.complete_camera_recovery();
+        processing_gate.resume();
+        if recovering {
+            runtime.record_camera_restart();
+            tracing::info!("camera backend reopened and exact identity revalidated");
+        }
+
+        let mut context = CaptureSessionContext {
+            runtime,
+            raw,
+            processing_gate,
+            processing_recovery,
+            minimum_capture_interval,
+            watchdog,
+            backoff: &mut backoff,
+            source_generation: &mut source_generation,
+        };
+        let end = capture_session(&mut source, &mut context);
+        runtime.begin_camera_recovery();
+        let teardown_token = end
+            .watchdog_token
+            .unwrap_or_else(|| watchdog.arm(Duration::ZERO, source.interrupter()));
+        if let Err(error) = source.stop() {
+            tracing::error!(%error, "camera stop failed during recovery; terminating");
+            std::process::exit(70);
+        }
+        processing_gate.pause_and_wait();
+        runtime.record_pipeline_skips(raw.begin_new_epoch());
+        if let Err(error) = source.close() {
+            tracing::error!(%error, "camera close failed during recovery; terminating");
+            std::process::exit(70);
+        }
+        watchdog.complete(teardown_token);
+        recovering = true;
     }
-    settings.mark_camera_ready();
-    runtime.set_capture_readiness(ComponentReadiness::Ready);
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct CaptureSessionEnd {
+    watchdog_token: Option<u64>,
+}
+
+struct CaptureSessionContext<'a> {
+    runtime: &'a RuntimeState,
+    raw: &'a LatestBufferMailbox,
+    processing_gate: &'a ProcessingGate,
+    processing_recovery: &'a mpsc::Receiver<()>,
+    minimum_capture_interval: Option<Duration>,
+    watchdog: &'a CaptureWatchdogMonitor,
+    backoff: &'a mut CameraRecoveryBackoff,
+    source_generation: &'a mut u64,
+}
+
+#[allow(
+    clippy::too_many_lines,
+    reason = "the single linear camera-owner state machine keeps recovery ordering auditable"
+)]
+fn capture_session(
+    source: &mut impl CameraSource,
+    context: &mut CaptureSessionContext<'_>,
+) -> CaptureSessionEnd {
+    let runtime = context.runtime;
+    let raw = context.raw;
+    let processing_gate = context.processing_gate;
+    let processing_recovery = context.processing_recovery;
+    let minimum_capture_interval = context.minimum_capture_interval;
+    let watchdog = context.watchdog;
+    let backoff = &mut *context.backoff;
+    let source_generation = &mut *context.source_generation;
+    let settings = runtime.settings();
     let mut capture_in_progress = false;
+    let mut watchdog_token = None;
+    let session_started = Instant::now();
+    let mut validation = ValidationWindow::new(Duration::from_secs(10));
+    let mut last_generation = 0;
 
     loop {
-        match apply_pending_settings(&mut source, &settings, |generation| {
+        if processing_recovery.try_recv().is_ok() {
+            if let Some(token) = watchdog_token
+                && watchdog.cancellation_requested(token)
+            {
+                return CaptureSessionEnd {
+                    watchdog_token: watchdog_token.take(),
+                };
+            }
+            processing_gate.pause_and_wait();
+            runtime.record_pipeline_skips(raw.begin_new_epoch());
+            processing_gate.request_reset();
+            runtime.require_source_generation(source_generation.saturating_add(1));
+            processing_gate.resume();
+            tracing::info!("processing component recovered without restarting capture");
+            continue;
+        }
+        match apply_pending_settings(source, &settings, |generation| {
             raw.begin_epoch(generation);
         }) {
-            Ok(SettingsTransition::Applied) => continue,
+            Ok(SettingsTransition::Applied) => {
+                if let Some(token) = watchdog_token.take() {
+                    if watchdog.cancellation_requested(token) {
+                        return CaptureSessionEnd {
+                            watchdog_token: Some(token),
+                        };
+                    }
+                    watchdog.complete(token);
+                }
+                capture_in_progress = false;
+                continue;
+            }
             Ok(SettingsTransition::Idle) => {}
             Ok(SettingsTransition::Restored(error)) => {
+                if let Some(token) = watchdog_token.take() {
+                    if watchdog.cancellation_requested(token) {
+                        return CaptureSessionEnd {
+                            watchdog_token: Some(token),
+                        };
+                    }
+                    watchdog.complete(token);
+                }
+                capture_in_progress = false;
                 tracing::warn!(%error, "camera settings transition failed; applied tuple restored");
             }
             Err(restore_error) => {
-                runtime.set_capture_readiness(ComponentReadiness::Unavailable);
                 tracing::error!(%restore_error, "camera settings recovery failed");
-                restore_applied_settings(&mut source, &settings);
-                runtime.set_capture_readiness(ComponentReadiness::Ready);
+                return CaptureSessionEnd {
+                    watchdog_token: watchdog_token.take(),
+                };
             }
         }
         if !capture_in_progress {
@@ -258,16 +498,42 @@ fn capture(
                 applied.settings().exposure_ms(),
                 unix_time_us(),
             );
+            watchdog_token = Some(watchdog.arm(
+                Duration::from_millis(u64::from(applied.settings().exposure_ms())),
+                source.interrupter(),
+            ));
             capture_in_progress = true;
         }
-        let started = Instant::now();
+        let capture_wait_started = Instant::now();
         let epoch = raw.current_epoch();
         match source.capture_next(100) {
             Ok(frame) => {
+                let token = watchdog_token.expect("watchdog armed");
+                if watchdog.cancellation_requested(token) {
+                    return CaptureSessionEnd {
+                        watchdog_token: Some(token),
+                    };
+                }
+                if frame.generation() <= last_generation {
+                    if validation_failure(
+                        runtime,
+                        &mut validation,
+                        ValidationFailure::InvalidGeneration,
+                        session_started.elapsed(),
+                    ) {
+                        return CaptureSessionEnd {
+                            watchdog_token: watchdog_token.take(),
+                        };
+                    }
+                    watchdog.complete(watchdog_token.take().expect("watchdog armed"));
+                    capture_in_progress = false;
+                    continue;
+                }
                 let applied = settings.snapshot().applied();
+                *source_generation = source_generation.saturating_add(1);
                 let skipped = raw.publish_with_metadata(
                     epoch,
-                    frame.generation(),
+                    *source_generation,
                     frame.data(),
                     Some(CapturedFrameMetadata {
                         settings_generation: applied.generation(),
@@ -276,21 +542,85 @@ fn capture(
                     }),
                 );
                 runtime.record_pipeline_skips(skipped);
+                last_generation = frame.generation();
+                backoff.reset();
+                watchdog.complete(watchdog_token.take().expect("watchdog armed"));
                 capture_in_progress = false;
             }
             Err(CaptureError::Timeout) => {}
-            Err(CaptureError::Interrupted) => capture_in_progress = false,
+            Err(CaptureError::Interrupted) => {
+                let token = watchdog_token.take().expect("watchdog armed");
+                if watchdog.cancellation_requested(token) {
+                    return CaptureSessionEnd {
+                        watchdog_token: Some(token),
+                    };
+                }
+                watchdog.complete(token);
+                capture_in_progress = false;
+            }
+            Err(CaptureError::MalformedDimensions { .. }) => {
+                if validation_failure(
+                    runtime,
+                    &mut validation,
+                    ValidationFailure::InvalidDimensions,
+                    session_started.elapsed(),
+                ) {
+                    return CaptureSessionEnd {
+                        watchdog_token: watchdog_token.take(),
+                    };
+                }
+                watchdog.complete(watchdog_token.take().expect("watchdog armed"));
+                capture_in_progress = false;
+            }
+            Err(CaptureError::MalformedLength { .. }) => {
+                if validation_failure(
+                    runtime,
+                    &mut validation,
+                    ValidationFailure::InvalidBufferLength,
+                    session_started.elapsed(),
+                ) {
+                    return CaptureSessionEnd {
+                        watchdog_token: watchdog_token.take(),
+                    };
+                }
+                watchdog.complete(watchdog_token.take().expect("watchdog armed"));
+                capture_in_progress = false;
+            }
+            Err(CaptureError::MalformedGeneration { .. }) => {
+                if validation_failure(
+                    runtime,
+                    &mut validation,
+                    ValidationFailure::InvalidGeneration,
+                    session_started.elapsed(),
+                ) {
+                    return CaptureSessionEnd {
+                        watchdog_token: watchdog_token.take(),
+                    };
+                }
+                watchdog.complete(watchdog_token.take().expect("watchdog armed"));
+                capture_in_progress = false;
+            }
             Err(error) => {
-                settings.begin_recovery();
-                runtime.set_capture_readiness(ComponentReadiness::Unavailable);
                 tracing::error!(%error, "camera capture stopped");
-                return;
+                return CaptureSessionEnd {
+                    watchdog_token: watchdog_token.take(),
+                };
             }
         }
         if let Some(interval) = minimum_capture_interval {
-            thread::sleep(interval.saturating_sub(started.elapsed()));
+            thread::sleep(interval.saturating_sub(capture_wait_started.elapsed()));
         }
     }
+}
+
+fn validation_failure(
+    runtime: &RuntimeState,
+    validation: &mut ValidationWindow,
+    failure: ValidationFailure,
+    now: Duration,
+) -> bool {
+    runtime.record_validation_failure(failure);
+    validation.record(failure, now)
 }
 
 /// Applies at most one claimed settings target through the camera-owner lifecycle.
@@ -342,33 +672,11 @@ enum SettingsTransition {
     Restored(zwo_asi::CameraError),
 }
 
-fn restore_applied_settings(
-    source: &mut impl CameraSource,
-    controller: &crate::SettingsController,
-) {
-    loop {
-        let applied = controller.snapshot().applied().settings();
-        let restoration = source
-            .stop()
-            .and_then(|()| source.configure(applied.camera_settings()))
-            .and_then(|()| source.start());
-        match restoration {
-            Ok(()) => {
-                controller.mark_camera_ready();
-                tracing::info!("camera settings recovery completed");
-                return;
-            }
-            Err(error) => {
-                tracing::error!(%error, "camera settings recovery retry failed");
-                thread::sleep(SETTINGS_RECOVERY_RETRY_DELAY);
-            }
-        }
-    }
-}
-
 fn spawn_processing(
     raw: Arc<LatestBufferMailbox>,
     processed: Arc<LatestFrameMailbox>,
+    gate: Arc<ProcessingGate>,
+    recovery: mpsc::Sender<()>,
     runtime: RuntimeState,
 ) -> io::Result<thread::JoinHandle<()>> {
     thread::Builder::new()
@@ -377,8 +685,19 @@ fn spawn_processing(
             let settings = runtime.settings();
             let mut processor = MonochromeProcessor::new();
             let mut colour_processor = ColourProcessor::new();
+            let started = Instant::now();
+            let mut validation = ValidationWindow::new(Duration::from_secs(10));
+            let mut recovery_pending = false;
             loop {
+                let permit = gate.enter();
+                if gate.take_reset() {
+                    processor = MonochromeProcessor::new();
+                    colour_processor = ColourProcessor::new();
+                    validation.reset();
+                    recovery_pending = false;
+                }
                 let Some(source) = raw.wait_take(Duration::from_secs(1)) else {
+                    drop(permit);
                     continue;
                 };
                 let generation = source.generation();
@@ -389,7 +708,22 @@ fn spawn_processing(
                         colour_processor.process_validated(generation, source.data())
                     }
                 };
-                if raw.is_current_epoch(epoch) {
+                let valid = validate_processing_output(
+                    generation,
+                    output.generation(),
+                    output.width(),
+                    output.height(),
+                    output.data().len(),
+                );
+                if !valid {
+                    request_processing_recovery(
+                        &runtime,
+                        &mut validation,
+                        started.elapsed(),
+                        &recovery,
+                        &mut recovery_pending,
+                    );
+                } else if raw.is_current_epoch(epoch) {
                     let skipped = if let Some(metadata) = source.metadata() {
                         processed.publish_captured(epoch, &output, metadata)
                     } else {
@@ -398,8 +732,27 @@ fn spawn_processing(
                     runtime.record_pipeline_skips(skipped);
                 }
                 raw.recycle(source);
+                drop(permit);
             }
         })
+}
+
+fn request_processing_recovery(
+    runtime: &RuntimeState,
+    validation: &mut ValidationWindow,
+    now: Duration,
+    recovery: &mpsc::Sender<()>,
+    recovery_pending: &mut bool,
+) {
+    let threshold_reached = validation_failure(
+        runtime,
+        validation,
+        ValidationFailure::InvalidProcessingOutput,
+        now,
+    );
+    if !*recovery_pending && threshold_reached && recovery.send(()).is_ok() {
+        *recovery_pending = true;
+    }
 }
 
 pub(crate) fn unix_time_us() -> u64 {
@@ -523,8 +876,13 @@ fn replace_exited_encoder(
 #[cfg(all(test, feature = "camera-substitute"))]
 mod tests {
     use super::*;
-    use crate::{CameraSettings, SettingsController};
-    use zwo_asi::{DeterministicCamera, DeterministicScenario, Settings};
+    use crate::{CameraSettings, Config, SettingsController};
+    use std::{
+        process::Command,
+        sync::atomic::{AtomicUsize, Ordering},
+    };
+    use uuid::Uuid;
+    use zwo_asi::{CapturePlan, DeterministicCamera, DeterministicScenario, Settings};
 
     #[test]
     fn repeated_encoder_failures_back_off_with_a_five_second_cap() {
@@ -626,73 +984,480 @@ mod tests {
     }
 
     #[test]
-    fn failed_compensating_restoration_retries_until_the_previous_tuple_is_live() {
-        let mut inner =
-            DeterministicCamera::connect(DeterministicScenario::new([])).expect("camera present");
-        inner
-            .configure(Settings::new(500_000, 100).expect("defaults"))
-            .expect("configure");
-        inner.start().expect("start");
-        let mut camera = FailNextConfigurations::new(inner, 3);
-        let controller = ready_controller();
-        controller.install_interrupter(camera.interrupter());
-        let _target = controller
-            .accept(CameraSettings::new(20, 600, Treatment::Colour).expect("target"))
-            .expect("camera ready");
+    fn three_malformed_dimensions_recover_capture_and_increment_only_their_counter() {
+        let plans = [
+            CapturePlan::MalformedDimensions {
+                width: 1280,
+                height: 720,
+            },
+            CapturePlan::MalformedDimensions {
+                width: 1280,
+                height: 720,
+            },
+            CapturePlan::MalformedDimensions {
+                width: 1280,
+                height: 720,
+            },
+        ];
+        let (end, snapshot) = run_capture_faults(plans);
 
-        assert!(apply_pending_settings(&mut camera, &controller, |_| {}).is_err());
-        restore_applied_settings(&mut camera, &controller);
-
-        assert!(
-            controller
-                .accept(CameraSettings::new(50, 200, Treatment::Monochrome).expect("next target"))
-                .is_ok(),
-            "successful restoration makes the camera ready for new intent"
-        );
-        let frame = loop {
-            match camera.capture_next(100) {
-                Ok(frame) => break frame,
-                Err(CaptureError::Interrupted | CaptureError::Timeout) => {}
-                Err(error) => panic!("restored capture failed: {error}"),
-            }
-        };
-        assert_eq!(frame.data()[258 * WIDTH + 258], 166, "gain 100 restored");
+        assert!(end.watchdog_token.is_some());
+        assert_eq!(snapshot["mediaRecovery"]["invalidDimensions"], 3);
+        assert_eq!(snapshot["mediaRecovery"]["invalidBufferLengths"], 0);
+        assert_eq!(snapshot["mediaRecovery"]["invalidGenerationMetadata"], 0);
     }
 
-    fn ready_controller() -> SettingsController {
-        let controller = SettingsController::new(CameraSettings::default());
-        controller.mark_camera_ready();
-        controller
+    #[test]
+    fn malformed_lengths_and_generations_have_independent_recovery_thresholds() {
+        let plans = [
+            CapturePlan::MalformedLength { length: 1 },
+            CapturePlan::MalformedGeneration { generation: 0 },
+            CapturePlan::MalformedLength { length: 1 },
+            CapturePlan::MalformedGeneration { generation: 0 },
+            CapturePlan::MalformedLength { length: 1 },
+        ];
+        let (end, snapshot) = run_capture_faults(plans);
+
+        assert!(end.watchdog_token.is_some());
+        assert_eq!(snapshot["mediaRecovery"]["invalidBufferLengths"], 3);
+        assert_eq!(snapshot["mediaRecovery"]["invalidGenerationMetadata"], 2);
     }
 
-    struct FailNextConfiguration {
-        inner: DeterministicCamera,
-        fail_next: bool,
-    }
-
-    struct FailNextConfigurations {
-        inner: DeterministicCamera,
-        remaining: usize,
-    }
-
-    impl FailNextConfigurations {
-        const fn new(inner: DeterministicCamera, remaining: usize) -> Self {
-            Self { inner, remaining }
+    #[test]
+    fn sdk_and_disconnect_faults_recover_capture_immediately() {
+        for plan in [CapturePlan::Sdk { code: 17 }, CapturePlan::Disconnect] {
+            let (end, snapshot) = run_capture_faults([plan]);
+            assert!(end.watchdog_token.is_some());
+            assert_eq!(snapshot["mediaRecovery"]["invalidDimensions"], 0);
+            assert_eq!(snapshot["mediaRecovery"]["invalidBufferLengths"], 0);
+            assert_eq!(snapshot["mediaRecovery"]["invalidGenerationMetadata"], 0);
         }
     }
 
-    impl CameraSource for FailNextConfigurations {
+    #[test]
+    fn processing_validation_requests_only_processing_component_recovery() {
+        let runtime = capture_test_runtime();
+        let stops = Arc::new(AtomicUsize::new(0));
+        let mut camera = StopCountingCamera::new(
+            configured_camera([CapturePlan::Sdk { code: 17 }]),
+            Arc::clone(&stops),
+        );
+        let raw = LatestBufferMailbox::new(RAW8_BYTES);
+        let initial_epoch = raw.current_epoch();
+        let gate = ProcessingGate::paused();
+        gate.resume();
+        let (recovery, requests) = mpsc::channel();
+        recovery.send(()).expect("processing recovery request");
+        let watchdog = CaptureWatchdogMonitor::spawn().expect("watchdog");
+        let mut backoff = CameraRecoveryBackoff::new();
+        let mut source_generation = 10;
+
+        let mut context = CaptureSessionContext {
+            runtime: &runtime,
+            raw: &raw,
+            processing_gate: &gate,
+            processing_recovery: &requests,
+            minimum_capture_interval: None,
+            watchdog: &watchdog,
+            backoff: &mut backoff,
+            source_generation: &mut source_generation,
+        };
+        let end = capture_session(&mut camera, &mut context);
+
+        if let Some(token) = end.watchdog_token {
+            watchdog.complete(token);
+        }
+        assert_eq!(stops.load(Ordering::SeqCst), 0);
+        assert_ne!(raw.current_epoch(), initial_epoch);
+        let snapshot = serde_json::to_value(runtime.snapshot()).expect("runtime snapshot");
+        assert_eq!(snapshot["minimumSourceGeneration"], 11);
+        assert_eq!(snapshot["components"]["capture"]["state"], "ready");
+    }
+
+    #[test]
+    fn invalid_processing_output_requests_one_recovery_at_the_threshold() {
+        let runtime = capture_test_runtime();
+        let mut validation = ValidationWindow::new(Duration::from_secs(10));
+        let (recovery, requests) = mpsc::channel();
+        let mut recovery_pending = false;
+
+        for second in 0..5 {
+            request_processing_recovery(
+                &runtime,
+                &mut validation,
+                Duration::from_secs(second),
+                &recovery,
+                &mut recovery_pending,
+            );
+        }
+
+        assert!(requests.try_recv().is_ok());
+        assert!(
+            requests.try_recv().is_err(),
+            "one threshold crossing queues once"
+        );
+        let snapshot = serde_json::to_value(runtime.snapshot()).expect("runtime snapshot");
+        assert_eq!(snapshot["mediaRecovery"]["invalidProcessingOutput"], 5);
+    }
+
+    #[test]
+    fn capture_watchdog_monitor_interrupts_the_owner() {
+        let mut camera = configured_camera([]);
+        let watchdog = CaptureWatchdogMonitor::spawn().expect("watchdog");
+        let token = watchdog.arm(Duration::ZERO, camera.interrupter());
+
+        thread::sleep(Duration::from_millis(2_100));
+
+        assert_eq!(
+            camera.capture_next(100).err(),
+            Some(CaptureError::Interrupted)
+        );
+        watchdog.complete(token);
+    }
+
+    #[test]
+    fn capture_watchdog_monitor_terminates_when_cancellation_does_not_complete() {
+        const CHILD: &str = "OBSCAM_WATCHDOG_TERMINATION_CHILD";
+        if std::env::var_os(CHILD).is_some() {
+            let camera = configured_camera([]);
+            let watchdog = CaptureWatchdogMonitor::spawn().expect("watchdog");
+            let _token = watchdog.arm(Duration::ZERO, camera.interrupter());
+            thread::sleep(Duration::from_secs(4));
+            panic!("watchdog did not terminate the process");
+        }
+
+        let status = Command::new(std::env::current_exe().expect("current test executable"))
+            .args([
+                "--exact",
+                "pipeline::tests::capture_watchdog_monitor_terminates_when_cancellation_does_not_complete",
+            ])
+            .env(CHILD, "1")
+            .status()
+            .expect("watchdog child process");
+
+        assert_eq!(status.code(), Some(70));
+    }
+
+    #[test]
+    fn failed_teardown_terminates_before_reopen() {
+        const CHILD: &str = "OBSCAM_TEARDOWN_FAILURE_CHILD";
+        if let Some(mode) = std::env::var_os(CHILD) {
+            let mode = mode.to_string_lossy().into_owned();
+            let runtime = capture_test_runtime();
+            let raw = LatestBufferMailbox::new(RAW8_BYTES);
+            let gate = ProcessingGate::paused();
+            let (_processing, requests) = mpsc::channel();
+            let watchdog = CaptureWatchdogMonitor::spawn().expect("watchdog");
+            let fail_stop = mode == "stop";
+            supervise_capture(
+                move || {
+                    if mode == "connect" {
+                        return Err(zwo_asi::CameraError::OwnershipUncertain { close_code: 5 });
+                    }
+                    let camera = DeterministicCamera::connect(DeterministicScenario::new([
+                        CapturePlan::Sdk { code: 17 },
+                    ]))?;
+                    Ok::<_, zwo_asi::CameraError>(FailingTeardownCamera::new(camera, fail_stop))
+                },
+                &runtime,
+                &raw,
+                &gate,
+                &requests,
+                None,
+                &watchdog,
+            );
+            panic!("teardown failure reopened in-process");
+        }
+
+        for mode in ["connect", "stop", "close"] {
+            let status = Command::new(std::env::current_exe().expect("current test executable"))
+                .args([
+                    "--exact",
+                    "pipeline::tests::failed_teardown_terminates_before_reopen",
+                ])
+                .env(CHILD, mode)
+                .status()
+                .expect("teardown child process");
+            assert_eq!(status.code(), Some(70), "{mode} failure terminates");
+        }
+    }
+
+    #[test]
+    fn camera_supervisor_drops_the_old_owner_before_reopening_and_restores_the_applied_tuple() {
+        let runtime = capture_test_runtime();
+        let raw = Arc::new(LatestBufferMailbox::new(RAW8_BYTES));
+        let gate = ProcessingGate::paused();
+        let (_processing, requests) = mpsc::channel();
+        let watchdog = CaptureWatchdogMonitor::spawn().expect("watchdog");
+        let attempts = Arc::new(AtomicUsize::new(0));
+        let active = Arc::new(AtomicUsize::new(0));
+        let maximum_active = Arc::new(AtomicUsize::new(0));
+        let connect_attempts = Arc::clone(&attempts);
+        let connect_active = Arc::clone(&active);
+        let connect_maximum = Arc::clone(&maximum_active);
+        let worker_runtime = runtime.clone();
+        let worker_raw = Arc::clone(&raw);
+
+        let worker = thread::spawn(move || {
+            supervise_capture(
+                move || {
+                    let attempt = connect_attempts.fetch_add(1, Ordering::SeqCst) + 1;
+                    assert!(attempt <= 2, "test ends after the recovered source fails");
+                    assert_eq!(
+                        connect_active.load(Ordering::SeqCst),
+                        0,
+                        "the old camera owner must be dropped before reconnect"
+                    );
+                    let plans = vec![
+                        CapturePlan::Frame {
+                            additional_delay_us: 0,
+                        },
+                        CapturePlan::Sdk { code: 17 },
+                    ];
+                    let camera = DeterministicCamera::connect(DeterministicScenario::new(plans))?;
+                    Ok::<_, zwo_asi::CameraError>(TrackedCamera::new(
+                        camera,
+                        Arc::clone(&connect_active),
+                        connect_maximum.as_ref(),
+                    ))
+                },
+                &worker_runtime,
+                &worker_raw,
+                &gate,
+                &requests,
+                None,
+                &watchdog,
+            );
+        });
+
+        assert!(
+            worker.join().is_err(),
+            "bounded test connector stops the supervisor"
+        );
+        assert_eq!(attempts.load(Ordering::SeqCst), 3);
+        assert_eq!(maximum_active.load(Ordering::SeqCst), 1);
+        assert_eq!(runtime.settings().snapshot().applied().generation(), 0);
+        let snapshot = serde_json::to_value(runtime.snapshot()).expect("runtime snapshot");
+        assert_eq!(snapshot["mediaRecovery"]["cameraRestarts"], 1);
+    }
+
+    #[test]
+    fn supervisor_retries_absence_and_startup_failure_until_capture_recovers() {
+        let runtime = capture_test_runtime();
+        let raw = LatestBufferMailbox::new(RAW8_BYTES);
+        let gate = ProcessingGate::paused();
+        let (_processing, requests) = mpsc::channel();
+        let watchdog = CaptureWatchdogMonitor::spawn().expect("watchdog");
+        let attempts = Arc::new(AtomicUsize::new(0));
+        let connector_attempts = Arc::clone(&attempts);
+        let worker_runtime = runtime.clone();
+
+        let worker = thread::spawn(move || {
+            supervise_capture(
+                move || match connector_attempts.fetch_add(1, Ordering::SeqCst) + 1 {
+                    1 => Err(zwo_asi::CameraError::IdentityCount { found: 0 }),
+                    2 => DeterministicCamera::connect(DeterministicScenario::new([]))
+                        .map(FailNextConfiguration::new),
+                    3 => DeterministicCamera::connect(DeterministicScenario::new([
+                        CapturePlan::Frame {
+                            additional_delay_us: 0,
+                        },
+                        CapturePlan::Sdk { code: 17 },
+                    ]))
+                    .map(FailNextConfiguration::without_failure),
+                    _ => panic!("test ends after recovered capture fails"),
+                },
+                &worker_runtime,
+                &raw,
+                &gate,
+                &requests,
+                None,
+                &watchdog,
+            );
+        });
+
+        assert!(worker.join().is_err());
+        assert_eq!(attempts.load(Ordering::SeqCst), 4);
+        let snapshot = serde_json::to_value(runtime.snapshot()).expect("runtime snapshot");
+        assert_eq!(snapshot["mediaRecovery"]["cameraRestarts"], 1);
+    }
+
+    #[test]
+    fn source_generation_remains_runtime_monotonic_across_camera_owners() {
+        let runtime = capture_test_runtime();
+        let raw = LatestBufferMailbox::new(RAW8_BYTES);
+        let gate = ProcessingGate::paused();
+        gate.resume();
+        let (_recovery, requests) = mpsc::channel();
+        let watchdog = CaptureWatchdogMonitor::spawn().expect("watchdog");
+        let mut backoff = CameraRecoveryBackoff::new();
+        let mut source_generation = 0;
+        for owner in 0..2 {
+            let mut camera = configured_camera([
+                CapturePlan::Frame {
+                    additional_delay_us: 0,
+                },
+                CapturePlan::Sdk { code: 17 },
+            ]);
+            let mut context = CaptureSessionContext {
+                runtime: &runtime,
+                raw: &raw,
+                processing_gate: &gate,
+                processing_recovery: &requests,
+                minimum_capture_interval: None,
+                watchdog: &watchdog,
+                backoff: &mut backoff,
+                source_generation: &mut source_generation,
+            };
+            let end = capture_session(&mut camera, &mut context);
+            if let Some(token) = end.watchdog_token {
+                watchdog.complete(token);
+            }
+            if owner == 0 {
+                raw.begin_new_epoch();
+            }
+        }
+
+        assert_eq!(
+            raw.take()
+                .expect("latest recovered generation")
+                .generation(),
+            2
+        );
+    }
+
+    fn run_capture_faults<const N: usize>(
+        plans: [CapturePlan; N],
+    ) -> (CaptureSessionEnd, serde_json::Value) {
+        let runtime = capture_test_runtime();
+        let mut camera = configured_camera(plans);
+        let raw = LatestBufferMailbox::new(RAW8_BYTES);
+        let gate = ProcessingGate::paused();
+        gate.resume();
+        let (_recovery, requests) = mpsc::channel();
+        let watchdog = CaptureWatchdogMonitor::spawn().expect("watchdog");
+        let mut backoff = CameraRecoveryBackoff::new();
+        let mut source_generation = 0;
+
+        let mut context = CaptureSessionContext {
+            runtime: &runtime,
+            raw: &raw,
+            processing_gate: &gate,
+            processing_recovery: &requests,
+            minimum_capture_interval: None,
+            watchdog: &watchdog,
+            backoff: &mut backoff,
+            source_generation: &mut source_generation,
+        };
+        let end = capture_session(&mut camera, &mut context);
+        if let Some(token) = end.watchdog_token {
+            watchdog.complete(token);
+        }
+        let snapshot = serde_json::to_value(runtime.snapshot()).expect("runtime snapshot");
+        (end, snapshot)
+    }
+
+    fn configured_camera(plans: impl IntoIterator<Item = CapturePlan>) -> DeterministicCamera {
+        let mut camera = DeterministicCamera::connect(DeterministicScenario::new(plans))
+            .expect("camera present");
+        camera
+            .configure(Settings::new(500_000, 100).expect("defaults"))
+            .expect("configure");
+        camera.start().expect("start");
+        camera
+    }
+
+    fn capture_test_runtime() -> RuntimeState {
+        let config =
+            Config::parse("127.0.0.1:8080", "8889", "/obscam/whep").expect("configuration");
+        let runtime = RuntimeState::with_readiness(
+            Uuid::from_u128(1),
+            &config,
+            ComponentReadiness::Ready,
+            ComponentReadiness::Ready,
+            ComponentReadiness::Ready,
+        );
+        runtime.settings().mark_camera_ready();
+        runtime
+    }
+
+    struct TrackedCamera {
+        inner: Option<DeterministicCamera>,
+        active: Arc<AtomicUsize>,
+    }
+
+    impl TrackedCamera {
+        fn new(
+            inner: DeterministicCamera,
+            active: Arc<AtomicUsize>,
+            maximum_active: &AtomicUsize,
+        ) -> Self {
+            let current = active.fetch_add(1, Ordering::SeqCst) + 1;
+            maximum_active.fetch_max(current, Ordering::SeqCst);
+            Self {
+                inner: Some(inner),
+                active,
+            }
+        }
+
+        fn inner(&self) -> &DeterministicCamera {
+            self.inner.as_ref().expect("tracked camera remains present")
+        }
+
+        fn inner_mut(&mut self) -> &mut DeterministicCamera {
+            self.inner.as_mut().expect("tracked camera remains present")
+        }
+    }
+
+    impl CameraSource for TrackedCamera {
+        fn interrupter(&self) -> zwo_asi::CaptureInterrupter {
+            self.inner().interrupter()
+        }
+
+        fn configure(&mut self, settings: Settings) -> Result<(), zwo_asi::CameraError> {
+            self.inner_mut().configure(settings)
+        }
+
+        fn start(&mut self) -> Result<(), zwo_asi::CameraError> {
+            self.inner_mut().start()
+        }
+
+        fn capture_next(
+            &mut self,
+            wait_ms: i32,
+        ) -> Result<zwo_asi::FrameGeneration<'_>, CaptureError> {
+            self.inner_mut().capture_next(wait_ms)
+        }
+
+        fn stop(&mut self) -> Result<(), zwo_asi::CameraError> {
+            self.inner_mut().stop()
+        }
+    }
+
+    impl Drop for TrackedCamera {
+        fn drop(&mut self) {
+            drop(self.inner.take());
+            self.active.fetch_sub(1, Ordering::SeqCst);
+        }
+    }
+
+    struct StopCountingCamera {
+        inner: DeterministicCamera,
+        stops: Arc<AtomicUsize>,
+    }
+
+    impl StopCountingCamera {
+        fn new(inner: DeterministicCamera, stops: Arc<AtomicUsize>) -> Self {
+            Self { inner, stops }
+        }
+    }
+
+    impl CameraSource for StopCountingCamera {
         fn interrupter(&self) -> zwo_asi::CaptureInterrupter {
             self.inner.interrupter()
         }
 
         fn configure(&mut self, settings: Settings) -> Result<(), zwo_asi::CameraError> {
-            if self.remaining > 0 {
-                self.remaining -= 1;
-                return Err(zwo_asi::CameraError::InvalidState {
-                    operation: "injected repeated settings failure",
-                });
-            }
             self.inner.configure(settings)
         }
 
@@ -708,8 +1473,67 @@ mod tests {
         }
 
         fn stop(&mut self) -> Result<(), zwo_asi::CameraError> {
+            self.stops.fetch_add(1, Ordering::SeqCst);
             self.inner.stop()
         }
+    }
+
+    struct FailingTeardownCamera {
+        inner: DeterministicCamera,
+        fail_stop: bool,
+    }
+
+    impl FailingTeardownCamera {
+        const fn new(inner: DeterministicCamera, fail_stop: bool) -> Self {
+            Self { inner, fail_stop }
+        }
+    }
+
+    impl CameraSource for FailingTeardownCamera {
+        fn interrupter(&self) -> zwo_asi::CaptureInterrupter {
+            self.inner.interrupter()
+        }
+
+        fn configure(&mut self, settings: Settings) -> Result<(), zwo_asi::CameraError> {
+            self.inner.configure(settings)
+        }
+
+        fn start(&mut self) -> Result<(), zwo_asi::CameraError> {
+            self.inner.start()
+        }
+
+        fn capture_next(
+            &mut self,
+            wait_ms: i32,
+        ) -> Result<zwo_asi::FrameGeneration<'_>, CaptureError> {
+            self.inner.capture_next(wait_ms)
+        }
+
+        fn stop(&mut self) -> Result<(), zwo_asi::CameraError> {
+            if self.fail_stop {
+                return Err(zwo_asi::CameraError::InvalidState {
+                    operation: "injected stop failure",
+                });
+            }
+            self.inner.stop()
+        }
+
+        fn close(self) -> Result<(), zwo_asi::CameraError> {
+            Err(zwo_asi::CameraError::InvalidState {
+                operation: "injected close failure",
+            })
+        }
+    }
+
+    fn ready_controller() -> SettingsController {
+        let controller = SettingsController::new(CameraSettings::default());
+        controller.mark_camera_ready();
+        controller
+    }
+
+    struct FailNextConfiguration {
+        inner: DeterministicCamera,
+        fail_next: bool,
     }
 
     impl FailNextConfiguration {
@@ -717,6 +1541,13 @@ mod tests {
             Self {
                 inner,
                 fail_next: true,
+            }
+        }
+
+        const fn without_failure(inner: DeterministicCamera) -> Self {
+            Self {
+                inner,
+                fail_next: false,
             }
         }
     }

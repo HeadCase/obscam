@@ -10,13 +10,22 @@ import {
 const unavailableRuntime = {
   schemaVersion: 1,
   runtimeEpoch: "8d4cc9fd-b91f-4d0c-a2e3-0f3838608262",
+  minimumSourceGeneration: 1,
   media: { whepPort: 8889, whepPath: "/obscam/whep" },
   components: {
     capture: { state: "unavailable", reason: "no_camera_source" },
     encoder: { state: "unavailable", reason: "no_frame" },
     relay: { state: "unavailable", reason: "not_observed" }
   },
-  mediaRecovery: { encoderReplacements: 0, pipelineSkips: 0 },
+  mediaRecovery: {
+    encoderReplacements: 0,
+    pipelineSkips: 0,
+    cameraRestarts: 0,
+    invalidDimensions: 0,
+    invalidBufferLengths: 0,
+    invalidGenerationMetadata: 0,
+    invalidProcessingOutput: 0
+  },
   latestFrame: null
 };
 
@@ -29,7 +38,7 @@ test("absent trustworthy frame facts derive Unavailable without invented metrics
   assert.equal(viewer.captureCadenceHz, undefined);
   assert.equal(viewer.sourceGeneration, undefined);
   assert.equal(viewer.visibleLatencyMs, undefined);
-  assert.deepEqual(runtime.mediaRecovery, { encoderReplacements: 0, pipelineSkips: 0 });
+  assert.deepEqual(runtime.mediaRecovery, unavailableRuntime.mediaRecovery);
 });
 
 test("malformed runtime input fails closed", () => {

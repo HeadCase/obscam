@@ -35,6 +35,16 @@ pub enum CapturePlan {
         /// Reported byte length.
         length: usize,
     },
+    /// Return a non-timeout SDK capture failure.
+    Sdk {
+        /// Normalized vendor result code.
+        code: i32,
+    },
+    /// Complete a frame with invalid source-generation metadata.
+    MalformedGeneration {
+        /// Invalid generation value.
+        generation: u64,
+    },
 }
 
 /// RAM-only deterministic camera behavior supplied by development or acceptance code.
@@ -136,6 +146,13 @@ impl DeterministicCamera {
             }
             CapturePlan::MalformedLength { length } => {
                 Err(CaptureError::MalformedLength { length })
+            }
+            CapturePlan::Sdk { code } => Err(CaptureError::Sdk { code }),
+            CapturePlan::MalformedGeneration { generation } => {
+                Err(CaptureError::MalformedGeneration {
+                    previous: self.generation,
+                    received: generation,
+                })
             }
         }
     }

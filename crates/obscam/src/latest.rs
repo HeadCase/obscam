@@ -245,9 +245,9 @@ impl LatestBufferMailbox {
         discarded
     }
 
-    pub(crate) fn begin_epoch(&self, generation: u64) {
+    pub(crate) fn begin_epoch(&self, _generation: u64) {
         let mut state = self.state.lock().expect("frame mailbox mutex poisoned");
-        self.epoch_fence.advance_to(generation);
+        self.epoch_fence.advance();
         if let Some(pending) = state.pending.take() {
             state.spare.push(pending);
         }
@@ -360,12 +360,6 @@ impl EpochFence {
         MediaEpoch(previous.saturating_add(1))
     }
 
-    fn advance_to(&self, generation: u64) -> MediaEpoch {
-        let previous = self.0.swap(generation, Ordering::AcqRel);
-        assert!(generation > previous, "semantic epochs must advance");
-        MediaEpoch(generation)
-    }
-
     fn is_current(&self, epoch: MediaEpoch) -> bool {
         self.current() == epoch
     }
@@ -453,10 +447,13 @@ mod tests {
     }
 
     #[test]
-    fn reserved_settings_generation_becomes_the_exact_shared_epoch() {
+    fn settings_boundary_advances_the_shared_epoch_without_reusing_a_recovery_epoch() {
         let mailbox = LatestBufferMailbox::new(1);
         mailbox.begin_epoch(3);
 
+        assert_eq!(mailbox.current_epoch(), MediaEpoch(1));
+        mailbox.begin_new_epoch();
+        mailbox.begin_epoch(4);
         assert_eq!(mailbox.current_epoch(), MediaEpoch(3));
     }
 

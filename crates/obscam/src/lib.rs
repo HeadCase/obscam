@@ -9,6 +9,7 @@ mod encoder;
 mod latest;
 mod monochrome;
 mod pipeline;
+mod recovery;
 mod runtime;
 mod service;
 mod service_quality;
@@ -25,6 +26,10 @@ pub use encoder::FfmpegEncoder;
 pub use latest::{LatestFrameMailbox, PublishedFrame};
 pub use monochrome::{MonochromeFrame, MonochromeProcessor, ProcessedFrame};
 pub use pipeline::MediaPipeline;
+pub use recovery::{
+    CameraRecoveryBackoff, ExposureWatchdog, ValidationFailure, ValidationWindow, WatchdogAction,
+    validate_processing_output,
+};
 pub use runtime::{ComponentReadiness, RuntimeState};
 pub use service::serve;
 pub use settings::{

@@ -17,12 +17,18 @@ export interface RuntimeComponents {
 export interface MediaRecoveryCounters {
   encoderReplacements: number;
   pipelineSkips: number;
+  cameraRestarts: number;
+  invalidDimensions: number;
+  invalidBufferLengths: number;
+  invalidGenerationMetadata: number;
+  invalidProcessingOutput: number;
 }
 
 /** Version-one bootstrap facts supplied by the Rust service. */
 export interface RuntimeContract {
   schemaVersion: 1;
   runtimeEpoch: string;
+  minimumSourceGeneration: number;
   media: {
     whepPort: number;
     whepPath: string;
@@ -68,6 +74,13 @@ export function parseRuntimeContract(value: unknown): RuntimeContract {
     throw new Error("invalid runtime epoch");
   }
   if (
+    typeof value.minimumSourceGeneration !== "number" ||
+    !nonNegativeSafeInteger(value.minimumSourceGeneration) ||
+    value.minimumSourceGeneration < 1
+  ) {
+    throw new Error("invalid minimum source generation");
+  }
+  if (
     !isRecord(value.media) ||
     !Number.isInteger(value.media.whepPort) ||
     typeof value.media.whepPort !== "number" ||
@@ -87,6 +100,7 @@ export function parseRuntimeContract(value: unknown): RuntimeContract {
   return {
     schemaVersion: 1,
     runtimeEpoch: value.runtimeEpoch,
+    minimumSourceGeneration: value.minimumSourceGeneration as number,
     media: {
       whepPort: value.media.whepPort,
       whepPath: value.media.whepPath
@@ -101,13 +115,23 @@ function parseMediaRecoveryCounters(value: unknown): MediaRecoveryCounters {
   if (
     !isRecord(value) ||
     !nonNegativeSafeInteger(value.encoderReplacements) ||
-    !nonNegativeSafeInteger(value.pipelineSkips)
+    !nonNegativeSafeInteger(value.pipelineSkips) ||
+    !nonNegativeSafeInteger(value.cameraRestarts) ||
+    !nonNegativeSafeInteger(value.invalidDimensions) ||
+    !nonNegativeSafeInteger(value.invalidBufferLengths) ||
+    !nonNegativeSafeInteger(value.invalidGenerationMetadata) ||
+    !nonNegativeSafeInteger(value.invalidProcessingOutput)
   ) {
     throw new Error("invalid media recovery counters");
   }
   return {
     encoderReplacements: value.encoderReplacements as number,
-    pipelineSkips: value.pipelineSkips as number
+    pipelineSkips: value.pipelineSkips as number,
+    cameraRestarts: value.cameraRestarts as number,
+    invalidDimensions: value.invalidDimensions as number,
+    invalidBufferLengths: value.invalidBufferLengths as number,
+    invalidGenerationMetadata: value.invalidGenerationMetadata as number,
+    invalidProcessingOutput: value.invalidProcessingOutput as number
   };
 }
 

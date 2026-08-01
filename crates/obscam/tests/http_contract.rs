@@ -19,6 +19,7 @@ async fn unavailable_runtime_contract_omits_unproven_frame_facts() {
 
     assert_eq!(response["schemaVersion"], 1);
     assert_eq!(response["runtimeEpoch"], EPOCH.to_string());
+    assert_eq!(response["minimumSourceGeneration"], 1);
     assert_eq!(response["media"]["whepPort"], 8889);
     assert_eq!(response["media"]["whepPath"], "/obscam/whep");
     assert_eq!(response["latestFrame"], Value::Null);
@@ -28,6 +29,11 @@ async fn unavailable_runtime_contract_omits_unproven_frame_facts() {
     assert_eq!(response["components"]["relay"]["state"], "unavailable");
     assert_eq!(response["mediaRecovery"]["encoderReplacements"], 0);
     assert_eq!(response["mediaRecovery"]["pipelineSkips"], 0);
+    assert_eq!(response["mediaRecovery"]["cameraRestarts"], 0);
+    assert_eq!(response["mediaRecovery"]["invalidDimensions"], 0);
+    assert_eq!(response["mediaRecovery"]["invalidBufferLengths"], 0);
+    assert_eq!(response["mediaRecovery"]["invalidGenerationMetadata"], 0);
+    assert_eq!(response["mediaRecovery"]["invalidProcessingOutput"], 0);
 }
 
 #[tokio::test]
@@ -62,6 +68,33 @@ async fn component_readiness_is_exposed_independently() {
     assert_eq!(response["components"]["capture"]["state"], "ready");
     assert_eq!(response["components"]["encoder"]["state"], "unavailable");
     assert_eq!(response["components"]["relay"]["state"], "ready");
+}
+
+#[tokio::test]
+async fn camera_recovery_counters_are_distinct_and_authoritative() {
+    let config =
+        Config::parse("127.0.0.1:8080", "8889", "/obscam/whep").expect("test configuration");
+    let state = RuntimeState::with_readiness(
+        EPOCH,
+        &config,
+        ComponentReadiness::Ready,
+        ComponentReadiness::Ready,
+        ComponentReadiness::Ready,
+    );
+    state.record_camera_restart();
+    state.record_validation_failure(obscam::ValidationFailure::InvalidDimensions);
+    state.record_validation_failure(obscam::ValidationFailure::InvalidBufferLength);
+    state.record_validation_failure(obscam::ValidationFailure::InvalidGeneration);
+    state.record_validation_failure(obscam::ValidationFailure::InvalidProcessingOutput);
+    let address = spawn_state(state).await;
+
+    let response = get_json(address, "/api/v1/runtime").await;
+
+    assert_eq!(response["mediaRecovery"]["cameraRestarts"], 1);
+    assert_eq!(response["mediaRecovery"]["invalidDimensions"], 1);
+    assert_eq!(response["mediaRecovery"]["invalidBufferLengths"], 1);
+    assert_eq!(response["mediaRecovery"]["invalidGenerationMetadata"], 1);
+    assert_eq!(response["mediaRecovery"]["invalidProcessingOutput"], 1);
 }
 
 #[tokio::test]

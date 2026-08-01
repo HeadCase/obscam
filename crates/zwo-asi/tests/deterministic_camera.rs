@@ -147,6 +147,8 @@ fn virtual_exposure_interruption_and_timeouts_never_publish_stale_generations() 
 fn deterministic_source_uses_the_production_capture_contract() {
     let scenario = DeterministicScenario::new([
         CapturePlan::Timeout,
+        CapturePlan::Sdk { code: 17 },
+        CapturePlan::MalformedGeneration { generation: 0 },
         CapturePlan::Frame {
             additional_delay_us: 0,
         },
@@ -158,6 +160,17 @@ fn deterministic_source_uses_the_production_capture_contract() {
     camera.start().expect("start");
 
     assert_eq!(capture_one(&mut camera), Err(CaptureError::Timeout));
+    assert_eq!(
+        capture_one(&mut camera),
+        Err(CaptureError::Sdk { code: 17 })
+    );
+    assert_eq!(
+        capture_one(&mut camera),
+        Err(CaptureError::MalformedGeneration {
+            previous: 0,
+            received: 0,
+        })
+    );
     assert_eq!(
         capture_one(&mut camera),
         Ok((1, 1920 * 1080, BayerLayout::Rggb))
