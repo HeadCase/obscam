@@ -25,6 +25,8 @@ import {
 } from "./service-quality.js";
 
 const LIVENESS_TICK_MS = 100;
+const INITIAL_MEDIA_RETRY_MS = 250;
+const MAX_MEDIA_RETRY_MS = 5_000;
 
 async function boot(): Promise<void> {
   const status = requiredElement("[data-viewer-status]");
@@ -60,6 +62,7 @@ async function boot(): Promise<void> {
     let mediaSession: WhepSession | null = null;
     let stopPresentedFrames: (() => void) | null = null;
     let mediaAttempt = 0;
+    let mediaRetryMs = INITIAL_MEDIA_RETRY_MS;
 
     const render = (): void => {
       const projection = viewerProjection(viewer);
@@ -134,6 +137,7 @@ async function boot(): Promise<void> {
           return;
         }
         mediaSession = session;
+        mediaRetryMs = INITIAL_MEDIA_RETRY_MS;
         dispatch({ type: "media_connected" });
         stopPresentedFrames = watchPresentedFrames(video, (metadata) => {
           presentedFrame(connectionGeneration, metadata);
@@ -142,6 +146,11 @@ async function boot(): Promise<void> {
         if (attempt === mediaAttempt) {
           dispatch({ type: "media_disconnected" });
           console.error("ObsCam WHEP connection failed", error);
+          const retryAfterMs = mediaRetryMs;
+          mediaRetryMs = Math.min(mediaRetryMs * 2, MAX_MEDIA_RETRY_MS);
+          window.setTimeout(() => {
+            if (attempt === mediaAttempt) void connectMedia(true);
+          }, retryAfterMs);
         }
       }
     };

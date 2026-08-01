@@ -4,6 +4,8 @@ import { startWhep } from "./whep.js";
 import { acceptsMediaPresentation, initialViewerState, parseLifecycleFacts, reduceViewer, viewerProjection } from "./viewer.js";
 import { ServiceQualityClient, downloadServiceQuality, serviceQualityText } from "./service-quality.js";
 const LIVENESS_TICK_MS = 100;
+const INITIAL_MEDIA_RETRY_MS = 250;
+const MAX_MEDIA_RETRY_MS = 5_000;
 async function boot() {
     const status = requiredElement("[data-viewer-status]");
     const detail = requiredElement("[data-viewer-detail]");
@@ -35,6 +37,7 @@ async function boot() {
         let mediaSession = null;
         let stopPresentedFrames = null;
         let mediaAttempt = 0;
+        let mediaRetryMs = INITIAL_MEDIA_RETRY_MS;
         const render = () => {
             const projection = viewerProjection(viewer);
             status.textContent = projection.status;
@@ -97,6 +100,7 @@ async function boot() {
                     return;
                 }
                 mediaSession = session;
+                mediaRetryMs = INITIAL_MEDIA_RETRY_MS;
                 dispatch({ type: "media_connected" });
                 stopPresentedFrames = watchPresentedFrames(video, (metadata) => {
                     presentedFrame(connectionGeneration, metadata);
@@ -106,6 +110,12 @@ async function boot() {
                 if (attempt === mediaAttempt) {
                     dispatch({ type: "media_disconnected" });
                     console.error("ObsCam WHEP connection failed", error);
+                    const retryAfterMs = mediaRetryMs;
+                    mediaRetryMs = Math.min(mediaRetryMs * 2, MAX_MEDIA_RETRY_MS);
+                    window.setTimeout(() => {
+                        if (attempt === mediaAttempt)
+                            void connectMedia(true);
+                    }, retryAfterMs);
                 }
             }
         };

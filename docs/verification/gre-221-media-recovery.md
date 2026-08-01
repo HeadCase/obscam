@@ -19,16 +19,18 @@ a long exposure or processing operation already in flight remains valid.
 
 MediaMTX readiness comes from its read-only metrics endpoint on the private
 `169.254.218.0/30` veth. The endpoint is not translated to a browser-facing
-address. The firewall admits only established or related replies from the
-namespace to the host and continues to drop new namespace-to-host traffic.
+address. The firewall admits only established TCP replies from that exact
+address and source port to the host and continues to drop every other
+namespace-to-host packet.
 Relay loss does not stop RTP publication or change camera, encoder, settings,
 runtime, or lease ownership.
 
 The browser retains its last trustworthy frame during confirmed media failure.
 It reconnects WHEP after authoritative relay or encoder recovery and also
 observes peer-connection failure, covering a relay restart too short for the
-500 ms relay poll to observe. A new media-connection generation and a new exact
-current-stream presentation are required before returning to Live.
+500 ms relay poll to observe. Negotiation failures retry with generation-fenced
+exponential delay capped at five seconds. A new media-connection generation and
+a new exact current-stream presentation are required before returning to Live.
 
 ## Automated evidence
 
@@ -46,9 +48,11 @@ current-stream presentation are required before returning to Live.
 - Browser reducer tests prove failure retains a trustworthy stale frame,
   recovery replaces the dead media connection, and the old connection cannot
   establish Live.
+- The repository Playwright reconnect suite aborts the first WHEP negotiation
+  and requires a later attempt to establish Live.
 - Deployment tests prove the metrics permission and listener remain private,
-  port 9998 is not forwarded, and only established replies can return from the
-  owned media veth.
+  port 9998 is not forwarded, and only established TCP replies from that exact
+  source address and port can return from the owned media veth.
 
 ## Browser and deployed-stack evidence -- 2026-08-01
 
@@ -69,6 +73,9 @@ Chromium browser over the permitted `http://10.164.190.1:8080` WireGuard route.
 - A rapid MediaMTX restart also terminated the old WHEP session, created a new
   session from the Mac WireGuard client, and returned to native advancing Live
   video without a Rust restart.
+- A Mac Playwright route aborted the first WHEP POST. The browser moved through
+  Unavailable, Reconnecting, and Capturing; its generation-fenced retry made a
+  second POST and reached Live native 1920x1080 video.
 - Sending `SIGKILL` to the exact ObsCam-owned FFmpeg child advanced encoder
   replacements from 2 to 3. Rust PID, runtime epoch, camera readiness, relay
   readiness, settings, and browser lease remained unchanged; a new FFmpeg PID
@@ -104,3 +111,8 @@ Fault-injection pages intentionally recorded failed WHEP requests while
 MediaMTX was stopped. Those expected diagnostics were excluded from the clean
 fresh-page regression check, which attached new listeners before navigation as
 required by the browser-testing procedure.
+
+After narrowing the private reply exception, the host metrics probe still
+returned the ready `obscam` path while a direct host request to the namespace's
+WHEP listener timed out. Browser WHEP through the approved WireGuard destination
+continued to reach Live.

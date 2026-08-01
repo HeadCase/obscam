@@ -64,7 +64,7 @@ fn mediamtx_metrics_are_readable_only_on_the_private_media_link() {
     );
     assert!(!rules.contains("dport 9998"));
     assert!(rules.contains(
-        "iifname \"obscam-media0\" ct state established,related accept\n        iifname \"obscam-media0\" drop"
+        "iifname \"obscam-media0\" ip saddr 169.254.218.2 tcp sport 9998 ct state established accept\n        iifname \"obscam-media0\" drop"
     ));
 }
 
