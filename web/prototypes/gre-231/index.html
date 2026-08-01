@@ -1,0 +1,402 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+    <meta name="color-scheme" content="dark">
+    <title>GRE-231 compact operator interface prototype</title>
+    <style>
+      :root {
+        color: #c0caf5;
+        background: #15161e;
+        font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        font-synthesis: none;
+      }
+      * { box-sizing: border-box; }
+      html, body { min-width: 320px; min-height: 100%; margin: 0; }
+      body { overflow: hidden; background: #15161e; }
+      button, select, input { font: inherit; }
+      button:focus-visible, select:focus-visible, input:focus-visible { outline: 2px solid #7aa2f7; outline-offset: 2px; }
+
+      .prototype { position: relative; width: 100vw; height: 100dvh; overflow: hidden; }
+      .viewer { position: absolute; inset: 0; overflow: hidden; background: #000; }
+      .viewer.is-idle { cursor: none; }
+      .feed { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; background: #000; }
+      .state-boundary { position: absolute; z-index: 2; inset: 3px; pointer-events: none; }
+      .viewer[data-feed-state="stale"] .state-boundary,
+      .viewer[data-feed-state="reconnecting"] .state-boundary { border: 2px dashed #ff9e64; }
+      .viewer[data-feed-state="unavailable"] .state-boundary { border: 3px double #db4b4b; }
+
+      .exposure-rail { position: absolute; z-index: 3; right: 0; bottom: 0; left: 0; height: 2px; overflow: hidden; pointer-events: none; background: rgb(65 72 104 / 28%); }
+      .exposure-rail[hidden] { display: none; }
+      .exposure-rail span { display: block; width: 0; height: 100%; background: #414868; box-shadow: 0 0 0.45rem rgb(65 72 104 / 52%); }
+      .exposure-rail.is-arriving span { background: #7aa2f7; box-shadow: 0 0 0.7rem rgb(122 162 247 / 58%); }
+
+      .chrome { transition: opacity 150ms ease; }
+      .viewer.is-idle .chrome { opacity: 0; pointer-events: none; }
+      .command-wrap { position: absolute; z-index: 6; right: max(0.55rem, env(safe-area-inset-right)); bottom: max(0.55rem, env(safe-area-inset-bottom)); left: max(0.55rem, env(safe-area-inset-left)); display: grid; justify-items: center; gap: 0.4rem; pointer-events: none; }
+
+      .command-bar { display: flex; align-items: center; gap: 0.3rem; width: min(46rem, 100%); min-height: 2.9rem; padding: 0.3rem; border: 1px solid #414868; border-radius: 0.65rem; background: rgb(26 27 38 / 96%); box-shadow: 0 0.8rem 2rem rgb(0 0 0 / 46%); pointer-events: auto; }
+      .command-bar button { min-height: 2.25rem; padding: 0.35rem 0.55rem; border: 1px solid #414868; border-radius: 0.42rem; color: #c0caf5; background: #292e42; white-space: nowrap; }
+      .command-bar button:hover { background: #414868; }
+      .command-bar .status { display: inline-flex; align-items: center; gap: 0.35rem; border-color: transparent; background: transparent; }
+      .status-dot { width: 0.48rem; height: 0.48rem; flex: 0 0 auto; border: 1px solid transparent; border-radius: 50%; background: #7aa2f7; box-shadow: 0 0 0 3px rgb(122 162 247 / 14%); }
+      .viewer[data-feed-state="waiting"] .status-dot { border-color: #7aa2f7; background: transparent; box-shadow: none; }
+      .viewer[data-feed-state="stale"] .status-dot,
+      .viewer[data-feed-state="reconnecting"] .status-dot { background: #ff9e64; box-shadow: 0 0 0 3px rgb(255 158 100 / 12%); }
+      .viewer[data-feed-state="unavailable"] .status-dot { background: #db4b4b; box-shadow: 0 0 0 3px rgb(219 75 75 / 14%); }
+      .settings-readout { display: block; min-width: 0; flex: 1; overflow: hidden; padding: 0.35rem 0.25rem; color: #a9b1d6; text-overflow: ellipsis; white-space: nowrap; }
+      .summary-value { color: #c0caf5; font-variant-numeric: tabular-nums; }
+      .summary-value.is-pending { color: #e0af68; }
+      .summary-group.is-pending, .summary-group.is-pending .summary-value { color: #e0af68; }
+      .settings-trigger[aria-disabled="false"] { border-color: #7aa2f7; color: #7aa2f7; background: #292e42; box-shadow: inset 0 0 0 1px rgb(122 162 247 / 10%); font-weight: 650; }
+      .settings-trigger[aria-disabled="true"] { cursor: not-allowed; border-color: #292e42; color: #565f89; background: rgb(21 22 30 / 78%); opacity: 1; }
+      .command-bar .primary { border-color: #7aa2f7; color: #15161e; background: #7aa2f7; }
+      .command-bar .quiet { color: #a9b1d6; background: transparent; }
+
+      .settings-popover { width: min(34rem, 100%); padding: 0.42rem; border: 1px solid #414868; border-radius: 0.55rem; background: rgb(26 27 38 / 98%); box-shadow: 0 1rem 2.5rem rgb(0 0 0 / 58%); pointer-events: auto; }
+      .settings-popover[hidden] { display: none; }
+      .settings-popover__done { min-height: 2.25rem; padding: 0.3rem 0.55rem; border: 1px solid #414868; border-radius: 0.42rem; color: #c0caf5; background: #292e42; }
+      .settings-fields { display: grid; gap: 0.28rem; }
+      .field { display: grid; grid-template-columns: 4.3rem minmax(8rem, 1fr) 4.4rem; align-items: center; gap: 0.42rem; min-width: 0; color: #a9b1d6; font-size: 0.72rem; font-weight: 650; letter-spacing: 0.04em; text-transform: uppercase; }
+      .field output { justify-self: end; color: #7aa2f7; font-size: 0.8rem; font-variant-numeric: tabular-nums; letter-spacing: 0; text-transform: none; }
+      .field output.is-pending { color: #e0af68; }
+      .field output.is-draft { color: #bb9af7; }
+      .field output.is-rejected { color: #f7768e; }
+      .slider-shell { position: relative; display: block; min-width: 0; padding-inline: 0.42rem; }
+      .detent-slider { position: relative; z-index: 3; width: 100%; height: 1.75rem; margin: 0; appearance: none; background: transparent; cursor: grab; }
+      .detent-slider:active { cursor: grabbing; }
+      .detent-slider::-webkit-slider-runnable-track { height: 0.22rem; border-radius: 1rem; background: #414868; }
+      .detent-slider::-moz-range-track { height: 0.22rem; border-radius: 1rem; background: #414868; }
+      .detent-slider::-webkit-slider-thumb { width: 0.9rem; height: 0.9rem; margin-top: -0.34rem; appearance: none; border: 2px solid #1a1b26; border-radius: 50%; background: #7aa2f7; box-shadow: 0 0 0 2px #7aa2f7; }
+      .detent-slider::-moz-range-thumb { width: 0.7rem; height: 0.7rem; border: 2px solid #1a1b26; border-radius: 50%; background: #7aa2f7; box-shadow: 0 0 0 2px #7aa2f7; }
+      .detent-slider.is-pending::-webkit-slider-thumb { background: #e0af68; box-shadow: 0 0 0 2px #e0af68; }
+      .detent-slider.is-pending::-moz-range-thumb { background: #e0af68; box-shadow: 0 0 0 2px #e0af68; }
+      .detent-slider.is-draft::-webkit-slider-thumb { background: #bb9af7; box-shadow: 0 0 0 2px #bb9af7; }
+      .detent-slider.is-draft::-moz-range-thumb { background: #bb9af7; box-shadow: 0 0 0 2px #bb9af7; }
+      .detent-slider.is-rejected::-webkit-slider-thumb { background: #f7768e; box-shadow: 0 0 0 2px #f7768e; }
+      .detent-slider.is-rejected::-moz-range-thumb { background: #f7768e; box-shadow: 0 0 0 2px #f7768e; }
+      .slider-ticks { position: absolute; z-index: 1; top: 0.88rem; right: 0.88rem; left: 0.88rem; display: flex; justify-content: space-between; pointer-events: none; }
+      .slider-ticks i { width: 1px; height: 0.45rem; background: #565f89; }
+      .visible-marker { position: absolute; z-index: 2; top: -0.04rem; left: calc(0.88rem + (100% - 1.76rem) * var(--visible-ratio)); width: 0.38rem; height: 0.38rem; transform: translateX(-50%) rotate(45deg); border: 1px solid #15161e; background: #7aa2f7; pointer-events: none; }
+      .visible-marker.is-converged { opacity: 0; }
+      .requested-marker { position: absolute; z-index: 2; top: 0.12rem; left: calc(0.88rem + (100% - 1.76rem) * var(--requested-ratio)); width: 0.28rem; height: 0.28rem; transform: translateX(-50%) rotate(45deg); border: 1px solid #15161e; background: #e0af68; pointer-events: none; }
+      .requested-marker[hidden] { display: none; }
+      .settings-footer { display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; padding-top: 0.32rem; border-top: 1px solid #292e42; }
+      .settings-actions { display: flex; gap: 0.3rem; }
+      .settings-actions button:disabled { cursor: default; color: #565f89; border-color: #292e42; background: #1a1b26; }
+      .settings-actions .apply { border-color: #7aa2f7; color: #15161e; background: #7aa2f7; }
+      .settings-actions .discard { background: transparent; }
+      .settings-trigger.has-draft { border-color: #bb9af7; color: #bb9af7; }
+      .treatment { display: flex; min-height: 2.25rem; }
+      .treatment button { min-width: 3.8rem; border: 1px solid #414868; color: #c0caf5; background: #292e42; }
+      .treatment button:first-child { border-radius: 0.42rem 0 0 0.42rem; }
+      .treatment button:last-child { margin-left: -1px; border-radius: 0 0.42rem 0.42rem 0; }
+      .treatment button[aria-pressed="true"] { position: relative; border-color: #7aa2f7; background: #3d59a1; }
+      .treatment.is-pending button[aria-pressed="true"] { border-color: #e0af68; color: #e0af68; background: #292e42; }
+      .treatment.is-draft button[aria-pressed="true"] { border-color: #bb9af7; color: #bb9af7; background: #292e42; }
+
+      .toast { position: absolute; z-index: 8; top: 50%; left: 50%; max-width: calc(100% - 2rem); transform: translate(-50%, -50%); padding: 0.5rem 0.7rem; border: 1px solid #414868; border-radius: 0.5rem; color: #c0caf5; background: rgb(26 27 38 / 97%); opacity: 0; pointer-events: none; transition: opacity 150ms ease; }
+      .toast.is-visible { opacity: 1; }
+
+      .scenario-bar { position: fixed; z-index: 20; top: 0.55rem; right: 0.55rem; display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 0.35rem; max-width: calc(100vw - 1.1rem); padding: 0.4rem; border: 1px solid #414868; border-radius: 0.55rem; color: #c0caf5; background: rgb(26 27 38 / 97%); }
+      .scenario-bar span { color: #a9b1d6; font-size: 0.68rem; font-weight: 700; letter-spacing: 0.07em; text-transform: uppercase; }
+      .scenario-bar button, .scenario-bar select { min-height: 2rem; padding: 0.25rem 0.5rem; border: 1px solid #414868; border-radius: 0.38rem; color: #c0caf5; background: #292e42; }
+
+      @media (max-width: 520px) {
+        .command-wrap { right: max(0.35rem, env(safe-area-inset-right)); bottom: max(0.35rem, env(safe-area-inset-bottom)); left: max(0.35rem, env(safe-area-inset-left)); }
+        .command-bar { gap: 0.2rem; min-height: 2.75rem; padding: 0.25rem; }
+        .command-bar button { min-height: 2.25rem; padding-inline: 0.42rem; font-size: 0.76rem; }
+        .command-bar .status { padding-inline: 0.35rem; }
+        .settings-popover { padding: 0.5rem; }
+        .field { grid-template-columns: 3.9rem minmax(5rem, 1fr) 3.8rem; gap: 0.3rem; min-height: 2.75rem; }
+        .settings-footer { min-height: 2.75rem; }
+        .scenario-bar { left: 0.55rem; justify-content: center; }
+      }
+      @media (prefers-reduced-motion: reduce) { .chrome, .toast { transition: none; } }
+    </style>
+  </head>
+  <body>
+    <main class="prototype">
+      <section class="viewer" data-viewer data-feed-state="live" aria-label="ObsCam compact operator interface">
+        <img class="feed" src="obscam.jpg" width="1920" height="1080" alt="Current observatory camera frame">
+        <div class="state-boundary" aria-hidden="true"></div>
+        <div class="exposure-rail" data-rail aria-hidden="true"><span data-rail-fill></span></div>
+
+        <section class="command-wrap chrome" aria-label="ObsCam controls">
+          <div class="settings-popover" data-settings-popover hidden>
+            <div class="settings-fields">
+              <label class="field">
+                <span>Exposure</span>
+                <span class="slider-shell" data-slider-shell>
+                  <input class="detent-slider" data-exposure type="range" min="0" max="13" step="1" value="9" aria-label="Exposure">
+                  <span class="visible-marker is-converged" data-visible-marker aria-hidden="true"></span>
+                  <span class="requested-marker" data-requested-exposure-marker aria-hidden="true" hidden></span>
+                  <span class="slider-ticks" data-slider-ticks aria-hidden="true"></span>
+                </span>
+                <output data-exposure-value>5 s</output>
+              </label>
+              <label class="field">
+                <span>ISO</span>
+                <span class="slider-shell" data-iso-slider-shell>
+                  <input class="detent-slider" data-iso type="range" min="0" max="12" step="1" value="2" aria-label="ISO">
+                  <span class="visible-marker is-converged" data-visible-iso-marker aria-hidden="true"></span>
+                  <span class="requested-marker" data-requested-iso-marker aria-hidden="true" hidden></span>
+                  <span class="slider-ticks" data-iso-slider-ticks aria-hidden="true"></span>
+                </span>
+                <output data-iso-value>100</output>
+              </label>
+              <div class="settings-footer">
+                <div class="treatment" aria-label="Treatment">
+                <button data-treatment="B&amp;W" type="button" aria-pressed="true">B&amp;W</button>
+                <button data-treatment="Colour" type="button" aria-pressed="false">Colour</button>
+                </div>
+                <span class="settings-actions"><button class="discard" data-discard type="button" disabled>Discard</button><button class="apply" data-apply type="button" disabled>Apply</button></span>
+              </div>
+            </div>
+          </div>
+
+          <div class="command-bar">
+            <button class="status" data-status type="button" aria-label="Live feed, current frame 0.2 seconds old"><span class="status-dot" aria-hidden="true"></span><span data-status-label>Live</span></button>
+            <span class="settings-readout" data-settings-readout role="status"><span class="summary-value" data-summary-exposure>5 s</span> · <span class="summary-group" data-summary-iso-group>ISO <span class="summary-value" data-summary-iso>100</span></span> · <span class="summary-value" data-summary-treatment>B&amp;W</span></span>
+            <button class="settings-trigger" data-settings-trigger type="button" aria-expanded="false" aria-disabled="true" title="Take control to change settings">Settings</button>
+            <button data-snapshot type="button">Snapshot</button>
+            <button class="primary" data-authority type="button">Take control</button>
+          </div>
+        </section>
+        <div class="toast" data-toast role="status" aria-live="polite"></div>
+      </section>
+
+      <aside class="scenario-bar" aria-label="Prototype scenarios">
+        <span>Prototype</span>
+        <select data-scenario-state aria-label="Feed state">
+          <option value="live">Live</option>
+          <option value="waiting">First image</option>
+          <option value="stale">Stale</option>
+          <option value="reconnecting">Reconnecting</option>
+          <option value="unavailable">Unavailable</option>
+        </select>
+        <button data-present-frame type="button">Present frame</button>
+        <button data-reject-setting type="button">Reject setting</button>
+        <button data-toggle-chrome type="button">Hide UI</button>
+      </aside>
+    </main>
+
+    <script>
+      const exposureChoices = [10, 20, 50, 100, 200, 300, 500, 1000, 2000, 5000, 10000, 15000, 20000, 30000];
+      const isoChoices = [0, 50, 100, 150, 200, 250, 300, 350, 400, 450, 500, 550, 600];
+      const model = {
+        state: "live", authority: "viewer", chrome: true, popover: false,
+        exposureMs: 5000, visibleExposureMs: 5000, iso: 100, visibleIso: 100,
+        treatment: "B&W", visibleTreatment: "B&W", phase: "settled",
+        draftExposureMs: 5000, draftIso: 100, draftTreatment: "B&W",
+        frame: 842, startedAt: performance.now(), arrivalUntil: 0,
+        lastActivity: performance.now(), protected: false
+      };
+      const viewer = document.querySelector("[data-viewer]");
+      const rail = document.querySelector("[data-rail]");
+      const railFill = document.querySelector("[data-rail-fill]");
+      const popover = document.querySelector("[data-settings-popover]");
+      const settingsTrigger = document.querySelector("[data-settings-trigger]");
+      const authority = document.querySelector("[data-authority]");
+      const statusLabel = document.querySelector("[data-status-label]");
+      const status = document.querySelector("[data-status]");
+      const exposure = document.querySelector("[data-exposure]");
+      const exposureValue = document.querySelector("[data-exposure-value]");
+      const visibleMarker = document.querySelector("[data-visible-marker]");
+      const requestedExposureMarker = document.querySelector("[data-requested-exposure-marker]");
+      const sliderShell = document.querySelector("[data-slider-shell]");
+      const iso = document.querySelector("[data-iso]");
+      const isoValue = document.querySelector("[data-iso-value]");
+      const visibleIsoMarker = document.querySelector("[data-visible-iso-marker]");
+      const requestedIsoMarker = document.querySelector("[data-requested-iso-marker]");
+      const isoSliderShell = document.querySelector("[data-iso-slider-shell]");
+      const settingsReadout = document.querySelector("[data-settings-readout]");
+      const summaryExposure = document.querySelector("[data-summary-exposure]");
+      const summaryIso = document.querySelector("[data-summary-iso]");
+      const summaryIsoGroup = document.querySelector("[data-summary-iso-group]");
+      const summaryTreatment = document.querySelector("[data-summary-treatment]");
+      const applySettings = document.querySelector("[data-apply]");
+      const discardSettings = document.querySelector("[data-discard]");
+      const toast = document.querySelector("[data-toast]");
+      const scenarioState = document.querySelector("[data-scenario-state]");
+
+      function exposureLabel(ms) { return ms >= 1000 ? `${ms / 1000} s` : `${ms} ms`; }
+      exposureChoices.forEach(() => document.querySelector("[data-slider-ticks]").append(document.createElement("i")));
+      isoChoices.forEach(() => document.querySelector("[data-iso-slider-ticks]").append(document.createElement("i")));
+
+      function exposureIndex(ms) { return exposureChoices.indexOf(ms); }
+      function isoIndex(value) { return isoChoices.indexOf(value); }
+
+      function currentSummary() { return `${exposureLabel(model.visibleExposureMs)} · ISO ${model.visibleIso} · ${model.visibleTreatment}`; }
+      function requestedSummary() { return `${exposureLabel(model.exposureMs)} · ISO ${model.iso} · ${model.treatment}`; }
+      function draftSummary() { return `${exposureLabel(model.draftExposureMs)} · ISO ${model.draftIso} · ${model.draftTreatment}`; }
+      function hasDraft() { return model.draftExposureMs !== model.exposureMs || model.draftIso !== model.iso || model.draftTreatment !== model.treatment; }
+      function showToast(message) {
+        toast.textContent = message;
+        toast.classList.add("is-visible");
+        window.setTimeout(() => toast.classList.remove("is-visible"), 1500);
+      }
+      function activity() { model.chrome = true; model.lastActivity = performance.now(); render(); }
+      function render() {
+        viewer.dataset.feedState = model.state;
+        viewer.classList.toggle("is-idle", !model.chrome);
+        popover.hidden = !model.popover || model.authority !== "controller";
+        settingsTrigger.setAttribute("aria-expanded", String(!popover.hidden));
+        settingsTrigger.setAttribute("aria-disabled", String(model.authority !== "controller"));
+        settingsTrigger.title = model.authority === "controller" ? "Open camera settings" : "Take control to change settings";
+        settingsTrigger.classList.toggle("has-draft", hasDraft());
+        settingsTrigger.textContent = hasDraft() ? "Settings · Unapplied" : "Settings";
+        summaryExposure.textContent = exposureLabel(model.exposureMs);
+        summaryIso.textContent = String(model.iso);
+        summaryTreatment.textContent = model.treatment;
+        summaryExposure.classList.toggle("is-pending", model.phase === "pending" && model.visibleExposureMs !== model.exposureMs);
+        summaryIsoGroup.classList.toggle("is-pending", model.phase === "pending" && model.visibleIso !== model.iso);
+        summaryTreatment.classList.toggle("is-pending", model.phase === "pending" && model.visibleTreatment !== model.treatment);
+        settingsTrigger.setAttribute("aria-label", hasDraft() ? `Open camera settings, unapplied draft ${draftSummary()}` : "Open camera settings");
+        settingsReadout.setAttribute("aria-label", model.phase === "pending" ? `Requested ${requestedSummary()}; current image uses ${currentSummary()}` : `Current settings ${currentSummary()}`);
+        authority.textContent = model.authority === "controller" ? "Release" : "Take control";
+        authority.classList.toggle("primary", model.authority !== "controller");
+        authority.classList.toggle("quiet", model.authority === "controller");
+        const exposureDrafted = model.draftExposureMs !== model.exposureMs;
+        const exposurePending = model.phase === "pending" && model.visibleExposureMs !== model.exposureMs;
+        exposure.value = String(exposureIndex(model.draftExposureMs));
+        exposureValue.textContent = exposureLabel(model.draftExposureMs);
+        exposure.classList.toggle("is-draft", exposureDrafted);
+        exposureValue.classList.toggle("is-draft", exposureDrafted);
+        exposure.classList.toggle("is-pending", !exposureDrafted && exposurePending);
+        exposure.classList.toggle("is-rejected", model.phase === "rejected" && model.visibleExposureMs !== model.exposureMs);
+        exposureValue.classList.toggle("is-pending", !exposureDrafted && exposurePending);
+        exposureValue.classList.toggle("is-rejected", model.phase === "rejected" && model.visibleExposureMs !== model.exposureMs);
+        sliderShell.style.setProperty("--visible-ratio", String(exposureIndex(model.visibleExposureMs) / (exposureChoices.length - 1)));
+        sliderShell.style.setProperty("--requested-ratio", String(exposureIndex(model.exposureMs) / (exposureChoices.length - 1)));
+        visibleMarker.classList.toggle("is-converged", model.visibleExposureMs === model.draftExposureMs);
+        requestedExposureMarker.hidden = !exposureDrafted || model.exposureMs === model.visibleExposureMs;
+        const isoDrafted = model.draftIso !== model.iso;
+        const isoPending = model.phase === "pending" && model.visibleIso !== model.iso;
+        iso.value = String(isoIndex(model.draftIso));
+        isoValue.textContent = String(model.draftIso);
+        iso.classList.toggle("is-draft", isoDrafted);
+        isoValue.classList.toggle("is-draft", isoDrafted);
+        iso.classList.toggle("is-pending", !isoDrafted && isoPending);
+        iso.classList.toggle("is-rejected", model.phase === "rejected" && model.visibleIso !== model.iso);
+        isoValue.classList.toggle("is-pending", !isoDrafted && isoPending);
+        isoValue.classList.toggle("is-rejected", model.phase === "rejected" && model.visibleIso !== model.iso);
+        isoSliderShell.style.setProperty("--visible-ratio", String(isoIndex(model.visibleIso) / (isoChoices.length - 1)));
+        isoSliderShell.style.setProperty("--requested-ratio", String(isoIndex(model.iso) / (isoChoices.length - 1)));
+        visibleIsoMarker.classList.toggle("is-converged", model.visibleIso === model.draftIso);
+        requestedIsoMarker.hidden = !isoDrafted || model.iso === model.visibleIso;
+        const treatmentDrafted = model.draftTreatment !== model.treatment;
+        document.querySelector(".treatment").classList.toggle("is-draft", treatmentDrafted);
+        document.querySelector(".treatment").classList.toggle("is-pending", !treatmentDrafted && model.phase === "pending" && model.visibleTreatment !== model.treatment);
+        document.querySelectorAll("[data-treatment]").forEach((button) => button.setAttribute("aria-pressed", String(button.dataset.treatment === model.draftTreatment)));
+        applySettings.disabled = !hasDraft();
+        discardSettings.disabled = !hasDraft();
+        const labels = { live: "Live", waiting: "First image", stale: "Stale", reconnecting: "Reconnecting", unavailable: "Unavailable" };
+        const details = { live: `Live feed, frame ${model.frame} is current`, waiting: "Waiting for the first image", stale: `Stale feed, frame ${model.frame} freshness unknown`, reconnecting: `Reconnecting, retaining frame ${model.frame}`, unavailable: "Camera feed unavailable" };
+        statusLabel.textContent = labels[model.state];
+        status.setAttribute("aria-label", details[model.state]);
+      }
+      function applyDraft() {
+        if (!hasDraft()) return;
+        model.exposureMs = model.draftExposureMs;
+        model.iso = model.draftIso;
+        model.treatment = model.draftTreatment;
+        model.phase = "pending";
+        model.startedAt = performance.now();
+        activity();
+      }
+      function discardDraft() {
+        model.draftExposureMs = model.exposureMs;
+        model.draftIso = model.iso;
+        model.draftTreatment = model.treatment;
+        activity();
+      }
+      function presentFrame(now) {
+        model.frame += 1;
+        model.visibleExposureMs = model.exposureMs;
+        model.visibleIso = model.iso;
+        model.visibleTreatment = model.treatment;
+        model.phase = "settled";
+        model.state = "live";
+        scenarioState.value = "live";
+        model.arrivalUntil = now + 300;
+        model.startedAt = now;
+        render();
+      }
+
+      settingsTrigger.addEventListener("click", () => {
+        if (model.authority !== "controller") { showToast("Take control to change settings"); activity(); return; }
+        model.popover = !model.popover;
+        activity();
+      });
+      authority.addEventListener("click", () => {
+        if (model.authority === "viewer") { model.authority = "controller"; model.popover = true; }
+        else {
+          const discarded = hasDraft();
+          model.draftExposureMs = model.exposureMs;
+          model.draftIso = model.iso;
+          model.draftTreatment = model.treatment;
+          model.authority = "viewer";
+          model.popover = false;
+          showToast(discarded ? "Unapplied changes discarded · Control released" : "Control released");
+        }
+        activity();
+      });
+      exposure.addEventListener("input", () => { model.draftExposureMs = exposureChoices[Number(exposure.value)]; render(); });
+      iso.addEventListener("input", () => { model.draftIso = isoChoices[Number(iso.value)]; render(); });
+      document.querySelectorAll("[data-treatment]").forEach((button) => button.addEventListener("click", () => { model.draftTreatment = button.dataset.treatment; activity(); }));
+      applySettings.addEventListener("click", applyDraft);
+      discardSettings.addEventListener("click", discardDraft);
+      document.querySelector("[data-snapshot]").addEventListener("click", () => { showToast(`Save As · obscam-frame-${model.frame}.jpg`); activity(); });
+      status.addEventListener("click", () => { showToast(status.getAttribute("aria-label")); activity(); });
+      document.addEventListener("keydown", (event) => {
+        if (event.key === "Escape" && model.popover) { model.popover = false; settingsTrigger.focus(); }
+        if (event.key === "Enter" && model.popover && hasDraft() && event.target !== applySettings && event.target !== discardSettings) applyDraft();
+        activity();
+      });
+      viewer.addEventListener("pointermove", activity);
+      viewer.addEventListener("pointerenter", activity);
+      document.querySelectorAll(".chrome button, .chrome select, .chrome input").forEach((control) => {
+        control.addEventListener("pointerenter", () => { model.protected = true; activity(); });
+        control.addEventListener("pointerleave", () => { model.protected = false; activity(); });
+        control.addEventListener("focus", () => { model.protected = true; activity(); });
+        control.addEventListener("blur", () => { model.protected = false; activity(); });
+      });
+      scenarioState.addEventListener("change", () => { model.state = scenarioState.value; model.startedAt = performance.now(); render(); });
+      document.querySelector("[data-present-frame]").addEventListener("click", () => presentFrame(performance.now()));
+      document.querySelector("[data-reject-setting]").addEventListener("click", () => {
+        if (model.phase !== "pending") { showToast("Change a setting first"); return; }
+        model.phase = "rejected";
+        render();
+        showToast("Setting rejected");
+        window.setTimeout(() => {
+          model.exposureMs = model.visibleExposureMs;
+          model.iso = model.visibleIso;
+          model.treatment = model.visibleTreatment;
+          model.draftExposureMs = model.visibleExposureMs;
+          model.draftIso = model.visibleIso;
+          model.draftTreatment = model.visibleTreatment;
+          model.phase = "settled";
+          render();
+        }, 650);
+      });
+      document.querySelector("[data-toggle-chrome]").addEventListener("click", (event) => { model.chrome = !model.chrome; event.currentTarget.textContent = model.chrome ? "Hide UI" : "Show UI"; render(); });
+
+      function animate(now) {
+        const railAllowed = (model.state === "live" || model.state === "waiting") && model.exposureMs >= 1000;
+        rail.hidden = !railAllowed;
+        rail.classList.toggle("is-arriving", now < model.arrivalUntil);
+        const elapsed = Math.max(0, now - model.startedAt);
+        if (railAllowed) {
+          railFill.style.width = `${Math.min(1, elapsed / model.exposureMs) * 100}%`;
+        }
+        if (elapsed >= model.exposureMs + 350) presentFrame(now);
+        if (model.chrome && !model.protected && now - model.lastActivity >= 5000) { model.chrome = false; model.popover = false; render(); }
+        requestAnimationFrame(animate);
+      }
+      render();
+      requestAnimationFrame(animate);
+    </script>
+  </body>
+</html>
