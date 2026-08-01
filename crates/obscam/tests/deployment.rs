@@ -46,15 +46,19 @@ fn mediamtx_service_enters_the_dedicated_network_namespace() {
 }
 
 #[test]
-fn mediamtx_control_api_is_readable_only_on_the_private_media_link() {
+fn mediamtx_metrics_are_readable_only_on_the_private_media_link() {
     let config = repository_file("deploy/mediamtx.yml");
     let rules = repository_file("deploy/obscam-media.nft");
 
-    assert_eq!(scalar_values(&config, "api"), ["yes"]);
-    assert_eq!(scalar_values(&config, "apiAddress"), ["169.254.218.2:9997"]);
-    assert!(config.contains("ips: [\"127.0.0.1\", \"::1\", \"169.254.218.1\"]"));
-    assert!(config.contains("- action: api"));
-    assert!(!rules.contains("dport 9997"));
+    assert_eq!(scalar_values(&config, "metrics"), ["yes"]);
+    assert_eq!(
+        scalar_values(&config, "metricsAddress"),
+        ["169.254.218.2:9998"]
+    );
+    assert!(config.contains("ips: [\"169.254.218.1\"]"));
+    assert!(config.contains("- action: metrics"));
+    assert!(!config.contains("- action: api"));
+    assert!(!rules.contains("dport 9998"));
 }
 
 #[test]

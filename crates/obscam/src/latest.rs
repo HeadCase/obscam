@@ -33,6 +33,8 @@ impl LatestFrameMailbox {
 
     /// Copies a complete frame into the sole pending slot, replacing older work.
     ///
+    /// Returns one when an older pending frame was replaced, otherwise zero.
+    ///
     /// # Panics
     ///
     /// Panics after mailbox mutex poisoning or violation of the single-consumer
@@ -99,7 +101,8 @@ impl LatestFrameMailbox {
     /// Starts a new semantic media epoch and fences older pending and uncommitted output.
     ///
     /// Same-epoch source generations do not call this method: they replace only
-    /// pending work. Settings, treatment, stream, and runtime changes do.
+    /// pending work. Settings, treatment, stream, and runtime changes do. The
+    /// returned count is one when pending work was discarded, otherwise zero.
     pub fn begin_new_epoch(&self) -> u64 {
         self.inner.begin_new_epoch()
     }

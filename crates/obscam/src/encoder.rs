@@ -171,20 +171,8 @@ impl FfmpegEncoder {
         repeat: bool,
         timeout: Duration,
     ) -> Result<PublishedFrame, OwnedPublicationError> {
-        match self
-            .child
-            .as_mut()
-            .expect("FFmpeg child is present")
-            .try_wait()
-        {
-            Ok(Some(status)) => {
-                return Err(OwnedPublicationError::new(
-                    frame,
-                    io::Error::other(format!("FFmpeg exited with status {status}")),
-                ));
-            }
-            Ok(None) => {}
-            Err(error) => return Err(OwnedPublicationError::new(frame, error)),
+        if let Err(error) = self.verify_running() {
+            return Err(OwnedPublicationError::new(frame, error));
         }
         if let (Some((correlation, stream_epoch)), Some(metadata)) =
             (&self.correlation, frame.metadata())
@@ -234,6 +222,21 @@ impl FfmpegEncoder {
                     io::Error::new(io::ErrorKind::TimedOut, "FFmpeg publication timed out"),
                 ))
             }
+        }
+    }
+
+    pub(crate) fn verify_running(&mut self) -> io::Result<()> {
+        match self
+            .child
+            .as_mut()
+            .expect("FFmpeg child is present")
+            .try_wait()
+        {
+            Ok(Some(status)) => Err(io::Error::other(format!(
+                "FFmpeg exited with status {status}"
+            ))),
+            Ok(None) => Ok(()),
+            Err(error) => Err(error),
         }
     }
 
@@ -766,6 +769,29 @@ mod tests {
 
         assert_eq!(error.kind(), io::ErrorKind::TimedOut);
         assert_eq!(frame.generation(), generation);
+        fs::remove_dir_all(directory).expect("remove test directory");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn exited_ffmpeg_is_detected_without_waiting_for_a_source_frame() {
+        use std::{fs, os::unix::fs::PermissionsExt};
+
+        use uuid::Uuid;
+
+        let directory = std::env::temp_dir().join(format!("obscam-ffmpeg-exit-{}", Uuid::new_v4()));
+        fs::create_dir(&directory).expect("create test directory");
+        let program = directory.join("fake-ffmpeg");
+        fs::write(&program, "#!/bin/sh\nexit 17\n").expect("write fake FFmpeg");
+        fs::set_permissions(&program, fs::Permissions::from_mode(0o700)).expect("make executable");
+        let mut encoder = FfmpegEncoder::start_owned(&program).expect("start fake FFmpeg");
+        thread::sleep(Duration::from_millis(20));
+
+        let error = encoder
+            .verify_running()
+            .expect_err("exited child must be observed without a frame");
+
+        assert!(error.to_string().contains("17"));
         fs::remove_dir_all(directory).expect("remove test directory");
     }
 

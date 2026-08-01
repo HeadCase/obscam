@@ -31,6 +31,7 @@ export function reduceViewer(state, event) {
     switch (event.type) {
         case "lifecycle": {
             const changedEpoch = event.facts.runtimeEpoch !== state.runtimeEpoch;
+            const mediaRecovered = state.lifecycle?.recovery != null && event.facts.recovery === null;
             next = {
                 ...state,
                 runtimeEpoch: event.facts.runtimeEpoch,
@@ -44,7 +45,7 @@ export function reduceViewer(state, event) {
                 correlationLostAtUnixUs: changedEpoch ? null : state.correlationLostAtUnixUs,
                 awaitingCurrentPresentation: changedEpoch || event.facts.recovery !== null || state.awaitingCurrentPresentation
             };
-            if (changedEpoch) {
+            if (changedEpoch || mediaRecovered) {
                 effects = ["reconnect_media"];
             }
             break;

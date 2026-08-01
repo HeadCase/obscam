@@ -24,7 +24,7 @@ const RAW8_BYTES: usize = WIDTH * HEIGHT;
 const SETTINGS_RECOVERY_RETRY_DELAY: Duration = Duration::from_secs(1);
 const MAX_ENCODER_RECOVERY_DELAY: Duration = Duration::from_secs(5);
 const ENCODER_PUBLICATION_TIMEOUT: Duration = Duration::from_secs(2);
-const RELAY_API_ADDRESS: &str = "169.254.218.2:9997";
+const RELAY_METRICS_ADDRESS: &str = "169.254.218.2:9998";
 const RELAY_PROBE_INTERVAL: Duration = Duration::from_millis(500);
 const RELAY_PROBE_TIMEOUT: Duration = Duration::from_millis(250);
 
@@ -46,6 +46,9 @@ impl EncoderRecoveryBackoff {
                 .min(MAX_ENCODER_RECOVERY_DELAY)
         };
         self.failures = self.failures.saturating_add(1);
+        if delay.is_zero() {
+            return delay;
+        }
         delay
             .saturating_add(Duration::from_millis(jitter_ms))
             .min(MAX_ENCODER_RECOVERY_DELAY)
@@ -162,7 +165,7 @@ fn spawn_relay_observer(runtime: RuntimeState) -> io::Result<thread::JoinHandle<
 }
 
 fn probe_relay() -> bool {
-    let Ok(address) = RELAY_API_ADDRESS.parse::<SocketAddr>() else {
+    let Ok(address) = RELAY_METRICS_ADDRESS.parse::<SocketAddr>() else {
         return false;
     };
     let Ok(mut stream) = TcpStream::connect_timeout(&address, RELAY_PROBE_TIMEOUT) else {
@@ -172,14 +175,29 @@ fn probe_relay() -> bool {
         || stream.set_write_timeout(Some(RELAY_PROBE_TIMEOUT)).is_err()
         || stream
             .write_all(
-                b"GET /v3/paths/get/obscam HTTP/1.1\r\nHost: mediamtx\r\nConnection: close\r\n\r\n",
+                b"GET /metrics?type=paths&path=obscam HTTP/1.1\r\nHost: mediamtx\r\nConnection: close\r\n\r\n",
             )
             .is_err()
     {
         return false;
     }
-    let mut response = Vec::with_capacity(2_048);
-    stream.read_to_end(&mut response).is_ok() && relay_path_is_ready(&response)
+    let mut response = [0_u8; 4_096];
+    let mut length = 0;
+    loop {
+        match stream.read(&mut response[length..]) {
+            Ok(0) => return relay_path_is_ready(&response[..length]),
+            Ok(read) => {
+                length += read;
+                if relay_path_is_ready(&response[..length]) {
+                    return true;
+                }
+                if length == response.len() {
+                    return false;
+                }
+            }
+            Err(_) => return false,
+        }
+    }
 }
 
 fn relay_path_is_ready(response: &[u8]) -> bool {
@@ -189,10 +207,10 @@ fn relay_path_is_ready(response: &[u8]) -> bool {
     if !response.starts_with(b"HTTP/1.1 200 ") {
         return false;
     }
-    serde_json::from_slice::<serde_json::Value>(&response[boundary + 4..]).is_ok_and(|body| {
-        body.get("name").and_then(serde_json::Value::as_str) == Some("obscam")
-            && body.get("ready").and_then(serde_json::Value::as_bool) == Some(true)
-    })
+    response[boundary + 4..]
+        .split(|byte| *byte == b'\n')
+        .map(|line| line.strip_suffix(b"\r").unwrap_or(line))
+        .any(|line| line == b"paths{name=\"obscam\",state=\"ready\"} 1")
 }
 
 fn capture(
@@ -490,9 +508,30 @@ fn spawn_encoder(
                             runtime.record_pipeline_skips(mailbox.begin_new_epoch());
                         }
                     }
+                } else if replace_exited_encoder(&mut encoder, &runtime, &mailbox) {
+                    recovering = true;
                 }
             }
         })
+}
+
+fn replace_exited_encoder(
+    encoder: &mut Option<FfmpegEncoder>,
+    runtime: &RuntimeState,
+    mailbox: &LatestFrameMailbox,
+) -> bool {
+    let Err(error) = encoder
+        .as_mut()
+        .expect("started encoder remains present")
+        .verify_running()
+    else {
+        return false;
+    };
+    runtime.set_encoder_readiness(ComponentReadiness::Unavailable);
+    tracing::error!(%error, "FFmpeg hardware encoder exited; replacing encoder");
+    encoder.take();
+    runtime.record_pipeline_skips(mailbox.begin_new_epoch());
+    true
 }
 
 #[cfg(all(test, feature = "camera-substitute"))]
@@ -505,7 +544,7 @@ mod tests {
     fn repeated_encoder_failures_back_off_with_a_five_second_cap() {
         let mut backoff = EncoderRecoveryBackoff::new();
 
-        assert_eq!(backoff.next_delay_with_jitter(0), Duration::ZERO);
+        assert_eq!(backoff.next_delay_with_jitter(250), Duration::ZERO);
         assert_eq!(
             backoff.next_delay_with_jitter(0),
             Duration::from_millis(250)
@@ -523,8 +562,8 @@ mod tests {
 
     #[test]
     fn relay_probe_accepts_only_a_ready_obscam_path() {
-        let ready = b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\r\n{\"name\":\"obscam\",\"ready\":true}";
-        let unavailable = b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\r\n{\"name\":\"obscam\",\"ready\":false}";
+        let ready = b"HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\n\r\npaths{name=\"obscam\",state=\"ready\"} 1\n";
+        let unavailable = b"HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\n\r\npaths{name=\"obscam\",state=\"notReady\"} 1\n";
 
         assert!(relay_path_is_ready(ready));
         assert!(!relay_path_is_ready(unavailable));
