@@ -24,6 +24,7 @@ table inet obscam_media {
 
     chain input {
         type filter hook input priority -10; policy accept;
+        iifname "obscam-media0" ip saddr 169.254.218.2 tcp sport 9998 ct state established accept
         iifname "obscam-media0" drop
     }
 

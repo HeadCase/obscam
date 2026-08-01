@@ -495,4 +495,33 @@ mod tests {
         );
         assert!(tracker.lookup(99_000).is_none());
     }
+
+    #[test]
+    fn replacing_a_stream_invalidates_every_prior_epoch_mapping() {
+        let state = CorrelationState::new(Uuid::from_u128(1));
+        let first_stream = state.begin_stream();
+        state.submit(
+            first_stream,
+            CapturedFrameMetadata {
+                settings_generation: 0,
+                treatment: Treatment::Monochrome,
+                exposure_completed_at_unix_us: 1,
+            },
+            7,
+            2,
+            false,
+        );
+        state
+            .observe(first_stream, 0, 90_000)
+            .expect("first stream mapping");
+
+        let replacement = state.begin_stream();
+
+        assert!(replacement > first_stream);
+        assert!(state.lookup(first_stream, 90_000).is_none());
+        assert_eq!(
+            state.observe(first_stream, 0, 90_000),
+            Err(CorrelationError::Reset)
+        );
+    }
 }

@@ -46,6 +46,29 @@ fn mediamtx_service_enters_the_dedicated_network_namespace() {
 }
 
 #[test]
+fn mediamtx_metrics_are_readable_only_on_the_private_media_link() {
+    let config = repository_file("deploy/mediamtx.yml");
+    let rules = repository_file("deploy/obscam-media.nft");
+
+    assert_eq!(scalar_values(&config, "metrics"), ["yes"]);
+    assert_eq!(
+        scalar_values(&config, "metricsAddress"),
+        ["169.254.218.2:9998"]
+    );
+    assert!(config.contains("ips: [\"169.254.218.1\"]"));
+    assert!(config.contains("- action: metrics"));
+    assert!(!config.contains("- action: api"));
+    assert!(
+        config.find("ips: [\"169.254.218.1\"]") < config.find("ips: []"),
+        "the specific private metrics identity must precede the public media identity"
+    );
+    assert!(!rules.contains("dport 9998"));
+    assert!(rules.contains(
+        "iifname \"obscam-media0\" ip saddr 169.254.218.2 tcp sport 9998 ct state established accept\n        iifname \"obscam-media0\" drop"
+    ));
+}
+
+#[test]
 fn media_namespace_contains_only_a_private_point_to_point_link() {
     let setup = repository_file("deploy/setup-media-network");
     let unit = repository_file("deploy/systemd/obscam-media-network.service");

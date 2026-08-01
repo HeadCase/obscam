@@ -121,6 +121,7 @@ export function reduceViewer(state: ViewerState, event: ViewerEvent): ViewerTran
   switch (event.type) {
     case "lifecycle": {
       const changedEpoch = event.facts.runtimeEpoch !== state.runtimeEpoch;
+      const mediaRecovered = state.lifecycle?.recovery != null && event.facts.recovery === null;
       next = {
         ...state,
         runtimeEpoch: event.facts.runtimeEpoch,
@@ -132,9 +133,10 @@ export function reduceViewer(state: ViewerState, event: ViewerEvent): ViewerTran
           ? initialPresentationState(event.facts.runtimeEpoch)
           : state.presentation,
         correlationLostAtUnixUs: changedEpoch ? null : state.correlationLostAtUnixUs,
-        awaitingCurrentPresentation: changedEpoch || state.awaitingCurrentPresentation
+        awaitingCurrentPresentation:
+          changedEpoch || event.facts.recovery !== null || state.awaitingCurrentPresentation
       };
-      if (changedEpoch) {
+      if (changedEpoch || mediaRecovered) {
         effects = ["reconnect_media"];
       }
       break;

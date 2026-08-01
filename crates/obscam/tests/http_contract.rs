@@ -26,6 +26,8 @@ async fn unavailable_runtime_contract_omits_unproven_frame_facts() {
     assert_eq!(response["components"]["capture"]["state"], "unavailable");
     assert_eq!(response["components"]["encoder"]["state"], "unavailable");
     assert_eq!(response["components"]["relay"]["state"], "unavailable");
+    assert_eq!(response["mediaRecovery"]["encoderReplacements"], 0);
+    assert_eq!(response["mediaRecovery"]["pipelineSkips"], 0);
 }
 
 #[tokio::test]

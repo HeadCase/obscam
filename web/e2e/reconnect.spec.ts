@@ -2,6 +2,22 @@ import { expect, test } from "@playwright/test";
 
 import { openLiveViewer } from "./support/obs-cam.js";
 
+test("failed WHEP negotiation retries and becomes Live", async ({ page }) => {
+  let attempts = 0;
+  await page.route("**/obscam/whep", async (route) => {
+    attempts += 1;
+    if (attempts === 1) {
+      await route.abort("connectionfailed");
+    } else {
+      await route.continue();
+    }
+  });
+
+  await openLiveViewer(page);
+
+  expect(attempts).toBeGreaterThanOrEqual(2);
+});
+
 test("foreground return reconnects media and becomes Live again", async ({ page }) => {
   let qualityConnections = 0;
   page.on("response", (response) => {

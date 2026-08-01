@@ -1,6 +1,7 @@
 use std::{
     fmt::Display,
-    io,
+    io::{self, Read, Write},
+    net::{SocketAddr, TcpStream},
     path::Path,
     sync::Arc,
     thread,
@@ -21,12 +22,53 @@ use crate::{
 
 const RAW8_BYTES: usize = WIDTH * HEIGHT;
 const SETTINGS_RECOVERY_RETRY_DELAY: Duration = Duration::from_secs(1);
+const MAX_ENCODER_RECOVERY_DELAY: Duration = Duration::from_secs(5);
+const ENCODER_PUBLICATION_TIMEOUT: Duration = Duration::from_secs(2);
+const RELAY_METRICS_ADDRESS: &str = "169.254.218.2:9998";
+const RELAY_PROBE_INTERVAL: Duration = Duration::from_millis(500);
+const RELAY_PROBE_TIMEOUT: Duration = Duration::from_millis(250);
+
+#[derive(Debug, Default)]
+struct EncoderRecoveryBackoff {
+    failures: u32,
+}
+
+impl EncoderRecoveryBackoff {
+    const fn new() -> Self {
+        Self { failures: 0 }
+    }
+
+    fn next_delay_with_jitter(&mut self, jitter_ms: u64) -> Duration {
+        let delay = if self.failures == 0 {
+            Duration::ZERO
+        } else {
+            Duration::from_millis(250_u64.saturating_mul(1_u64 << (self.failures - 1).min(5)))
+                .min(MAX_ENCODER_RECOVERY_DELAY)
+        };
+        self.failures = self.failures.saturating_add(1);
+        if delay.is_zero() {
+            return delay;
+        }
+        delay
+            .saturating_add(Duration::from_millis(jitter_ms))
+            .min(MAX_ENCODER_RECOVERY_DELAY)
+    }
+
+    const fn reset(&mut self) {
+        self.failures = 0;
+    }
+}
+
+fn encoder_recovery_jitter_ms() -> u64 {
+    u64::from(getrandom::u32().unwrap_or(0) % 251)
+}
 
 /// Detached continuously warm capture, processing, and publication workers.
 pub struct MediaPipeline {
     _capture: thread::JoinHandle<()>,
     _processing: thread::JoinHandle<()>,
     _encoder: thread::JoinHandle<()>,
+    _relay: thread::JoinHandle<()>,
 }
 
 impl MediaPipeline {
@@ -71,8 +113,9 @@ impl MediaPipeline {
         ));
         let processed = Arc::new(LatestFrameMailbox::with_epoch_fence(epoch_fence));
         let encoder = spawn_encoder(Arc::clone(&processed), runtime.clone())?;
+        let relay = spawn_relay_observer(runtime.clone())?;
         let processing =
-            spawn_processing(Arc::clone(&raw), Arc::clone(&processed), runtime.settings())?;
+            spawn_processing(Arc::clone(&raw), Arc::clone(&processed), runtime.clone())?;
         let capture = thread::Builder::new()
             .name(capture_thread_name.into())
             .spawn(move || match connect() {
@@ -87,8 +130,87 @@ impl MediaPipeline {
             _capture: capture,
             _processing: processing,
             _encoder: encoder,
+            _relay: relay,
         })
     }
+}
+
+fn spawn_relay_observer(runtime: RuntimeState) -> io::Result<thread::JoinHandle<()>> {
+    thread::Builder::new()
+        .name("obscam-relay-observer".into())
+        .spawn(move || {
+            let mut previous = None;
+            loop {
+                let ready = probe_relay();
+                runtime.set_relay_readiness(if ready {
+                    ComponentReadiness::Ready
+                } else {
+                    ComponentReadiness::Unavailable
+                });
+                if previous != Some(ready) {
+                    if ready {
+                        tracing::info!(
+                            "MediaMTX relay path is ready; RTP publication is available"
+                        );
+                    } else {
+                        tracing::warn!(
+                            "MediaMTX relay path is unavailable; RTP publication continues"
+                        );
+                    }
+                    previous = Some(ready);
+                }
+                thread::sleep(RELAY_PROBE_INTERVAL);
+            }
+        })
+}
+
+fn probe_relay() -> bool {
+    let Ok(address) = RELAY_METRICS_ADDRESS.parse::<SocketAddr>() else {
+        return false;
+    };
+    let Ok(mut stream) = TcpStream::connect_timeout(&address, RELAY_PROBE_TIMEOUT) else {
+        return false;
+    };
+    if stream.set_read_timeout(Some(RELAY_PROBE_TIMEOUT)).is_err()
+        || stream.set_write_timeout(Some(RELAY_PROBE_TIMEOUT)).is_err()
+        || stream
+            .write_all(
+                b"GET /metrics?type=paths&path=obscam HTTP/1.1\r\nHost: mediamtx\r\nConnection: close\r\n\r\n",
+            )
+            .is_err()
+    {
+        return false;
+    }
+    let mut response = [0_u8; 4_096];
+    let mut length = 0;
+    loop {
+        match stream.read(&mut response[length..]) {
+            Ok(0) => return relay_path_is_ready(&response[..length]),
+            Ok(read) => {
+                length += read;
+                if relay_path_is_ready(&response[..length]) {
+                    return true;
+                }
+                if length == response.len() {
+                    return false;
+                }
+            }
+            Err(_) => return false,
+        }
+    }
+}
+
+fn relay_path_is_ready(response: &[u8]) -> bool {
+    let Some(boundary) = response.windows(4).position(|window| window == b"\r\n\r\n") else {
+        return false;
+    };
+    if !response.starts_with(b"HTTP/1.1 200 ") {
+        return false;
+    }
+    response[boundary + 4..]
+        .split(|byte| *byte == b'\n')
+        .map(|line| line.strip_suffix(b"\r").unwrap_or(line))
+        .any(|line| line == b"paths{name=\"obscam\",state=\"ready\"} 1")
 }
 
 fn capture(
@@ -143,7 +265,7 @@ fn capture(
         match source.capture_next(100) {
             Ok(frame) => {
                 let applied = settings.snapshot().applied();
-                raw.publish_with_metadata(
+                let skipped = raw.publish_with_metadata(
                     epoch,
                     frame.generation(),
                     frame.data(),
@@ -153,6 +275,7 @@ fn capture(
                         exposure_completed_at_unix_us: unix_time_us(),
                     }),
                 );
+                runtime.record_pipeline_skips(skipped);
                 capture_in_progress = false;
             }
             Err(CaptureError::Timeout) => {}
@@ -246,11 +369,12 @@ fn restore_applied_settings(
 fn spawn_processing(
     raw: Arc<LatestBufferMailbox>,
     processed: Arc<LatestFrameMailbox>,
-    settings: crate::SettingsController,
+    runtime: RuntimeState,
 ) -> io::Result<thread::JoinHandle<()>> {
     thread::Builder::new()
         .name("obscam-processing".into())
         .spawn(move || {
+            let settings = runtime.settings();
             let mut processor = MonochromeProcessor::new();
             let mut colour_processor = ColourProcessor::new();
             loop {
@@ -266,11 +390,12 @@ fn spawn_processing(
                     }
                 };
                 if raw.is_current_epoch(epoch) {
-                    if let Some(metadata) = source.metadata() {
-                        processed.publish_captured(epoch, &output, metadata);
+                    let skipped = if let Some(metadata) = source.metadata() {
+                        processed.publish_captured(epoch, &output, metadata)
                     } else {
-                        processed.publish_in_epoch(epoch, &output);
-                    }
+                        processed.publish_in_epoch(epoch, &output)
+                    };
+                    runtime.record_pipeline_skips(skipped);
                 }
                 raw.recycle(source);
             }
@@ -295,61 +420,104 @@ fn spawn_encoder(
             let correlation = runtime.correlation();
             let mut encoder = None;
             let mut completed = None;
+            let mut recovering = false;
+            let mut backoff = EncoderRecoveryBackoff::new();
             loop {
+                if encoder.is_none() {
+                    if recovering {
+                        thread::sleep(
+                            backoff.next_delay_with_jitter(encoder_recovery_jitter_ms()),
+                        );
+                    }
+                    match FfmpegEncoder::start_correlated(
+                        Path::new("ffmpeg"),
+                        correlation.clone(),
+                    ) {
+                        Ok(replacement) => {
+                            if recovering {
+                                runtime.record_encoder_replacement();
+                            }
+                            encoder = Some(replacement);
+                        }
+                        Err(error) => {
+                            runtime.set_encoder_readiness(ComponentReadiness::Unavailable);
+                            tracing::error!(%error, "qualified FFmpeg hardware encoder unavailable; retrying");
+                            recovering = true;
+                            continue;
+                        }
+                    }
+                }
                 let next = mailbox.wait_take(if completed.is_some() {
                     Duration::from_millis(500)
                 } else {
                     Duration::from_secs(1)
                 });
-                if let Some(frame) = next {
+                let publication = if let Some(frame) = next {
                     if let Some(previous) = completed.take() {
                         mailbox.recycle(previous);
                     }
-                    if encoder.is_none() {
-                        encoder = match FfmpegEncoder::start_correlated(
-                            Path::new("ffmpeg"),
-                            correlation.clone(),
-                        ) {
-                            Ok(encoder) => Some(encoder),
-                            Err(error) => {
-                                runtime.set_encoder_readiness(ComponentReadiness::Unavailable);
-                                tracing::error!(%error, "qualified FFmpeg hardware encoder unavailable");
-                                mailbox.recycle(frame);
-                                return;
-                            }
-                        };
-                    }
-                    let publication = mailbox.commit_if_current(&frame, |current| {
+                    let publication = mailbox.commit_owned_if_current(frame, |current| {
                         encoder
                             .as_mut()
                             .expect("current media epoch has an encoder")
-                            .publish(current)
+                            .publish_owned(current, false, ENCODER_PUBLICATION_TIMEOUT)
                     });
-                    let Some(publication) = publication else {
-                        mailbox.recycle(frame);
-                        continue;
-                    };
-                    if let Err(error) = publication {
-                        runtime.set_encoder_readiness(ComponentReadiness::Unavailable);
-                        tracing::error!(%error, "FFmpeg hardware publication stopped");
-                        mailbox.recycle(frame);
-                        return;
+                    match publication {
+                        Ok(publication) => publication,
+                        Err(frame) => {
+                            mailbox.recycle(frame);
+                            continue;
+                        }
                     }
-                    runtime.set_encoder_readiness(ComponentReadiness::Ready);
-                    completed = Some(frame);
-                } else if let Some(frame) = completed.as_ref() {
-                    let publication = encoder
+                } else if let Some(frame) = completed.take() {
+                    encoder
                         .as_mut()
                         .expect("completed frame has an encoder")
-                        .repeat(frame);
-                    if let Err(error) = publication {
+                        .publish_owned(frame, true, ENCODER_PUBLICATION_TIMEOUT)
+                } else {
+                    if replace_exited_encoder(&mut encoder, &runtime, &mailbox) {
+                        recovering = true;
+                    }
+                    continue;
+                };
+                match publication {
+                    Ok(frame) => {
+                        runtime.set_encoder_readiness(ComponentReadiness::Ready);
+                        completed = Some(frame);
+                        recovering = false;
+                        backoff.reset();
+                    }
+                    Err(failure) => {
+                        let (frame, error) = failure.into_parts();
                         runtime.set_encoder_readiness(ComponentReadiness::Unavailable);
-                        tracing::error!(%error, "FFmpeg hardware repeat stopped");
-                        return;
+                        tracing::error!(%error, "FFmpeg hardware publication stopped; replacing encoder");
+                        completed = Some(frame);
+                        encoder.take();
+                        recovering = true;
+                        runtime.record_pipeline_skips(mailbox.discard_pending());
                     }
                 }
             }
         })
+}
+
+fn replace_exited_encoder(
+    encoder: &mut Option<FfmpegEncoder>,
+    runtime: &RuntimeState,
+    mailbox: &LatestFrameMailbox,
+) -> bool {
+    let Err(error) = encoder
+        .as_mut()
+        .expect("started encoder remains present")
+        .verify_running()
+    else {
+        return false;
+    };
+    runtime.set_encoder_readiness(ComponentReadiness::Unavailable);
+    tracing::error!(%error, "FFmpeg hardware encoder exited; replacing encoder");
+    encoder.take();
+    runtime.record_pipeline_skips(mailbox.discard_pending());
+    true
 }
 
 #[cfg(all(test, feature = "camera-substitute"))]
@@ -357,6 +525,36 @@ mod tests {
     use super::*;
     use crate::{CameraSettings, SettingsController};
     use zwo_asi::{DeterministicCamera, DeterministicScenario, Settings};
+
+    #[test]
+    fn repeated_encoder_failures_back_off_with_a_five_second_cap() {
+        let mut backoff = EncoderRecoveryBackoff::new();
+
+        assert_eq!(backoff.next_delay_with_jitter(250), Duration::ZERO);
+        assert_eq!(
+            backoff.next_delay_with_jitter(0),
+            Duration::from_millis(250)
+        );
+        assert_eq!(
+            backoff.next_delay_with_jitter(0),
+            Duration::from_millis(500)
+        );
+        assert_eq!(backoff.next_delay_with_jitter(0), Duration::from_secs(1));
+        assert_eq!(backoff.next_delay_with_jitter(0), Duration::from_secs(2));
+        assert_eq!(backoff.next_delay_with_jitter(0), Duration::from_secs(4));
+        assert_eq!(backoff.next_delay_with_jitter(0), Duration::from_secs(5));
+        assert_eq!(backoff.next_delay_with_jitter(0), Duration::from_secs(5));
+    }
+
+    #[test]
+    fn relay_probe_accepts_only_a_ready_obscam_path() {
+        let ready = b"HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\n\r\npaths{name=\"obscam\",state=\"ready\"} 1\n";
+        let unavailable = b"HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\n\r\npaths{name=\"obscam\",state=\"notReady\"} 1\n";
+
+        assert!(relay_path_is_ready(ready));
+        assert!(!relay_path_is_ready(unavailable));
+        assert!(!relay_path_is_ready(b"HTTP/1.1 404 Not Found\r\n\r\n{}"));
+    }
 
     #[test]
     fn pending_tuple_runs_the_complete_camera_and_generation_transition() {

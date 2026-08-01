@@ -57,6 +57,13 @@ custom media stack or allow browser testing to inspect or advertise `wg1`.
   A sandboxed authentication failure is not authoritative: rerun
   `gh auth status` outside the sandbox before diagnosing credentials. Never run
   `gh auth login` or `gh auth refresh` solely because a sandboxed check failed.
+- All Git fetch, pull, and push operations must use the repository's configured
+  SSH remote. Never rewrite GitHub remotes, substitute HTTPS URLs, or use
+  token-authenticated HTTPS as a fallback. Never run `gh auth setup-git`. If SSH
+  authentication fails outside the sandbox, stop and report the failure; do not
+  change authentication or transport configuration. `gh` may still be used
+  outside the sandbox for GitHub API operations such as creating pull requests,
+  but Git object transfer remains SSH-only.
 
 ## Response Style
 

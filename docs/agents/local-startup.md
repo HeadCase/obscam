@@ -18,7 +18,9 @@ service integration.
 - Its SHA-256 must match `deploy/mediamtx-linux-arm64.sha256`.
 - `/etc/obscam/mediamtx.yml` is the installed host configuration. It matches
   the checked production media path while advertising only the permitted
-  `wg0` and LAN addresses.
+  `wg0` and LAN addresses. Its read-only metrics endpoint listens only on the
+  namespace-private `169.254.218.2:9998` address so ObsCam can observe exact
+  relay-path readiness.
 - `/etc/obscam/obscam-media.nft` and
   `/usr/local/libexec/obscam/setup-media-network` match the checked-in namespace
   boundary. IPv4 forwarding must already be enabled; the helper fails closed
@@ -128,9 +130,11 @@ curl --fail http://127.0.0.1:8080/api/v1/runtime
 
 MediaMTX should log that path `obscam` is online with one H.264 track. A
 browser WHEP connection should return HTTP 201 and display native 1920×1080
-video. The runtime relay field remains `not_observed` until a later accepted
-relay-readiness contract replaces that bootstrap limitation; MediaMTX's stream
-log and the browser-facing WHEP check are the current relay evidence.
+video. `/api/v1/runtime` should report the relay ready only after MediaMTX's
+private metrics endpoint reports the `obscam` path ready. Stopping MediaMTX must make
+the relay unavailable without changing capture, encoder, settings, or lease
+state; restarting it must restore relay readiness while the continuing RTP
+publication establishes a fresh decodable GOP boundary.
 
 ## Stop
 

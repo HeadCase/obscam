@@ -29,6 +29,7 @@ pub(crate) struct RuntimeSnapshot {
     pub(crate) runtime_epoch: Uuid,
     media: MediaDescriptor,
     pub(crate) components: Components,
+    media_recovery: MediaRecoveryCounters,
     latest_frame: Option<LatestFrame>,
     capture: Option<CaptureProgress>,
 }
@@ -39,6 +40,7 @@ pub(crate) struct LifecycleSnapshot {
     pub(crate) runtime_epoch: Uuid,
     pub(crate) components: Components,
     pub(crate) recovery: Option<RecoveryComponent>,
+    media_recovery: MediaRecoveryCounters,
     pub(crate) capture: Option<CaptureProgress>,
 }
 
@@ -47,6 +49,14 @@ pub(crate) struct LifecycleSnapshot {
 pub(crate) enum RecoveryComponent {
     Capture,
     Encoder,
+    Relay,
+}
+
+#[derive(Clone, Copy, Debug, Default, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct MediaRecoveryCounters {
+    encoder_replacements: u64,
+    pipeline_skips: u64,
 }
 
 #[derive(Clone, Copy, Debug, Serialize)]
@@ -97,6 +107,7 @@ impl RuntimeState {
                     encoder: ComponentStatus::from_readiness(encoder, UnavailableReason::NoFrame),
                     relay: ComponentStatus::from_readiness(relay, UnavailableReason::NotObserved),
                 },
+                media_recovery: MediaRecoveryCounters::default(),
                 latest_frame: None,
                 capture: None,
             })),
@@ -142,6 +153,45 @@ impl RuntimeState {
             .expect("runtime state lock poisoned")
             .components
             .encoder = ComponentStatus::from_readiness(readiness, UnavailableReason::NoFrame);
+        self.notify_lifecycle();
+    }
+
+    pub(crate) fn set_relay_readiness(&self, readiness: ComponentReadiness) {
+        let status = ComponentStatus::from_readiness(readiness, UnavailableReason::NotObserved);
+        let changed = {
+            let mut snapshot = self.snapshot.write().expect("runtime state lock poisoned");
+            if snapshot.components.relay == status {
+                false
+            } else {
+                snapshot.components.relay = status;
+                true
+            }
+        };
+        if changed {
+            self.notify_lifecycle();
+        }
+    }
+
+    pub(crate) fn record_encoder_replacement(&self) {
+        let mut snapshot = self.snapshot.write().expect("runtime state lock poisoned");
+        snapshot.media_recovery.encoder_replacements = snapshot
+            .media_recovery
+            .encoder_replacements
+            .saturating_add(1);
+        drop(snapshot);
+        self.notify_lifecycle();
+    }
+
+    pub(crate) fn record_pipeline_skips(&self, skipped: u64) {
+        if skipped == 0 {
+            return;
+        }
+        let mut snapshot = self.snapshot.write().expect("runtime state lock poisoned");
+        snapshot.media_recovery.pipeline_skips = snapshot
+            .media_recovery
+            .pipeline_skips
+            .saturating_add(skipped);
+        drop(snapshot);
         self.notify_lifecycle();
     }
 
@@ -193,6 +243,7 @@ impl RuntimeState {
             runtime_epoch: snapshot.runtime_epoch,
             recovery: snapshot.components.recovery(),
             components: snapshot.components,
+            media_recovery: snapshot.media_recovery,
             capture: snapshot.capture,
         }
     }
@@ -240,13 +291,15 @@ impl Components {
             Some(RecoveryComponent::Capture)
         } else if matches!(self.encoder, ComponentStatus::Unavailable { .. }) {
             Some(RecoveryComponent::Encoder)
+        } else if matches!(self.relay, ComponentStatus::Unavailable { .. }) {
+            Some(RecoveryComponent::Relay)
         } else {
             None
         }
     }
 }
 
-#[derive(Clone, Copy, Debug, Serialize)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
 #[serde(tag = "state", rename_all = "snake_case")]
 enum ComponentStatus {
     Ready,
@@ -267,7 +320,7 @@ impl ComponentStatus {
     }
 }
 
-#[derive(Clone, Copy, Debug, Serialize)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
 enum UnavailableReason {
     NoCameraSource,
@@ -278,4 +331,59 @@ enum UnavailableReason {
 #[derive(Clone, Debug, Serialize)]
 struct LatestFrame {
     source_generation: u64,
+}
+
+#[cfg(test)]
+mod tests {
+    use std::time::Instant;
+
+    use super::*;
+
+    #[test]
+    fn media_recovery_counters_and_relay_state_advance_independently() {
+        let config =
+            Config::parse("127.0.0.1:8080", "8889", "/obscam/whep").expect("test configuration");
+        let runtime = RuntimeState::with_readiness(
+            Uuid::from_u128(1),
+            &config,
+            ComponentReadiness::Ready,
+            ComponentReadiness::Ready,
+            ComponentReadiness::Unavailable,
+        );
+
+        runtime.record_encoder_replacement();
+        runtime.record_pipeline_skips(2);
+        runtime.set_relay_readiness(ComponentReadiness::Ready);
+
+        let snapshot = runtime.snapshot();
+        assert_eq!(snapshot.media_recovery.encoder_replacements, 1);
+        assert_eq!(snapshot.media_recovery.pipeline_skips, 2);
+        assert_eq!(snapshot.components.relay, ComponentStatus::Ready);
+        assert_eq!(snapshot.components.capture, ComponentStatus::Ready);
+    }
+
+    #[test]
+    fn encoder_and_relay_recovery_preserve_the_control_lease() {
+        let config =
+            Config::parse("127.0.0.1:8080", "8889", "/obscam/whep").expect("test configuration");
+        let runtime = RuntimeState::with_readiness(
+            Uuid::from_u128(1),
+            &config,
+            ComponentReadiness::Ready,
+            ComponentReadiness::Ready,
+            ComponentReadiness::Ready,
+        );
+        let now = Instant::now();
+        let grant = runtime.authority().take(now);
+
+        runtime.set_encoder_readiness(ComponentReadiness::Unavailable);
+        runtime.set_relay_readiness(ComponentReadiness::Unavailable);
+
+        assert_eq!(
+            runtime
+                .authority()
+                .accept(&grant.credentials(), now, || "accepted"),
+            Ok("accepted")
+        );
+    }
 }

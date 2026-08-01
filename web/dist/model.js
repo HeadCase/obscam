@@ -26,6 +26,7 @@ export function parseRuntimeContract(value) {
         throw new Error("invalid media descriptor");
     }
     const components = parseRuntimeComponents(value.components);
+    const mediaRecovery = parseMediaRecoveryCounters(value.mediaRecovery);
     if (value.latestFrame !== null) {
         throw new Error("untrusted frame contract");
     }
@@ -37,8 +38,23 @@ export function parseRuntimeContract(value) {
             whepPath: value.media.whepPath
         },
         components,
+        mediaRecovery,
         latestFrame: null
     };
+}
+function parseMediaRecoveryCounters(value) {
+    if (!isRecord(value) ||
+        !nonNegativeSafeInteger(value.encoderReplacements) ||
+        !nonNegativeSafeInteger(value.pipelineSkips)) {
+        throw new Error("invalid media recovery counters");
+    }
+    return {
+        encoderReplacements: value.encoderReplacements,
+        pipelineSkips: value.pipelineSkips
+    };
+}
+function nonNegativeSafeInteger(value) {
+    return typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
 }
 /** Validates and normalizes independently reported component facts. */
 export function parseRuntimeComponents(value) {

@@ -6,7 +6,8 @@ export interface WhepSession {
 /** Negotiates a receive-only WebRTC video track through WHEP. */
 export async function startWhep(
   video: HTMLVideoElement,
-  endpoint: string
+  endpoint: string,
+  onFailure: () => void
 ): Promise<WhepSession> {
   const peer = new RTCPeerConnection();
   peer.addTransceiver("video", { direction: "recvonly" });
@@ -37,9 +38,18 @@ export async function startWhep(
     }
     const sessionUrl = new URL(resource, endpoint).toString();
     await peer.setRemoteDescription({ type: "answer", sdp: await response.text() });
+    let closed = false;
+    let failureReported = false;
+    peer.addEventListener("connectionstatechange", () => {
+      if (!closed && !failureReported && peer.connectionState === "failed") {
+        failureReported = true;
+        onFailure();
+      }
+    });
 
     return {
       async close(): Promise<void> {
+        closed = true;
         peer.close();
         try {
           await fetch(sessionUrl, { method: "DELETE" });

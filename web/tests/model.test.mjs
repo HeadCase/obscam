@@ -16,6 +16,7 @@ const unavailableRuntime = {
     encoder: { state: "unavailable", reason: "no_frame" },
     relay: { state: "unavailable", reason: "not_observed" }
   },
+  mediaRecovery: { encoderReplacements: 0, pipelineSkips: 0 },
   latestFrame: null
 };
 
@@ -28,6 +29,7 @@ test("absent trustworthy frame facts derive Unavailable without invented metrics
   assert.equal(viewer.captureCadenceHz, undefined);
   assert.equal(viewer.sourceGeneration, undefined);
   assert.equal(viewer.visibleLatencyMs, undefined);
+  assert.deepEqual(runtime.mediaRecovery, { encoderReplacements: 0, pipelineSkips: 0 });
 });
 
 test("malformed runtime input fails closed", () => {
@@ -38,6 +40,10 @@ test("malformed runtime input fails closed", () => {
   assert.throws(
     () => parseRuntimeContract({ ...unavailableRuntime, latestFrame: { sourceGeneration: 12 } }),
     /untrusted frame contract/
+  );
+  assert.throws(
+    () => parseRuntimeContract({ ...unavailableRuntime, mediaRecovery: { encoderReplacements: -1, pipelineSkips: 0 } }),
+    /invalid media recovery counters/
   );
   for (const whepPath of [
     "/obscam/whep?token=guess",

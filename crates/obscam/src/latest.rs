@@ -33,16 +33,18 @@ impl LatestFrameMailbox {
 
     /// Copies a complete frame into the sole pending slot, replacing older work.
     ///
+    /// Returns one when an older pending frame was replaced, otherwise zero.
+    ///
     /// # Panics
     ///
     /// Panics after mailbox mutex poisoning or violation of the single-consumer
     /// buffer-ownership invariant; either condition is an internal invariant failure.
-    pub fn publish(&self, frame: &MonochromeFrame<'_>) {
-        self.inner.publish_current(frame.generation(), frame.data());
+    pub fn publish(&self, frame: &MonochromeFrame<'_>) -> u64 {
+        self.inner.publish_current(frame.generation(), frame.data())
     }
 
-    pub(crate) fn publish_in_epoch(&self, epoch: MediaEpoch, frame: &MonochromeFrame<'_>) {
-        self.inner.publish(epoch, frame.generation(), frame.data());
+    pub(crate) fn publish_in_epoch(&self, epoch: MediaEpoch, frame: &MonochromeFrame<'_>) -> u64 {
+        self.inner.publish(epoch, frame.generation(), frame.data())
     }
 
     pub(crate) fn publish_captured(
@@ -50,18 +52,21 @@ impl LatestFrameMailbox {
         epoch: MediaEpoch,
         frame: &MonochromeFrame<'_>,
         metadata: CapturedFrameMetadata,
-    ) {
+    ) -> u64 {
         self.inner
-            .publish_with_metadata(epoch, frame.generation(), frame.data(), Some(metadata));
+            .publish_with_metadata(epoch, frame.generation(), frame.data(), Some(metadata))
     }
 
-    pub(crate) fn commit_if_current<T>(
+    pub(crate) fn commit_owned_if_current<T>(
         &self,
-        frame: &PublishedFrame,
-        commit: impl FnOnce(&PublishedFrame) -> T,
-    ) -> Option<T> {
-        self.inner
-            .commit_if_current(frame.0.epoch(), || commit(frame))
+        frame: PublishedFrame,
+        commit: impl FnOnce(PublishedFrame) -> T,
+    ) -> Result<T, PublishedFrame> {
+        if self.inner.is_current(frame.0.identity) {
+            Ok(commit(frame))
+        } else {
+            Err(frame)
+        }
     }
 
     /// Takes the newest pending frame, leaving no queued work.
@@ -96,9 +101,14 @@ impl LatestFrameMailbox {
     /// Starts a new semantic media epoch and fences older pending and uncommitted output.
     ///
     /// Same-epoch source generations do not call this method: they replace only
-    /// pending work. Settings, treatment, stream, and runtime changes do.
-    pub fn begin_new_epoch(&self) {
-        self.inner.begin_new_epoch();
+    /// pending work. Settings, treatment, stream, and runtime changes do. The
+    /// returned count is one when pending work was discarded, otherwise zero.
+    pub fn begin_new_epoch(&self) -> u64 {
+        self.inner.begin_new_epoch()
+    }
+
+    pub(crate) fn discard_pending(&self) -> u64 {
+        self.inner.discard_pending()
     }
 
     /// Reports whether claimed output still belongs to the current semantic epoch.
@@ -141,12 +151,12 @@ impl LatestBufferMailbox {
         self.epoch_fence.current()
     }
 
-    pub(crate) fn publish_current(&self, generation: u64, data: &[u8]) {
-        self.publish(self.current_epoch(), generation, data);
+    pub(crate) fn publish_current(&self, generation: u64, data: &[u8]) -> u64 {
+        self.publish(self.current_epoch(), generation, data)
     }
 
-    pub(crate) fn publish(&self, epoch: MediaEpoch, generation: u64, data: &[u8]) {
-        self.publish_with_metadata(epoch, generation, data, None);
+    pub(crate) fn publish(&self, epoch: MediaEpoch, generation: u64, data: &[u8]) -> u64 {
+        self.publish_with_metadata(epoch, generation, data, None)
     }
 
     pub(crate) fn publish_with_metadata(
@@ -155,19 +165,20 @@ impl LatestBufferMailbox {
         generation: u64,
         data: &[u8],
         metadata: Option<CapturedFrameMetadata>,
-    ) {
+    ) -> u64 {
         let identity = FrameIdentity { epoch, generation };
         if !self.epoch_fence.is_current(epoch) {
-            return;
+            return 0;
         }
 
         let mut state = self.state.lock().expect("frame mailbox mutex poisoned");
         if !self.epoch_fence.is_current(epoch)
             || state.newest.is_some_and(|newest| identity <= newest)
         {
-            return;
+            return 0;
         }
 
+        let skipped = u64::from(state.pending.is_some());
         let mut pending = state.pending.take().unwrap_or_else(|| {
             state
                 .spare
@@ -180,6 +191,7 @@ impl LatestBufferMailbox {
         state.pending = Some(pending);
         state.newest = Some(identity);
         self.available.notify_one();
+        skipped
     }
 
     pub(crate) fn take(&self) -> Option<BufferGeneration> {
@@ -214,12 +226,23 @@ impl LatestBufferMailbox {
             .push(frame);
     }
 
-    pub(crate) fn begin_new_epoch(&self) {
+    pub(crate) fn begin_new_epoch(&self) -> u64 {
         let mut state = self.state.lock().expect("frame mailbox mutex poisoned");
         self.epoch_fence.advance();
+        Self::discard_pending_locked(&mut state)
+    }
+
+    pub(crate) fn discard_pending(&self) -> u64 {
+        let mut state = self.state.lock().expect("frame mailbox mutex poisoned");
+        Self::discard_pending_locked(&mut state)
+    }
+
+    fn discard_pending_locked(state: &mut State) -> u64 {
+        let discarded = u64::from(state.pending.is_some());
         if let Some(pending) = state.pending.take() {
             state.spare.push(pending);
         }
+        discarded
     }
 
     pub(crate) fn begin_epoch(&self, generation: u64) {
@@ -238,6 +261,7 @@ impl LatestBufferMailbox {
         self.epoch_fence.is_current(epoch)
     }
 
+    #[cfg(test)]
     fn commit_if_current<T>(&self, epoch: MediaEpoch, commit: impl FnOnce() -> T) -> Option<T> {
         self.epoch_fence.commit_if_current(epoch, commit)
     }
@@ -346,6 +370,7 @@ impl EpochFence {
         self.current() == epoch
     }
 
+    #[cfg(test)]
     fn commit_if_current<T>(&self, epoch: MediaEpoch, commit: impl FnOnce() -> T) -> Option<T> {
         // This load is the encoder publication's commit point. An epoch that
         // advances afterward cannot relabel the already-committed frame, but
@@ -365,14 +390,16 @@ mod tests {
         mailbox.publish(epoch, 1, &[1]);
         let claimed = mailbox.take().expect("first generation is claimed");
 
+        let mut skips = 0;
         for generation in 2..=100 {
-            mailbox.publish(
+            skips += mailbox.publish(
                 epoch,
                 generation,
                 &[u8::try_from(generation).expect("bounded")],
             );
         }
 
+        assert_eq!(skips, 98);
         assert!(mailbox.is_current_epoch(claimed.epoch()));
         let pending = mailbox.take().expect("one pending generation remains");
         assert_eq!(pending.generation(), 100);
@@ -403,6 +430,25 @@ mod tests {
                 .expect("new epoch can restart at generation one")
                 .data(),
             &[3]
+        );
+    }
+
+    #[test]
+    fn discarding_encoder_pending_work_preserves_the_shared_capture_epoch() {
+        let epoch_fence = EpochFence::new();
+        let raw = LatestBufferMailbox::with_epoch_fence(1, epoch_fence.clone());
+        let processed = LatestBufferMailbox::with_epoch_fence(1, epoch_fence);
+        let epoch = raw.current_epoch();
+        raw.publish(epoch, 1, &[1]);
+        let in_flight_capture = raw.take().expect("capture work is in flight");
+        processed.publish(epoch, 1, &[1]);
+
+        assert_eq!(processed.discard_pending(), 1);
+        assert!(raw.is_current_epoch(in_flight_capture.epoch()));
+        raw.publish(epoch, 2, &[2]);
+        assert_eq!(
+            raw.take().expect("capture epoch remains valid").data(),
+            &[2]
         );
     }
 
