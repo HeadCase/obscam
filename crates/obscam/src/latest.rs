@@ -107,6 +107,10 @@ impl LatestFrameMailbox {
         self.inner.begin_new_epoch()
     }
 
+    pub(crate) fn discard_pending(&self) -> u64 {
+        self.inner.discard_pending()
+    }
+
     /// Reports whether claimed output still belongs to the current semantic epoch.
     #[must_use]
     pub fn is_current(&self, frame: &PublishedFrame) -> bool {
@@ -225,6 +229,15 @@ impl LatestBufferMailbox {
     pub(crate) fn begin_new_epoch(&self) -> u64 {
         let mut state = self.state.lock().expect("frame mailbox mutex poisoned");
         self.epoch_fence.advance();
+        Self::discard_pending_locked(&mut state)
+    }
+
+    pub(crate) fn discard_pending(&self) -> u64 {
+        let mut state = self.state.lock().expect("frame mailbox mutex poisoned");
+        Self::discard_pending_locked(&mut state)
+    }
+
+    fn discard_pending_locked(state: &mut State) -> u64 {
         let discarded = u64::from(state.pending.is_some());
         if let Some(pending) = state.pending.take() {
             state.spare.push(pending);
@@ -417,6 +430,25 @@ mod tests {
                 .expect("new epoch can restart at generation one")
                 .data(),
             &[3]
+        );
+    }
+
+    #[test]
+    fn discarding_encoder_pending_work_preserves_the_shared_capture_epoch() {
+        let epoch_fence = EpochFence::new();
+        let raw = LatestBufferMailbox::with_epoch_fence(1, epoch_fence.clone());
+        let processed = LatestBufferMailbox::with_epoch_fence(1, epoch_fence);
+        let epoch = raw.current_epoch();
+        raw.publish(epoch, 1, &[1]);
+        let in_flight_capture = raw.take().expect("capture work is in flight");
+        processed.publish(epoch, 1, &[1]);
+
+        assert_eq!(processed.discard_pending(), 1);
+        assert!(raw.is_current_epoch(in_flight_capture.epoch()));
+        raw.publish(epoch, 2, &[2]);
+        assert_eq!(
+            raw.take().expect("capture epoch remains valid").data(),
+            &[2]
         );
     }
 

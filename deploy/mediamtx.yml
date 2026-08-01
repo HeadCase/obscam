@@ -8,16 +8,16 @@ metricsAddress: 169.254.218.2:9998
 authInternalUsers:
   - user: any
     pass:
+    ips: ["169.254.218.1"]
+    permissions:
+      - action: metrics
+  - user: any
+    pass:
     ips: []
     permissions:
       - action: publish
       - action: read
       - action: playback
-  - user: any
-    pass:
-    ips: ["169.254.218.1"]
-    permissions:
-      - action: metrics
 
 rtsp: no
 

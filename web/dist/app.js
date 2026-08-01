@@ -86,7 +86,12 @@ async function boot() {
                 console.error("ObsCam service-quality connection failed", error);
             }
             try {
-                const session = await startWhep(video, deriveWhepUrl(runtime.media, window.location.href));
+                const session = await startWhep(video, deriveWhepUrl(runtime.media, window.location.href), () => {
+                    if (attempt !== mediaAttempt)
+                        return;
+                    dispatch({ type: "media_disconnected" });
+                    void connectMedia(true);
+                });
                 if (attempt !== mediaAttempt) {
                     await session.close();
                     return;

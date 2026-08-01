@@ -452,7 +452,7 @@ fn spawn_encoder(
                 } else {
                     Duration::from_secs(1)
                 });
-                if let Some(frame) = next {
+                let publication = if let Some(frame) = next {
                     if let Some(previous) = completed.take() {
                         mailbox.recycle(previous);
                     }
@@ -462,54 +462,40 @@ fn spawn_encoder(
                             .expect("current media epoch has an encoder")
                             .publish_owned(current, false, ENCODER_PUBLICATION_TIMEOUT)
                     });
-                    let publication = match publication {
+                    match publication {
                         Ok(publication) => publication,
                         Err(frame) => {
                             mailbox.recycle(frame);
                             continue;
                         }
-                    };
-                    match publication {
-                        Ok(frame) => {
-                            runtime.set_encoder_readiness(ComponentReadiness::Ready);
-                            completed = Some(frame);
-                            recovering = false;
-                            backoff.reset();
-                        }
-                        Err(failure) => {
-                            let (frame, error) = failure.into_parts();
-                            runtime.set_encoder_readiness(ComponentReadiness::Unavailable);
-                            tracing::error!(%error, "FFmpeg hardware publication stopped; replacing encoder");
-                            completed = Some(frame);
-                            encoder.take();
-                            recovering = true;
-                            runtime.record_pipeline_skips(mailbox.begin_new_epoch());
-                        }
                     }
                 } else if let Some(frame) = completed.take() {
-                    match encoder
+                    encoder
                         .as_mut()
                         .expect("completed frame has an encoder")
                         .publish_owned(frame, true, ENCODER_PUBLICATION_TIMEOUT)
-                    {
-                        Ok(frame) => {
-                            runtime.set_encoder_readiness(ComponentReadiness::Ready);
-                            completed = Some(frame);
-                            recovering = false;
-                            backoff.reset();
-                        }
-                        Err(failure) => {
-                            let (frame, error) = failure.into_parts();
-                            runtime.set_encoder_readiness(ComponentReadiness::Unavailable);
-                            tracing::error!(%error, "FFmpeg hardware repeat stopped; replacing encoder");
-                            completed = Some(frame);
-                            encoder.take();
-                            recovering = true;
-                            runtime.record_pipeline_skips(mailbox.begin_new_epoch());
-                        }
+                } else {
+                    if replace_exited_encoder(&mut encoder, &runtime, &mailbox) {
+                        recovering = true;
                     }
-                } else if replace_exited_encoder(&mut encoder, &runtime, &mailbox) {
-                    recovering = true;
+                    continue;
+                };
+                match publication {
+                    Ok(frame) => {
+                        runtime.set_encoder_readiness(ComponentReadiness::Ready);
+                        completed = Some(frame);
+                        recovering = false;
+                        backoff.reset();
+                    }
+                    Err(failure) => {
+                        let (frame, error) = failure.into_parts();
+                        runtime.set_encoder_readiness(ComponentReadiness::Unavailable);
+                        tracing::error!(%error, "FFmpeg hardware publication stopped; replacing encoder");
+                        completed = Some(frame);
+                        encoder.take();
+                        recovering = true;
+                        runtime.record_pipeline_skips(mailbox.discard_pending());
+                    }
                 }
             }
         })
@@ -530,7 +516,7 @@ fn replace_exited_encoder(
     runtime.set_encoder_readiness(ComponentReadiness::Unavailable);
     tracing::error!(%error, "FFmpeg hardware encoder exited; replacing encoder");
     encoder.take();
-    runtime.record_pipeline_skips(mailbox.begin_new_epoch());
+    runtime.record_pipeline_skips(mailbox.discard_pending());
     true
 }
 

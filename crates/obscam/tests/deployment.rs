@@ -58,7 +58,14 @@ fn mediamtx_metrics_are_readable_only_on_the_private_media_link() {
     assert!(config.contains("ips: [\"169.254.218.1\"]"));
     assert!(config.contains("- action: metrics"));
     assert!(!config.contains("- action: api"));
+    assert!(
+        config.find("ips: [\"169.254.218.1\"]") < config.find("ips: []"),
+        "the specific private metrics identity must precede the public media identity"
+    );
     assert!(!rules.contains("dport 9998"));
+    assert!(rules.contains(
+        "iifname \"obscam-media0\" ct state established,related accept\n        iifname \"obscam-media0\" drop"
+    ));
 }
 
 #[test]
