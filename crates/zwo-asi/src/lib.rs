@@ -138,6 +138,20 @@ pub enum CameraError {
         /// SDK result from the compensating stop attempt.
         stop_code: i32,
     },
+    /// Opening failed and the SDK also rejected the compensating handle close.
+    #[error("ASI SDK initialization failed and ownership cleanup failed with code {close_code}")]
+    OwnershipUncertain {
+        /// SDK result from the compensating close attempt.
+        close_code: i32,
+    },
+}
+
+impl CameraError {
+    /// Whether another in-process open would risk concurrent SDK ownership.
+    #[must_use]
+    pub const fn ownership_uncertain(&self) -> bool {
+        matches!(self, Self::OwnershipUncertain { .. })
+    }
 }
 
 /// Failure to obtain a complete frame generation.
@@ -183,6 +197,14 @@ pub enum CaptureError {
     MalformedLength {
         /// Reported byte length.
         length: usize,
+    },
+    /// A completed source frame did not advance its generation monotonically.
+    #[error("camera frame generation was {received}, expected greater than {previous}")]
+    MalformedGeneration {
+        /// Last trustworthy source generation.
+        previous: u64,
+        /// Invalid source generation.
+        received: u64,
     },
     /// Capture was requested outside the running state.
     #[error("camera is not capturing")]
@@ -232,6 +254,23 @@ pub trait CameraSource {
     ///
     /// Returns [`CameraError`] when the source cannot stop.
     fn stop(&mut self) -> Result<(), CameraError>;
+
+    /// Consumes the exclusive source owner after stopping it.
+    ///
+    /// Production implementations must report any failure to close the owned
+    /// backend handle. Substitutes without an external handle may use this
+    /// default stop-and-drop implementation.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`CameraError`] when acquisition or backend ownership cannot be
+    /// relinquished conclusively.
+    fn close(mut self) -> Result<(), CameraError>
+    where
+        Self: Sized,
+    {
+        self.stop()
+    }
 }
 
 /// One validated full-frame RAW8 generation borrowed from the fixed pool.
@@ -328,7 +367,10 @@ impl CameraOwner {
         check("open camera", ffi::open(info.camera_id))?;
         let id = info.camera_id;
         if let Err(error) = Self::initialize_and_validate(id) {
-            let _ = ffi::close(id);
+            let close_code = ffi::close(id);
+            if close_code != 0 {
+                return Err(CameraError::OwnershipUncertain { close_code });
+            }
             return Err(error);
         }
         Ok(Self {
@@ -518,6 +560,10 @@ impl CameraSource for CameraOwner {
 
     fn stop(&mut self) -> Result<(), CameraError> {
         Self::stop(self)
+    }
+
+    fn close(self) -> Result<(), CameraError> {
+        Self::close(self)
     }
 }
 
@@ -792,6 +838,15 @@ mod tests {
         assert_eq!(stub::calls(0, 2), 1);
         assert_eq!(stub::calls(1, 2), 1);
         assert_eq!(stub::calls(2, 2), 1);
+
+        stub::reset();
+        target();
+        stub::result(1, 16);
+        stub::result(2, 5);
+        assert_eq!(
+            CameraOwner::connect().err(),
+            Some(CameraError::OwnershipUncertain { close_code: 5 })
+        );
 
         stub::reset();
         target();

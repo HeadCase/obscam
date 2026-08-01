@@ -15,6 +15,7 @@ const nextRuntimeEpoch = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
 const startedAtUnixUs = 1_700_000_000_000_000;
 const ready = {
   runtimeEpoch,
+  minimumSourceGeneration: 1,
   components: {
     capture: { state: "ready" },
     encoder: { state: "ready" },
@@ -268,6 +269,66 @@ test("confirmed component failure is immediate and retains only a stale trustwor
     }
   });
   assert.equal(viewerProjection(withoutFrame).status, "Unavailable");
+});
+
+test("camera recovery cannot return live from a retained pre-recovery repeat", () => {
+  let state = presentedState();
+  state = dispatch(state, {
+    type: "lifecycle",
+    facts: {
+      ...ready,
+      components: { ...ready.components, capture: { state: "unavailable", reason: "no_camera_source" } },
+      recovery: "capture",
+      capture: null
+    }
+  });
+  assert.equal(viewerProjection(state).status, "Stale");
+
+  const recovered = reduceViewer(state, {
+    type: "lifecycle",
+    facts: { ...ready, minimumSourceGeneration: 82 }
+  });
+  state = recovered.state;
+  assert.deepEqual(recovered.effects, ["reconnect_media"]);
+  state = dispatch(state, { type: "media_connecting" });
+  state = dispatch(state, { type: "media_connected" });
+  state = dispatch(state, { type: "mapping", mapping });
+  state = dispatch(state, {
+    type: "presented",
+    rtpTimestamp: mapping.rtpTimestamp,
+    nowUnixUs: mapping.submittedAtUnixUs + 30_000
+  });
+  assert.equal(viewerProjection(state).status, "Reconnecting");
+
+  const recoveredMapping = parseFrameMapping({
+    ...mapping,
+    schemaVersion: 1,
+    type: "frame_mapping",
+    rtpTimestamp: 43,
+    sourceGeneration: 82
+  });
+  state = dispatch(state, { type: "mapping", mapping: recoveredMapping });
+  state = dispatch(state, {
+    type: "presented",
+    rtpTimestamp: recoveredMapping.rtpTimestamp,
+    nowUnixUs: recoveredMapping.submittedAtUnixUs + 30_000
+  });
+  assert.equal(viewerProjection(state).status, "Live");
+  assert.equal(viewerProjection(state).sourceGeneration, 82);
+});
+
+test("a coalesced source-floor jump leaves live until a recovered presentation", () => {
+  let state = presentedState();
+  assert.equal(viewerProjection(state).status, "Live");
+
+  const fenced = reduceViewer(state, {
+    type: "lifecycle",
+    facts: { ...ready, minimumSourceGeneration: 82 }
+  });
+  state = fenced.state;
+  assert.deepEqual(fenced.effects, ["reconnect_media"]);
+  assert.equal(viewerProjection(state).status, "Reconnecting");
+  assert.equal(viewerProjection(state).sourceGeneration, 81);
 });
 
 test("control transport is independent from live media", () => {

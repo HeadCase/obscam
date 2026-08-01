@@ -16,6 +16,11 @@ export function parseRuntimeContract(value) {
         !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu.test(value.runtimeEpoch)) {
         throw new Error("invalid runtime epoch");
     }
+    if (typeof value.minimumSourceGeneration !== "number" ||
+        !nonNegativeSafeInteger(value.minimumSourceGeneration) ||
+        value.minimumSourceGeneration < 1) {
+        throw new Error("invalid minimum source generation");
+    }
     if (!isRecord(value.media) ||
         !Number.isInteger(value.media.whepPort) ||
         typeof value.media.whepPort !== "number" ||
@@ -33,6 +38,7 @@ export function parseRuntimeContract(value) {
     return {
         schemaVersion: 1,
         runtimeEpoch: value.runtimeEpoch,
+        minimumSourceGeneration: value.minimumSourceGeneration,
         media: {
             whepPort: value.media.whepPort,
             whepPath: value.media.whepPath
@@ -45,12 +51,22 @@ export function parseRuntimeContract(value) {
 function parseMediaRecoveryCounters(value) {
     if (!isRecord(value) ||
         !nonNegativeSafeInteger(value.encoderReplacements) ||
-        !nonNegativeSafeInteger(value.pipelineSkips)) {
+        !nonNegativeSafeInteger(value.pipelineSkips) ||
+        !nonNegativeSafeInteger(value.cameraRestarts) ||
+        !nonNegativeSafeInteger(value.invalidDimensions) ||
+        !nonNegativeSafeInteger(value.invalidBufferLengths) ||
+        !nonNegativeSafeInteger(value.invalidGenerationMetadata) ||
+        !nonNegativeSafeInteger(value.invalidProcessingOutput)) {
         throw new Error("invalid media recovery counters");
     }
     return {
         encoderReplacements: value.encoderReplacements,
-        pipelineSkips: value.pipelineSkips
+        pipelineSkips: value.pipelineSkips,
+        cameraRestarts: value.cameraRestarts,
+        invalidDimensions: value.invalidDimensions,
+        invalidBufferLengths: value.invalidBufferLengths,
+        invalidGenerationMetadata: value.invalidGenerationMetadata,
+        invalidProcessingOutput: value.invalidProcessingOutput
     };
 }
 function nonNegativeSafeInteger(value) {

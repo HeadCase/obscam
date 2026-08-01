@@ -32,6 +32,8 @@ export function reduceViewer(state, event) {
         case "lifecycle": {
             const changedEpoch = event.facts.runtimeEpoch !== state.runtimeEpoch;
             const mediaRecovered = state.lifecycle?.recovery != null && event.facts.recovery === null;
+            const sourceFloorAdvanced = state.lifecycle !== null &&
+                event.facts.minimumSourceGeneration > state.lifecycle.minimumSourceGeneration;
             next = {
                 ...state,
                 runtimeEpoch: event.facts.runtimeEpoch,
@@ -43,9 +45,10 @@ export function reduceViewer(state, event) {
                     ? initialPresentationState(event.facts.runtimeEpoch)
                     : state.presentation,
                 correlationLostAtUnixUs: changedEpoch ? null : state.correlationLostAtUnixUs,
-                awaitingCurrentPresentation: changedEpoch || event.facts.recovery !== null || state.awaitingCurrentPresentation
+                awaitingCurrentPresentation: changedEpoch || sourceFloorAdvanced || event.facts.recovery !== null ||
+                    state.awaitingCurrentPresentation
             };
-            if (changedEpoch || mediaRecovered) {
+            if (changedEpoch || mediaRecovered || sourceFloorAdvanced) {
                 effects = ["reconnect_media"];
             }
             break;
@@ -103,17 +106,27 @@ export function reduceViewer(state, event) {
                 };
             }
             else {
-                const control = reduceControl(state.control, {
-                    type: "visible",
-                    settingsGeneration: transition.presented.settingsGeneration
-                });
+                const currentSource = state.lifecycle !== null &&
+                    transition.presented.sourceGeneration >= state.lifecycle.minimumSourceGeneration;
+                const advancesFrame = currentSource && (state.trustworthyFrame === null ||
+                    transition.presented.sourceGeneration >= state.trustworthyFrame.sourceGeneration);
+                const control = currentSource
+                    ? reduceControl(state.control, {
+                        type: "visible",
+                        settingsGeneration: transition.presented.settingsGeneration
+                    })
+                    : { state: state.control, storage: "none" };
                 next = {
                     ...state,
                     control: control.state,
                     presentation: transition.state,
-                    trustworthyFrame: transition.presented,
-                    trustworthyPresentedAtUnixUs: event.nowUnixUs,
-                    awaitingCurrentPresentation: false,
+                    trustworthyFrame: advancesFrame ? transition.presented : state.trustworthyFrame,
+                    trustworthyPresentedAtUnixUs: advancesFrame
+                        ? event.nowUnixUs
+                        : state.trustworthyPresentedAtUnixUs,
+                    awaitingCurrentPresentation: currentSource
+                        ? false
+                        : state.awaitingCurrentPresentation,
                     correlationLostAtUnixUs: null,
                     nowUnixUs: event.nowUnixUs
                 };
@@ -166,6 +179,8 @@ export function viewerProjection(state) {
     const base = { controlConnection: state.control.connection };
     const failed = lifecycle === null ? null : failedComponent(lifecycle);
     const priorEpoch = frame !== null && frame.runtimeEpoch !== state.runtimeEpoch;
+    const priorSource = frame !== null && lifecycle !== null &&
+        frame.sourceGeneration < lifecycle.minimumSourceGeneration;
     const correlationUnknown = state.correlationLostAtUnixUs !== null &&
         state.nowUnixUs - state.correlationLostAtUnixUs > CORRELATION_GRACE_US;
     if (failed !== null) {
@@ -180,6 +195,14 @@ export function viewerProjection(state) {
             detail: knownDetail(state, frame, "Frame from previous service epoch"),
             frameCompletedAtUnixUs: frame.exposureCompletedAtUnixUs,
             frameAgeMs: frameAgeMs(state, frame)
+        };
+    }
+    if (priorSource) {
+        return {
+            ...base,
+            ...knownFrame(state, frame),
+            status: "Reconnecting",
+            detail: knownDetail(state, frame, "Awaiting recovered frame")
         };
     }
     if (state.awaitingCurrentPresentation && frame !== null) {
@@ -269,6 +292,9 @@ export function parseLifecycleFacts(value) {
         value.schemaVersion !== 1 ||
         value.type !== "lifecycle" ||
         !isUuid(value.runtimeEpoch) ||
+        !Number.isSafeInteger(value.minimumSourceGeneration) ||
+        typeof value.minimumSourceGeneration !== "number" ||
+        value.minimumSourceGeneration < 1 ||
         ![null, "capture", "encoder", "relay"].includes(value.recovery) ||
         !validCapture(value.capture)) {
         throw new Error("invalid lifecycle facts");
@@ -276,6 +302,7 @@ export function parseLifecycleFacts(value) {
     const components = parseRuntimeComponents(value.components);
     return {
         runtimeEpoch: value.runtimeEpoch,
+        minimumSourceGeneration: value.minimumSourceGeneration,
         components,
         recovery: value.recovery,
         capture: value.capture

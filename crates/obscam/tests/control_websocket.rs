@@ -171,6 +171,7 @@ async fn lifecycle_facts_are_sent_initially_and_when_capture_progresses() {
 
     let initial = receive_type(&mut socket, "lifecycle").await;
     assert_eq!(initial["runtimeEpoch"], state.runtime_epoch().to_string());
+    assert_eq!(initial["minimumSourceGeneration"], 1);
     assert_eq!(initial["components"]["capture"]["state"], "unavailable");
     assert_eq!(initial["recovery"], "capture");
     assert_eq!(initial["capture"], Value::Null);

@@ -426,6 +426,7 @@ enum ServerMessage {
     Lifecycle {
         schema_version: u8,
         runtime_epoch: Uuid,
+        minimum_source_generation: u64,
         components: Components,
         recovery: Option<RecoveryComponent>,
         capture: Option<CaptureProgress>,
@@ -498,6 +499,7 @@ impl ServerMessage {
         Self::Lifecycle {
             schema_version: SCHEMA_VERSION,
             runtime_epoch: snapshot.runtime_epoch,
+            minimum_source_generation: snapshot.minimum_source_generation,
             components: snapshot.components,
             recovery: snapshot.recovery,
             capture: snapshot.capture,
