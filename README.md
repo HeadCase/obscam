@@ -42,6 +42,10 @@ See:
 - `docs/agents/architecture.md` for binding local architecture guardrails
 - `docs/agents/local-startup.md` for temporary manual production startup
 - `docs/agents/issue-tracker.md` for the Linear workflow
+- `docs/operations/asiair-sync.md` for ASIAIR synchronization operations and
+  recovery
+- `docs/verification/asiair-sync.md` for ASIAIR synchronization acceptance and
+  deployed evidence
 
 ## Quality gate
 
