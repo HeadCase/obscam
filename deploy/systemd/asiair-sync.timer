@@ -1,0 +1,11 @@
+[Unit]
+Description=Run ASIAIR synchronization every five minutes
+
+[Timer]
+OnBootSec=5min
+OnUnitInactiveSec=5min
+AccuracySec=1s
+Unit=asiair-sync.service
+
+[Install]
+WantedBy=timers.target
