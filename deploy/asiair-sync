@@ -1,0 +1,216 @@
+#!/bin/sh
+set -eu
+
+usage() {
+    echo "usage: asiair-sync [--dry-run] CONFIG" >&2
+    exit 2
+}
+
+log() {
+    echo "asiair-sync: $*"
+}
+
+config_error() {
+    echo "asiair-sync: configuration error: $*" >&2
+    exit 2
+}
+
+dry_run=false
+if [ "${1:-}" = "--dry-run" ]; then
+    dry_run=true
+    shift
+fi
+[ "$#" -eq 1 ] || usage
+
+config=$1
+[ -f "$config" ] || config_error "cannot read $config"
+
+# The installed configuration is a root-owned, non-secret shell environment
+# file. Export its values so test doubles and rclone inherit only deliberate
+# configuration, without requiring an rclone remote or home directory.
+set -a
+# shellcheck disable=SC1090
+. "$config"
+set +a
+
+: "${ASIAIR_SYNC_SOURCE:?ASIAIR_SYNC_SOURCE is required}"
+: "${ASIAIR_SYNC_SOURCE_MOUNT:?ASIAIR_SYNC_SOURCE_MOUNT is required}"
+: "${ASIAIR_SYNC_SOURCE_DEVICE:?ASIAIR_SYNC_SOURCE_DEVICE is required}"
+: "${ASIAIR_SYNC_DESTINATION_MOUNT:?ASIAIR_SYNC_DESTINATION_MOUNT is required}"
+: "${ASIAIR_SYNC_DESTINATION_DEVICE:?ASIAIR_SYNC_DESTINATION_DEVICE is required}"
+: "${ASIAIR_SYNC_DESTINATION:?ASIAIR_SYNC_DESTINATION is required}"
+
+findmnt_bin=${ASIAIR_SYNC_FINDMNT:-/usr/bin/findmnt}
+ls_bin=${ASIAIR_SYNC_LS:-/usr/bin/ls}
+realpath_bin=${ASIAIR_SYNC_REALPATH:-/usr/bin/realpath}
+rclone_bin=${ASIAIR_SYNC_RCLONE:-/usr/bin/rclone}
+sleep_bin=${ASIAIR_SYNC_SLEEP:-/usr/bin/sleep}
+stat_bin=${ASIAIR_SYNC_STAT:-/usr/bin/stat}
+timeout_bin=${ASIAIR_SYNC_TIMEOUT:-/usr/bin/timeout}
+health_interval=${ASIAIR_SYNC_HEALTH_INTERVAL:-30}
+probe_timeout=${ASIAIR_SYNC_PROBE_TIMEOUT:-20}
+
+for executable in \
+    "$findmnt_bin" \
+    "$ls_bin" \
+    "$realpath_bin" \
+    "$rclone_bin" \
+    "$sleep_bin" \
+    "$stat_bin" \
+    "$timeout_bin"
+do
+    [ -x "$executable" ] || config_error "$executable is not executable"
+done
+
+case "$ASIAIR_SYNC_SOURCE" in
+    /*) ;;
+    *) config_error "source must be an absolute path" ;;
+esac
+case "$ASIAIR_SYNC_SOURCE_MOUNT" in
+    /*) ;;
+    *) config_error "source mount must be an absolute path" ;;
+esac
+case "$ASIAIR_SYNC_DESTINATION_MOUNT" in
+    /*) ;;
+    *) config_error "destination mount must be an absolute path" ;;
+esac
+case "$ASIAIR_SYNC_DESTINATION" in
+    /*) ;;
+    *) config_error "destination must be an absolute path" ;;
+esac
+
+for path in \
+    "$ASIAIR_SYNC_SOURCE" \
+    "$ASIAIR_SYNC_SOURCE_MOUNT" \
+    "$ASIAIR_SYNC_DESTINATION_MOUNT" \
+    "$ASIAIR_SYNC_DESTINATION"
+do
+    case "$path" in
+        *//*|*/./*|*/.|*/../*|*/..)
+            config_error "$path is not canonical"
+            ;;
+    esac
+done
+
+case "$ASIAIR_SYNC_SOURCE" in
+    "$ASIAIR_SYNC_SOURCE_MOUNT"/*) ;;
+    *) config_error "source must be beneath source mount" ;;
+esac
+case "$ASIAIR_SYNC_DESTINATION" in
+    "$ASIAIR_SYNC_DESTINATION_MOUNT"/*) ;;
+    *) config_error "destination must be beneath destination mount" ;;
+esac
+
+probe() {
+    path=$1
+    if ! "$timeout_bin" "$probe_timeout" "$stat_bin" -L -- "$path" >/dev/null 2>&1; then
+        log "$path is unavailable; deferring this cycle"
+        exit 0
+    fi
+}
+
+verify_mount() {
+    mount=$1
+    expected_type=$2
+    expected_device=$3
+
+    actual_device=$(
+        "$findmnt_bin" \
+            --noheadings \
+            --mountpoint "$mount" \
+            --types "$expected_type" \
+            --output SOURCE \
+            2>/dev/null |
+            /usr/bin/sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//'
+    )
+    if [ "$actual_device" != "$expected_device" ]; then
+        log "$mount is not the expected $expected_type mount; deferring this cycle"
+        exit 0
+    fi
+}
+
+canonical_path() {
+    path=$1
+    if ! canonical=$(
+        "$timeout_bin" "$probe_timeout" "$realpath_bin" -e -- "$path" 2>/dev/null
+    ); then
+        log "$path cannot be resolved; deferring this cycle"
+        exit 0
+    fi
+    printf '%s\n' "$canonical"
+}
+
+endpoint_is_healthy() {
+    path=$1
+    "$timeout_bin" "$probe_timeout" "$ls_bin" -A -- "$path" >/dev/null 2>&1
+}
+
+# Probing an automount path asks systemd to mount it. Exact identity checks then
+# prevent a failed mount from turning the bare local directory into a copy
+# source or destination.
+probe "$ASIAIR_SYNC_SOURCE_MOUNT/."
+verify_mount \
+    "$ASIAIR_SYNC_SOURCE_MOUNT" \
+    cifs \
+    "$ASIAIR_SYNC_SOURCE_DEVICE"
+probe "$ASIAIR_SYNC_SOURCE"
+source_mount=$(canonical_path "$ASIAIR_SYNC_SOURCE_MOUNT")
+source_path=$(canonical_path "$ASIAIR_SYNC_SOURCE")
+case "$source_path" in
+    "$source_mount"/*) ;;
+    *) config_error "source resolves outside source mount" ;;
+esac
+
+probe "$ASIAIR_SYNC_DESTINATION_MOUNT/."
+verify_mount \
+    "$ASIAIR_SYNC_DESTINATION_MOUNT" \
+    nfs4 \
+    "$ASIAIR_SYNC_DESTINATION_DEVICE"
+probe "$ASIAIR_SYNC_DESTINATION"
+destination_mount=$(canonical_path "$ASIAIR_SYNC_DESTINATION_MOUNT")
+destination_path=$(canonical_path "$ASIAIR_SYNC_DESTINATION")
+case "$destination_path" in
+    "$destination_mount"/*) ;;
+    *) config_error "destination resolves outside destination mount" ;;
+esac
+
+set -- copy "$source_path/" "$destination_path/" \
+    --config /dev/null \
+    --bwlimit 512Ki \
+    --transfers 1 \
+    --checkers 2 \
+    --min-age 2m \
+    --log-level INFO \
+    --stats 0
+
+if [ "$dry_run" = true ]; then
+    set -- "$@" --dry-run
+fi
+
+log "copying completed ASIAIR files to $destination_path"
+"$rclone_bin" "$@" &
+copy_pid=$!
+
+stop_copy() {
+    /usr/bin/kill -TERM "$copy_pid" 2>/dev/null || true
+}
+
+trap 'stop_copy; wait "$copy_pid" 2>/dev/null || true; exit 143' HUP INT TERM
+
+while /usr/bin/kill -0 "$copy_pid" 2>/dev/null; do
+    "$sleep_bin" "$health_interval"
+    if ! /usr/bin/kill -0 "$copy_pid" 2>/dev/null; then
+        break
+    fi
+    if ! endpoint_is_healthy "$source_path" || \
+        ! endpoint_is_healthy "$destination_path"; then
+        log "an endpoint became unavailable; stopping this cycle" >&2
+        stop_copy
+        wait "$copy_pid" 2>/dev/null || true
+        trap - HUP INT TERM
+        exit 1
+    fi
+done
+
+trap - HUP INT TERM
+wait "$copy_pid"

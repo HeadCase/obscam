@@ -1,0 +1,36 @@
+[Unit]
+Description=Copy completed ASIAIR files to observatory storage
+StartLimitIntervalSec=0
+
+[Service]
+Type=oneshot
+User=asiair-sync
+ExecStart=/usr/local/libexec/obscam/asiair-sync /etc/obscam/asiair-sync.env
+TimeoutStartSec=4h
+TimeoutStopSec=30s
+UMask=0002
+
+Nice=15
+CPUWeight=10
+IOWeight=10
+IOSchedulingClass=idle
+OOMScoreAdjust=500
+
+NoNewPrivileges=yes
+PrivateDevices=yes
+PrivateTmp=yes
+ProtectControlGroups=yes
+ProtectHome=yes
+ProtectKernelModules=yes
+ProtectKernelTunables=yes
+ProtectSystem=full
+CapabilityBoundingSet=
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+RestrictSUIDSGID=yes
+SystemCallArchitectures=native
+
+StandardOutput=journal
+StandardError=journal
+LogRateLimitIntervalSec=30s
+LogRateLimitBurst=100

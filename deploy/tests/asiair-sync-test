@@ -1,0 +1,245 @@
+#!/bin/sh
+set -eu
+
+repo=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)
+worker=$repo/deploy/asiair-sync
+tmp=$(mktemp -d)
+trap 'rm -rf "$tmp"' EXIT HUP INT TERM
+
+source_mount=$tmp/source-mount
+source=$source_mount/ASIAIR
+destination_mount=$tmp/library
+destination=$destination_mount/astro/anser
+tools=$tmp/tools
+mkdir -p "$source" "$destination" "$tools"
+
+cat >"$tools/findmnt" <<'EOF'
+#!/bin/sh
+mount=
+field=
+requested_type=
+while [ "$#" -gt 0 ]; do
+    case "$1" in
+        --mountpoint) mount=$2; shift 2 ;;
+        --types) requested_type=$2; shift 2 ;;
+        --output) field=$2; shift 2 ;;
+        *) shift ;;
+    esac
+done
+case "$mount:$field" in
+    "$FAKE_SOURCE:SOURCE")
+        [ "$requested_type" = "$FAKE_SOURCE_TYPE" ] || exit 0
+        printf '%s\n' "$FAKE_SOURCE_DEVICE"
+        ;;
+    "$FAKE_DESTINATION_MOUNT:SOURCE")
+        [ "$requested_type" = "$FAKE_DESTINATION_TYPE" ] || exit 0
+        printf '%s\n' "$FAKE_DESTINATION_DEVICE"
+        ;;
+    *) exit 1 ;;
+esac
+EOF
+
+cat >"$tools/stat" <<'EOF'
+#!/bin/sh
+printf '%s\n' "$*" >>"$STAT_CAPTURE"
+case "$*" in
+    *unavailable*) exit 1 ;;
+esac
+exec /usr/bin/stat "$@"
+EOF
+
+cat >"$tools/timeout" <<'EOF'
+#!/bin/sh
+shift
+exec "$@"
+EOF
+
+cat >"$tools/rclone" <<'EOF'
+#!/bin/sh
+printf '%s\n' "$@" >"$RCLONE_CAPTURE"
+if [ "${RCLONE_BLOCK:-false}" = true ]; then
+    trap 'exit 0' TERM
+    while :; do
+        /usr/bin/sleep 1
+    done
+fi
+exit "${RCLONE_EXIT:-0}"
+EOF
+
+cat >"$tools/ls" <<'EOF'
+#!/bin/sh
+[ "${HEALTH_FAIL:-false}" != true ]
+EOF
+
+cat >"$tools/sleep" <<'EOF'
+#!/bin/sh
+exit 0
+EOF
+chmod +x \
+    "$tools/findmnt" \
+    "$tools/ls" \
+    "$tools/rclone" \
+    "$tools/sleep" \
+    "$tools/stat" \
+    "$tools/timeout"
+
+config=$tmp/asiair-sync.env
+write_config() {
+    configured_source_mount=${1:-$source_mount}
+    configured_source=${2:-$source}
+    configured_destination_mount=${3:-$destination_mount}
+    configured_destination=${4:-$destination}
+    cat >"$config" <<EOF
+ASIAIR_SYNC_SOURCE_MOUNT='$configured_source_mount'
+ASIAIR_SYNC_SOURCE='$configured_source'
+ASIAIR_SYNC_SOURCE_DEVICE='//asiair/TF Images'
+ASIAIR_SYNC_DESTINATION_MOUNT='$configured_destination_mount'
+ASIAIR_SYNC_DESTINATION_DEVICE='nas:/create/photos'
+ASIAIR_SYNC_DESTINATION='$configured_destination'
+ASIAIR_SYNC_FINDMNT='$tools/findmnt'
+ASIAIR_SYNC_LS='$tools/ls'
+ASIAIR_SYNC_REALPATH='/usr/bin/realpath'
+ASIAIR_SYNC_RCLONE='$tools/rclone'
+ASIAIR_SYNC_SLEEP='$tools/sleep'
+ASIAIR_SYNC_STAT='$tools/stat'
+ASIAIR_SYNC_TIMEOUT='$tools/timeout'
+ASIAIR_SYNC_HEALTH_INTERVAL='1'
+EOF
+}
+
+export FAKE_SOURCE=$source_mount
+export FAKE_SOURCE_TYPE=cifs
+export FAKE_SOURCE_DEVICE='//asiair/TF Images'
+export FAKE_DESTINATION_MOUNT=$destination_mount
+export FAKE_DESTINATION_TYPE=nfs4
+export FAKE_DESTINATION_DEVICE='nas:/create/photos'
+export RCLONE_CAPTURE=$tmp/rclone-arguments
+export STAT_CAPTURE=$tmp/stat-arguments
+
+reset_case() {
+    FAKE_SOURCE_TYPE=cifs
+    FAKE_SOURCE_DEVICE='//asiair/TF Images'
+    FAKE_DESTINATION_TYPE=nfs4
+    FAKE_DESTINATION_DEVICE='nas:/create/photos'
+    HEALTH_FAIL=false
+    RCLONE_BLOCK=false
+    RCLONE_EXIT=0
+    export FAKE_SOURCE_TYPE FAKE_SOURCE_DEVICE
+    export FAKE_DESTINATION_TYPE FAKE_DESTINATION_DEVICE
+    export HEALTH_FAIL RCLONE_BLOCK RCLONE_EXIT
+    rm -f "$RCLONE_CAPTURE"
+    rm -f "$STAT_CAPTURE"
+    write_config
+}
+
+fail() {
+    echo "FAIL: $*" >&2
+    exit 1
+}
+
+assert_not_run() {
+    [ ! -e "$RCLONE_CAPTURE" ] || fail "rclone unexpectedly ran"
+}
+
+assert_argument() {
+    /usr/bin/grep -Fx -- "$1" "$RCLONE_CAPTURE" >/dev/null ||
+        fail "missing rclone argument: $1"
+}
+
+reset_case
+"$worker" --dry-run "$config" >/dev/null
+assert_argument copy
+assert_argument "$source/"
+assert_argument "$destination/"
+assert_argument 512Ki
+assert_argument 1
+assert_argument 2
+assert_argument 2m
+assert_argument /dev/null
+assert_argument --dry-run
+/usr/bin/grep -F -- "$source_mount/." "$STAT_CAPTURE" >/dev/null ||
+    fail "source probe did not cross the automount"
+/usr/bin/grep -F -- "$destination_mount/." "$STAT_CAPTURE" >/dev/null ||
+    fail "destination probe did not cross the automount"
+if /usr/bin/grep -Ex -- '(sync|delete|purge|move)' "$RCLONE_CAPTURE" >/dev/null; then
+    fail "destructive rclone operation present"
+fi
+
+reset_case
+unavailable_source_mount=$tmp/unavailable-source
+unavailable_source=$unavailable_source_mount/ASIAIR
+mkdir -p "$unavailable_source"
+write_config \
+    "$unavailable_source_mount" \
+    "$unavailable_source" \
+    "$destination_mount" \
+    "$destination"
+"$worker" "$config" >/dev/null
+assert_not_run
+
+reset_case
+FAKE_SOURCE_TYPE=ext4
+export FAKE_SOURCE_TYPE
+"$worker" "$config" >/dev/null
+assert_not_run
+
+reset_case
+FAKE_SOURCE_DEVICE='//wrong/share'
+export FAKE_SOURCE_DEVICE
+"$worker" "$config" >/dev/null
+assert_not_run
+
+reset_case
+FAKE_DESTINATION_TYPE=ext4
+export FAKE_DESTINATION_TYPE
+"$worker" "$config" >/dev/null
+assert_not_run
+
+reset_case
+FAKE_DESTINATION_DEVICE='nas:/wrong/export'
+export FAKE_DESTINATION_DEVICE
+"$worker" "$config" >/dev/null
+assert_not_run
+
+reset_case
+outside=$tmp/outside
+mkdir "$outside"
+write_config "$source_mount" "$source" "$destination_mount" "$outside"
+if "$worker" "$config" >/dev/null 2>&1; then
+    fail "destination outside validated mount was accepted"
+fi
+assert_not_run
+
+reset_case
+outside_source=$tmp/outside-source
+mkdir "$outside_source"
+write_config \
+    "$source_mount" \
+    "$outside_source" \
+    "$destination_mount" \
+    "$destination"
+if "$worker" "$config" >/dev/null 2>&1; then
+    fail "source outside validated mount was accepted"
+fi
+assert_not_run
+
+reset_case
+RCLONE_EXIT=7
+export RCLONE_EXIT
+if "$worker" "$config" >/dev/null 2>&1; then
+    fail "rclone failure was hidden"
+else
+    status=$?
+    [ "$status" -eq 7 ] || fail "rclone status was not preserved"
+fi
+
+reset_case
+HEALTH_FAIL=true
+RCLONE_BLOCK=true
+export HEALTH_FAIL RCLONE_BLOCK
+if "$worker" "$config" >/dev/null 2>&1; then
+    fail "endpoint loss did not fail the running cycle"
+fi
+assert_argument copy
+
+echo "asiair-sync tests passed"
