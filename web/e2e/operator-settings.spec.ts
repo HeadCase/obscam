@@ -10,6 +10,36 @@ import {
   visibleSettings
 } from "./support/obs-cam.js";
 
+async function setExposureWithinExactDeadline(
+  page: import("@playwright/test").Page,
+  exposureMs: number,
+  hardDeadlineMs: number
+): Promise<number> {
+  const appliedMarks = await page.evaluate(() =>
+    performance.getEntriesByName("obscam.settings.camera-applied").length
+  );
+  const startedAt = await page.evaluate(() => performance.now());
+  const button = page.locator(`[data-exposure-ms="${exposureMs}"]`);
+  await button.click();
+  await page.getByRole("button", { name: "Apply" }).click();
+  const targetGeneration = await page.waitForFunction((priorCount) => {
+    const marks = performance.getEntriesByName("obscam.settings.camera-applied") as PerformanceMark[];
+    if (marks.length <= priorCount) return null;
+    const detail = marks.at(-1)?.detail as { settingsGeneration?: unknown } | undefined;
+    return typeof detail?.settingsGeneration === "number" ? detail.settingsGeneration : null;
+  }, appliedMarks, { timeout: hardDeadlineMs }).then((handle) => handle.jsonValue());
+  if (typeof targetGeneration !== "number") throw new Error("camera-applied mark had no generation");
+  await page.waitForFunction((generation) =>
+    (performance.getEntriesByName("obscam.settings.browser-presented-exact") as PerformanceMark[])
+      .some((mark) => {
+        const detail = mark.detail as { settingsGeneration?: unknown } | undefined;
+        return detail?.settingsGeneration === generation;
+      }), targetGeneration, { timeout: hardDeadlineMs });
+  const elapsedMs = await page.evaluate((start) => performance.now() - start, startedAt);
+  expect(elapsedMs).toBeLessThanOrEqual(hardDeadlineMs);
+  return elapsedMs;
+}
+
 test("quality calibration cannot delay the first media request", async ({ page }) => {
   let releaseClock!: () => void;
   let clockStarted!: () => void;
@@ -90,6 +120,21 @@ test("operator changes exposure without changing gain or treatment", async ({ pa
   }
 });
 
+test("five-second exposure returns exactly visible at 200 ms within the hard SLA", async ({ page }) => {
+  test.setTimeout(30_000);
+  await openLiveViewer(page);
+  await takeControl(page);
+  const original = await visibleSettings(page);
+
+  try {
+    await setExposure(page, 5_000);
+    await setExposureWithinExactDeadline(page, 200, 1_200);
+    expect(await visibleSettings(page)).toEqual({ ...original, exposureMs: 200 });
+  } finally {
+    await restoreAndRelease(page, original);
+  }
+});
+
 test("operator changes treatment without changing exposure or gain", async ({ page }) => {
   await openLiveViewer(page);
   await takeControl(page);
@@ -158,7 +203,26 @@ test("operator moves from short to long exposure and back without losing the ret
     expect(retainedAt - startedAt, "retained video should keep playing during a long exposure")
       .toBeGreaterThan(2);
 
-    await setExposure(page, 100);
+    await page.evaluate(() => {
+      const container = document.querySelector('[aria-label="Exposure state"]');
+      const observed = new Set<string>();
+      const record = (): void => {
+        for (const marker of Array.from(
+          container?.querySelectorAll<HTMLElement>("[data-setting-state]") ?? []
+        )) {
+          if (marker.dataset.settingState !== undefined) observed.add(marker.dataset.settingState);
+        }
+      };
+      new MutationObserver(record).observe(container!, { childList: true, subtree: true });
+      record();
+      (window as Window & { __observedSettingStates?: Set<string> }).__observedSettingStates = observed;
+    });
+    await setExposureWithinExactDeadline(page, 100, 1_100);
+    const observedStates = await page.evaluate(() => [
+      ...((window as Window & { __observedSettingStates?: Set<string> }).__observedSettingStates ?? [])
+    ]);
+    expect(observedStates).toEqual(expect.arrayContaining(["requested", "applied", "visible"]));
+    await expect(page.locator("[data-setting-state=\"visible\"]").first()).toBeVisible();
     expect(await visibleSettings(page)).toEqual(shortSettings);
   } finally {
     await restoreAndRelease(page, original);

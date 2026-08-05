@@ -39,8 +39,10 @@ not button state or a retained prior image.
 ## Startup and primary status
 
 - Fresh Mac browser samples reached `Live` in 909-1,417 ms.
-- Startup no longer waits for an RTCP sender report before declaring advancing
-  decoded media Live.
+- Startup does not wait for an RTCP sender report before declaring advancing
+  decoded media Live. Exact correlation is anchored independently by FFmpeg's
+  fixed initial RTP sequence and fails closed on the first or any later missing
+  packet, so media availability never weakens correlation truthfulness.
 - Primary status progresses through `Unavailable`, `Reconnecting`, and
   `Waiting for first image` to `Live`.
 - Healthy retained media remains `Live` during a long exposure and during a
@@ -75,6 +77,12 @@ not button state or a retained prior image.
 - Repeated settings changes retained one WHEP quality connection generation;
   settings no longer caused media reconnects.
 - Browser-visible media remained Live through the settings series.
+- Final fixed-sequence production acceptance measured 5 s -> 200 ms at 624 ms
+  and 30 s -> 100 ms at 481 ms from browser action to the exact target
+  generation. Both remained below the approved normal thresholds.
+- The same run observed the rendered Requested -> Applied -> Visible evidence
+  progression, ended at Visible 500 ms with control released, and reported
+  current partitions of 57/57 exact and 2/2 exact with zero unknown samples.
 - Exact settings partitions contained zero unknown samples.
 - No encoder replacement or camera reopen occurred during the final continuous
   capture series.

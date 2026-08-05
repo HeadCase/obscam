@@ -121,15 +121,16 @@ Feed state and exposure activity are independent.
 
 | Primary state | Meaning | Image treatment | Resting cue |
 | --- | --- | --- | --- |
-| Live | The latest trustworthy presentation remains current within the expected exposure and delivery contract | Retain exact pixels | None or exposure rail |
-| Waiting for first image | The first authoritative exposure is within deadline and no trustworthy completed frame exists | Black feed surface | Exposure rail |
+| Live | Decoded browser media is advancing within the expected delivery contract; exact identity may still be pending | Retain exact pixels | None or exposure rail |
+| Waiting for first image | The first authoritative exposure is within deadline and no decoded presentation exists | Black feed surface | Exposure rail |
 | Reconnecting | Browser media transport is restoring | Retain the last trustworthy frame when available | Dashed amber perimeter |
 | Stale | A newer presentation is overdue or freshness cannot be proven | Retain the last trustworthy frame indefinitely | Dashed amber perimeter |
 | Unavailable | Capture or delivery is confirmed unusable and no working exposure can produce a trustworthy presentation | Retain a prior trustworthy frame if one exists; otherwise black | Muted-red double perimeter |
 
 The status strip supplies the exact reason on interaction. A normal 30-second
-exposure remains Live while the previous frame is still the latest completed
-trustworthy image; the exposure rail explains why it is not changing. The state
+exposure remains Live while the retained media keeps advancing; the exposure rail
+explains why its source image is not changing. Exact identity remains a separate
+diagnostic fact. The state
 becomes Stale only after exposure duration plus the authoritative delivery allowance
 passes without the expected presentation.
 

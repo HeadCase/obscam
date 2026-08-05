@@ -698,7 +698,7 @@ fn apply_pending_settings(
 enum SettingsTransition {
     /// No settings target was pending.
     Idle,
-    /// The target became Applied, with any required acquisition abort complete.
+    /// The target became Applied, with transitional frames explicitly fenced.
     Applied {
         /// Completed frames that remain visible but cannot carry exact target metadata.
         untrusted_frames: u8,

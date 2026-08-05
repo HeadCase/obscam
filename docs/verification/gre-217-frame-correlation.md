@@ -15,9 +15,12 @@ dedicated `obscam-media` network namespace. FFmpeg's direct `muxer <-`
 timestamp evidence identifies the exact 90 kHz input-timeline index, while the
 RTP marker packet supplies the corresponding actual RTP timestamp. The observer
 validates RTP version, payload type, SSRC, and sequence continuity without
-blocking the relay. It waits for an RTCP sender report whose sent-packet count
-exactly equals the number received locally before pairing the lossless ordered
-PTS and marker streams. Every subsequent pair must also agree with the anchored
+blocking the relay. FFmpeg is configured with a fixed initial RTP sequence;
+this anchors the lossless ordered PTS and marker streams without waiting for a
+periodic RTCP report. The
+the observer requires that first packet and continuous sequence thereafter, so
+missing the first or any subsequent packet permanently invalidates exact
+evidence. Every subsequent pair must also agree with the anchored
 RTP delta. Queue pressure, packet loss, or disagreement permanently stops
 correlation for that stream epoch while media forwarding continues. It never
 substitutes frame arrival order or the newest server generation.

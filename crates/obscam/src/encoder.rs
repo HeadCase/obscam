@@ -6,7 +6,7 @@ use std::{
     process::{Child, ChildStderr, ChildStdin, Command, Stdio},
     sync::{
         Arc,
-        atomic::{AtomicBool, AtomicU32, Ordering},
+        atomic::{AtomicBool, Ordering},
         mpsc::{self, Receiver, RecvTimeoutError, SyncSender},
     },
     thread,
@@ -24,6 +24,7 @@ const RTP_URL: &str = "rtp://127.0.0.1:5002?rtcpport=5003&pkt_size=1200";
 const RTP_CLOCK_STEP: u64 = 4_500;
 const RTP_PAYLOAD_TYPE: u8 = 96;
 const RTP_SSRC: u32 = 1_868_722_033;
+const RTP_INITIAL_SEQUENCE: u16 = 1_000;
 
 /// One long-lived `FFmpeg` hardware-H.264 publication child.
 #[derive(Debug)]
@@ -122,7 +123,7 @@ impl FfmpegEncoder {
         })
     }
 
-    fn arguments() -> [&'static str; 37] {
+    fn arguments() -> [&'static str; 39] {
         [
             "-hide_banner",
             "-loglevel",
@@ -156,6 +157,8 @@ impl FfmpegEncoder {
             "96",
             "-ssrc",
             "1868722033",
+            "-seq",
+            "1000",
             "-flush_packets",
             "1",
             "-f",
@@ -426,12 +429,9 @@ impl RtpObserver {
         let media_relay = parse_address(RTP_RELAY_ADDRESS)?;
         let control_relay = parse_address(RTCP_RELAY_ADDRESS)?;
         let stop = Arc::new(AtomicBool::new(false));
-        let observed_packets = Arc::new(AtomicU32::new(0));
         let (rtp_sender, rtp_receiver) = mpsc::sync_channel(128);
-        let (report_sender, report_receiver) = mpsc::sync_channel(4);
         let media_stop = Arc::clone(&stop);
         let media_evidence = Arc::clone(evidence_valid);
-        let media_packet_count = Arc::clone(&observed_packets);
         let media_thread = thread::Builder::new()
             .name("obscam-rtp-observer".into())
             .spawn(move || {
@@ -442,12 +442,10 @@ impl RtpObserver {
                     &rtp_sender,
                     &media_stop,
                     &media_evidence,
-                    &media_packet_count,
                 );
             })?;
         let control_stop = Arc::clone(&stop);
         let control_evidence = Arc::clone(evidence_valid);
-        let control_packet_count = Arc::clone(&observed_packets);
         let control_thread = thread::Builder::new()
             .name("obscam-rtcp-relay".into())
             .spawn(move || {
@@ -455,10 +453,8 @@ impl RtpObserver {
                     &control_socket,
                     &control_relay_socket,
                     control_relay,
-                    &report_sender,
                     &control_stop,
                     &control_evidence,
-                    &control_packet_count,
                 );
             })?;
         let correlate_stop = Arc::clone(&stop);
@@ -471,7 +467,6 @@ impl RtpObserver {
                     stream_epoch,
                     &pts_receiver,
                     &rtp_receiver,
-                    &report_receiver,
                     &correlate_stop,
                     &correlate_evidence,
                 );
@@ -544,7 +539,6 @@ fn pair_timestamps(
     stream_epoch: u64,
     pts_receiver: &Receiver<u64>,
     rtp_receiver: &Receiver<u32>,
-    report_receiver: &Receiver<(u32, u32)>,
     stop: &AtomicBool,
     evidence_valid: &AtomicBool,
 ) {
@@ -553,7 +547,6 @@ fn pair_timestamps(
             tracing::warn!("incomplete RTP evidence; correlation stopped for stream epoch");
             return;
         }
-        while report_receiver.try_recv().is_ok() {}
         let pts = match pts_receiver.recv_timeout(Duration::from_millis(100)) {
             Ok(pts) => pts,
             Err(mpsc::RecvTimeoutError::Timeout) => continue,
@@ -594,10 +587,9 @@ fn relay_rtp(
     timestamps: &SyncSender<u32>,
     stop: &AtomicBool,
     evidence_valid: &AtomicBool,
-    observed_packets: &AtomicU32,
 ) {
     let mut packet = [0_u8; 2_048];
-    let mut previous_sequence = None;
+    let mut previous_sequence = Some(RTP_INITIAL_SEQUENCE.wrapping_sub(1));
     let mut relay_available = true;
     while !stop.load(Ordering::Acquire) {
         let Ok(length) = socket.recv(&mut packet) else {
@@ -607,11 +599,14 @@ fn relay_rtp(
             evidence_valid.store(false, Ordering::Release);
             continue;
         };
-        if previous_sequence.is_some_and(|previous: u16| sequence != previous.wrapping_add(1)) {
+        if sequence
+            != previous_sequence
+                .expect("RTP sequence is initialized")
+                .wrapping_add(1)
+        {
             evidence_valid.store(false, Ordering::Release);
         }
         previous_sequence = Some(sequence);
-        observed_packets.fetch_add(1, Ordering::AcqRel);
         if !forward_packet(
             relay_socket,
             &packet[..length],
@@ -632,10 +627,8 @@ fn relay_rtcp(
     socket: &UdpSocket,
     relay_socket: &UdpSocket,
     relay: SocketAddr,
-    reports: &SyncSender<(u32, u32)>,
     stop: &AtomicBool,
     evidence_valid: &AtomicBool,
-    observed_packets: &AtomicU32,
 ) {
     let mut packet = [0_u8; 2_048];
     let mut relay_available = true;
@@ -643,22 +636,18 @@ fn relay_rtcp(
         let Ok(length) = socket.recv(&mut packet) else {
             continue;
         };
-        let Some(sender_packets) = sender_report_packet_count(&packet[..length]) else {
+        let Some(_sender_packets) = sender_report_packet_count(&packet[..length]) else {
             evidence_valid.store(false, Ordering::Release);
             continue;
         };
-        if !forward_packet(
+        let _ = forward_packet(
             relay_socket,
             &packet[..length],
             relay,
             "RTCP",
             &mut relay_available,
             evidence_valid,
-        ) {
-            continue;
-        }
-        let observed = observed_packets.load(Ordering::Acquire);
-        submit_evidence(reports, (sender_packets, observed), evidence_valid);
+        );
     }
 }
 
@@ -884,7 +873,7 @@ mod tests {
     }
 
     #[test]
-    fn direct_pts_and_rtp_marker_establish_correlation_before_an_rtcp_report() {
+    fn fixed_initial_sequence_and_direct_markers_establish_correlation() {
         use crate::{Treatment, correlation::CapturedFrameMetadata};
         use uuid::Uuid;
 
@@ -906,26 +895,23 @@ mod tests {
         let mut updates = correlation.subscribe();
         let (pts_sender, pts_receiver) = mpsc::sync_channel(1);
         let (rtp_sender, rtp_receiver) = mpsc::sync_channel(1);
-        let (report_sender, report_receiver) = mpsc::sync_channel(1);
         pts_sender.send(0).expect("PTS evidence");
         rtp_sender.send(90_000).expect("RTP marker evidence");
         drop(pts_sender);
         drop(rtp_sender);
-        drop(report_sender);
 
         pair_timestamps(
             &correlation,
             stream_epoch,
             &pts_receiver,
             &rtp_receiver,
-            &report_receiver,
             &AtomicBool::new(false),
             &AtomicBool::new(true),
         );
 
         let mapping = updates
             .try_recv()
-            .expect("direct evidence publishes a mapping");
+            .expect("fixed-sequence evidence publishes a mapping");
         assert_eq!(mapping.source_generation(), 7);
         assert_eq!(mapping.rtp_timestamp(), 90_000);
     }

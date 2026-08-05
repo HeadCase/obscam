@@ -236,9 +236,10 @@ pub trait CameraSource {
 
     /// Applies one validated complete settings tuple while acquisition remains active.
     ///
-    /// The active exposure is abandoned at this seam. A source may still emit a
-    /// bounded number of visually transitional frames before the new tuple is
-    /// trustworthy; callers must not infer exact settings identity for them.
+    /// The SDK controls change while acquisition remains warm. The camera may
+    /// complete an already-integrating exposure and may emit a bounded number
+    /// of visually transitional frames before the new tuple is trustworthy;
+    /// callers must not infer exact settings identity for them.
     ///
     /// # Errors
     ///

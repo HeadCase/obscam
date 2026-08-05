@@ -254,6 +254,10 @@ async fn production_assets_expose_the_complete_unavailable_viewer_shell() {
         script_head.contains("content-type: text/javascript"),
         "{script_head}"
     );
+    assert!(
+        script_head.contains("cache-control: no-store"),
+        "{script_head}"
+    );
     assert!(script.contains("/api/v1/runtime"));
     assert!(script.contains("/api/v1/service-quality/summary"));
     assert!(script.contains("RTCPeerConnection"));
@@ -262,6 +266,10 @@ async fn production_assets_expose_the_complete_unavailable_viewer_shell() {
     let (style_head, style) = get(address, "/assets/styles.css").await;
     assert!(
         style_head.contains("content-type: text/css"),
+        "{style_head}"
+    );
+    assert!(
+        style_head.contains("cache-control: no-store"),
         "{style_head}"
     );
     assert!(style.contains(".viewer"));

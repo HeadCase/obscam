@@ -532,8 +532,8 @@ function renderSettingEvidence(
   if (state.settings.pending !== null) {
     const applied = state.settings.applied.generation >= state.settings.pending.generation;
     entries.push({
-      label: applied ? "Requested · awaiting visibility" : "Requested · awaiting camera",
-      kind: "requested",
+      label: applied ? "Applied · awaiting visibility" : "Requested · awaiting camera",
+      kind: applied ? "applied" : "requested",
       settings: state.settings.pending.settings
     });
   }
