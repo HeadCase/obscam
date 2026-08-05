@@ -35,6 +35,7 @@ pub struct FfmpegEncoder {
     observer: Option<RtpObserver>,
     correlation: Option<(CorrelationState, u64)>,
     evidence_valid: Arc<AtomicBool>,
+    evidence_degradation_reported: bool,
 }
 
 impl FfmpegEncoder {
@@ -117,6 +118,7 @@ impl FfmpegEncoder {
             observer,
             correlation,
             evidence_valid,
+            evidence_degradation_reported: false,
         })
     }
 
@@ -224,10 +226,9 @@ impl FfmpegEncoder {
     }
 
     pub(crate) fn verify_running(&mut self) -> io::Result<()> {
-        if !self.evidence_valid.load(Ordering::Acquire) {
-            return Err(io::Error::other(
-                "FFmpeg correlation evidence became incomplete",
-            ));
+        if !self.evidence_valid.load(Ordering::Acquire) && !self.evidence_degradation_reported {
+            tracing::warn!("FFmpeg correlation evidence became incomplete; media continues");
+            self.evidence_degradation_reported = true;
         }
         match self
             .child
@@ -547,25 +548,12 @@ fn pair_timestamps(
     stop: &AtomicBool,
     evidence_valid: &AtomicBool,
 ) {
-    let mut timeline_proven = false;
     while !stop.load(Ordering::Acquire) {
         if !evidence_valid.load(Ordering::Acquire) {
             tracing::warn!("incomplete RTP evidence; correlation stopped for stream epoch");
             return;
         }
-        if timeline_proven {
-            while report_receiver.try_recv().is_ok() {}
-        } else {
-            match report_receiver.recv_timeout(Duration::from_millis(100)) {
-                Ok((sender_packets, observed_packets))
-                    if report_proves_complete_timeline(sender_packets, observed_packets) =>
-                {
-                    timeline_proven = true;
-                }
-                Ok(_) | Err(mpsc::RecvTimeoutError::Timeout) => continue,
-                Err(mpsc::RecvTimeoutError::Disconnected) => return,
-            }
-        }
+        while report_receiver.try_recv().is_ok() {}
         let pts = match pts_receiver.recv_timeout(Duration::from_millis(100)) {
             Ok(pts) => pts,
             Err(mpsc::RecvTimeoutError::Timeout) => continue,
@@ -597,10 +585,6 @@ fn pair_timestamps(
             }
         }
     }
-}
-
-const fn report_proves_complete_timeline(sender_packets: u32, observed_packets: u32) -> bool {
-    sender_packets > 0 && observed_packets >= sender_packets
 }
 
 fn relay_rtp(
@@ -840,7 +824,7 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
-    fn incomplete_correlation_evidence_restarts_a_running_encoder() {
+    fn incomplete_correlation_evidence_does_not_stop_healthy_media() {
         use std::{fs, os::unix::fs::PermissionsExt};
 
         use uuid::Uuid;
@@ -854,11 +838,9 @@ mod tests {
         let mut encoder = FfmpegEncoder::start_owned(&program).expect("start fake FFmpeg");
         encoder.evidence_valid.store(false, Ordering::Release);
 
-        let error = encoder
+        encoder
             .verify_running()
-            .expect_err("incomplete evidence must invalidate a running encoder");
-
-        assert!(error.to_string().contains("correlation evidence"));
+            .expect("correlation may degrade without stopping a healthy encoder");
         fs::remove_dir_all(directory).expect("remove test directory");
     }
 
@@ -902,11 +884,50 @@ mod tests {
     }
 
     #[test]
-    fn rtcp_timeline_proof_accepts_observer_progress_after_the_sender_report() {
-        assert!(report_proves_complete_timeline(100, 100));
-        assert!(report_proves_complete_timeline(100, 103));
-        assert!(!report_proves_complete_timeline(100, 99));
-        assert!(!report_proves_complete_timeline(0, 0));
+    fn direct_pts_and_rtp_marker_establish_correlation_before_an_rtcp_report() {
+        use crate::{Treatment, correlation::CapturedFrameMetadata};
+        use uuid::Uuid;
+
+        let correlation = CorrelationState::new(Uuid::from_u128(1));
+        let stream_epoch = correlation.begin_stream();
+        correlation
+            .submit(
+                stream_epoch,
+                CapturedFrameMetadata {
+                    settings_generation: 3,
+                    treatment: Treatment::Monochrome,
+                    exposure_completed_at_unix_us: 1,
+                },
+                7,
+                2,
+                false,
+            )
+            .expect("current stream accepts input metadata");
+        let mut updates = correlation.subscribe();
+        let (pts_sender, pts_receiver) = mpsc::sync_channel(1);
+        let (rtp_sender, rtp_receiver) = mpsc::sync_channel(1);
+        let (report_sender, report_receiver) = mpsc::sync_channel(1);
+        pts_sender.send(0).expect("PTS evidence");
+        rtp_sender.send(90_000).expect("RTP marker evidence");
+        drop(pts_sender);
+        drop(rtp_sender);
+        drop(report_sender);
+
+        pair_timestamps(
+            &correlation,
+            stream_epoch,
+            &pts_receiver,
+            &rtp_receiver,
+            &report_receiver,
+            &AtomicBool::new(false),
+            &AtomicBool::new(true),
+        );
+
+        let mapping = updates
+            .try_recv()
+            .expect("direct evidence publishes a mapping");
+        assert_eq!(mapping.source_generation(), 7);
+        assert_eq!(mapping.rtp_timestamp(), 90_000);
     }
 
     #[test]

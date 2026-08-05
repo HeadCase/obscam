@@ -95,16 +95,14 @@ function reconcilePending(state, mapping) {
         pendingPresentations: state.pendingPresentations.filter((candidate) => candidate.rtpTimestamp !== mapping.rtpTimestamp)
     };
     const exact = exactAt(mapping, pending.presentedAtUnixUs);
-    const isCurrentPresentation = pending.sequence === state.latestPresentationSequence;
     return {
         state: next,
-        presented: exact && isCurrentPresentation ? mapping : null,
-        presentedAtUnixUs: exact && isCurrentPresentation ? pending.presentedAtUnixUs : null
+        presented: exact ? mapping : null,
+        presentedAtUnixUs: exact ? pending.presentedAtUnixUs : null
     };
 }
 function exactAt(mapping, presentedAtUnixUs) {
-    return presentedAtUnixUs >= mapping.submittedAtUnixUs &&
-        presentedAtUnixUs - mapping.submittedAtUnixUs <= MAX_MAPPING_AGE_US;
+    return Math.abs(presentedAtUnixUs - mapping.submittedAtUnixUs) <= MAX_MAPPING_AGE_US;
 }
 export function parseFrameMapping(value) {
     if (!isRecord(value) ||

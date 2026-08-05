@@ -28,7 +28,8 @@ const ENCODER_PUBLICATION_INTERVAL: Duration = Duration::from_millis(50);
 const RELAY_METRICS_ADDRESS: &str = "169.254.218.2:9998";
 const RELAY_PROBE_INTERVAL: Duration = Duration::from_millis(500);
 const RELAY_PROBE_TIMEOUT: Duration = Duration::from_millis(250);
-const MAX_LIVE_SETTINGS_TRANSITION_FRAMES: u8 = 2;
+const CAPTURE_INTERRUPT_POLL_MS: i32 = 25;
+const MAX_SENSOR_TRANSITION_FRAMES: u8 = 2;
 
 #[derive(Debug, Default)]
 struct SettingsFrameTrust {
@@ -36,12 +37,8 @@ struct SettingsFrameTrust {
 }
 
 impl SettingsFrameTrust {
-    const fn begin_transition(&mut self, camera_controls_changed: bool) {
-        self.untrusted_remaining = if camera_controls_changed {
-            MAX_LIVE_SETTINGS_TRANSITION_FRAMES
-        } else {
-            0
-        };
+    const fn begin_transition(&mut self, untrusted_frames: u8) {
+        self.untrusted_remaining = untrusted_frames;
     }
 
     const fn permits_exact_metadata(&mut self) -> bool {
@@ -486,10 +483,8 @@ fn capture_session(
         match apply_pending_settings(source, &settings, |generation| {
             raw.begin_epoch(generation);
         }) {
-            Ok(SettingsTransition::Applied {
-                camera_controls_changed,
-            }) => {
-                settings_frame_trust.begin_transition(camera_controls_changed);
+            Ok(SettingsTransition::Applied { untrusted_frames }) => {
+                settings_frame_trust.begin_transition(untrusted_frames);
                 if let Some(token) = watchdog_token.take() {
                     if watchdog.cancellation_requested(token) {
                         return CaptureSessionEnd {
@@ -536,7 +531,7 @@ fn capture_session(
         }
         let capture_wait_started = Instant::now();
         let epoch = raw.current_epoch();
-        match source.capture_next(100) {
+        match source.capture_next(CAPTURE_INTERRUPT_POLL_MS) {
             Ok(frame) => {
                 let token = watchdog_token.expect("watchdog armed");
                 if watchdog.cancellation_requested(token) {
@@ -674,6 +669,9 @@ fn apply_pending_settings(
         return Ok(SettingsTransition::Idle);
     };
     let previous = controller.snapshot().applied().settings();
+    let exposure_changed = previous.exposure_ms() != target.settings().exposure_ms();
+    let exposure_shortened = target.settings().exposure_ms() < previous.exposure_ms();
+    let gain_changed = previous.gain() != target.settings().gain();
     let camera_controls_changed = previous.camera_settings() != target.settings().camera_settings();
     if camera_controls_changed
         && let Err(error) = source.apply_live_settings(target.settings().camera_settings())
@@ -685,11 +683,14 @@ fn apply_pending_settings(
         controller.mark_camera_ready();
         return Ok(SettingsTransition::Restored(error));
     }
+    let untrusted_frames = if gain_changed || exposure_shortened {
+        MAX_SENSOR_TRANSITION_FRAMES
+    } else {
+        u8::from(exposure_changed)
+    };
     begin_epoch(target.generation());
     controller.mark_applied(target);
-    Ok(SettingsTransition::Applied {
-        camera_controls_changed,
-    })
+    Ok(SettingsTransition::Applied { untrusted_frames })
 }
 
 /// Outcome of one bounded settings transition attempt.
@@ -697,10 +698,10 @@ fn apply_pending_settings(
 enum SettingsTransition {
     /// No settings target was pending.
     Idle,
-    /// The target became Applied without stopping capture.
+    /// The target became Applied, with any required acquisition abort complete.
     Applied {
-        /// Whether sensor controls changed and may yield transitional frames.
-        camera_controls_changed: bool,
+        /// Completed frames that remain visible but cannot carry exact target metadata.
+        untrusted_frames: u8,
     },
     /// Applying failed, the target was failed, and the prior tuple was restored.
     Restored(zwo_asi::CameraError),
@@ -989,10 +990,31 @@ mod tests {
     }
 
     #[test]
-    fn live_camera_control_changes_keep_two_transition_frames_visible_but_untrusted() {
+    fn gain_changes_keep_two_transition_frames_visible_but_untrusted() {
         let mut trust = SettingsFrameTrust::default();
 
-        trust.begin_transition(true);
+        trust.begin_transition(2);
+
+        assert!(!trust.permits_exact_metadata());
+        assert!(!trust.permits_exact_metadata());
+        assert!(trust.permits_exact_metadata());
+    }
+
+    #[test]
+    fn a_lengthened_exposure_discards_only_the_old_in_flight_frame() {
+        let mut trust = SettingsFrameTrust::default();
+
+        trust.begin_transition(1);
+
+        assert!(!trust.permits_exact_metadata());
+        assert!(trust.permits_exact_metadata());
+    }
+
+    #[test]
+    fn a_shortened_exposure_keeps_two_transition_frames_visible_but_untrusted() {
+        let mut trust = SettingsFrameTrust::default();
+
+        trust.begin_transition(2);
 
         assert!(!trust.permits_exact_metadata());
         assert!(!trust.permits_exact_metadata());
@@ -1023,18 +1045,18 @@ mod tests {
         assert!(matches!(
             transition,
             SettingsTransition::Applied {
-                camera_controls_changed: false
+                untrusted_frames: 0
             }
         ));
         assert_eq!(camera.live_settings_applications, 0);
         assert_eq!(stops.load(Ordering::SeqCst), 0);
         let mut trust = SettingsFrameTrust::default();
-        trust.begin_transition(false);
+        trust.begin_transition(0);
         assert!(trust.permits_exact_metadata());
     }
 
     #[test]
-    fn pending_tuple_runs_the_complete_camera_and_generation_transition() {
+    fn shortening_an_exposure_keeps_warm_acquisition_running() {
         let mut inner =
             DeterministicCamera::connect(DeterministicScenario::new([])).expect("camera present");
         inner
@@ -1061,12 +1083,16 @@ mod tests {
         assert!(matches!(
             transition,
             SettingsTransition::Applied {
-                camera_controls_changed: true
+                untrusted_frames: 2
             }
         ));
 
         assert_eq!(boundaries, [target.generation()]);
-        assert_eq!(stops.load(Ordering::SeqCst), 0, "capture remains active");
+        assert_eq!(
+            stops.load(Ordering::SeqCst),
+            0,
+            "live settings do not restart warm acquisition"
+        );
         assert_eq!(controller.snapshot().applied(), target);
         let frame = camera
             .capture_next(100)

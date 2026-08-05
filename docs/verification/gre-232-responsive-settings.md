@@ -8,94 +8,73 @@ ASI662MC, hardware H.264, MediaMTX v1.19.3, and the Mac Playwright browser.
 - Official ZWO SDK: `libASICamera2.so.1.41`
 - SHA-256:
   `3ecf511979ed571131e7d7f4a467112aba21940b4dc91d63bd109b9683bf67c4`
-- Capture remained running while exposure and ISO controls changed dynamically.
-- The first two frames after a sensor-control change remained visible but were
-  withheld from exact correlation as approved transition frames.
+- Exposure and gain controls change while SDK video acquisition remains warm.
+- A longer exposure withholds one transitional frame from exact identity. A
+  shorter exposure or gain change withholds at most two. Transitional frames
+  remain visible as approved; the camera handle and video acquisition are not
+  restarted.
 
-## Settings timing
+## Accepted real-camera timing contract
 
-For a 500 ms to 100 ms exposure change:
+Real hardware established that restarting SDK video capture adds a variable
+first-frame penalty. The accepted production contract instead keeps capture
+warm and uses these browser-visible bounds:
 
-- Browser draft projection was immediate.
-- The UI immediately showed `Requested · awaiting acceptance` after Apply.
-- Rust accepted the complete tuple at `15:30:53.937478`.
-- Active-exposure abandonment was requested at `15:30:53.937541`.
-- The camera applied the tuple at `15:30:53.975553`, 38 ms after acceptance.
-- The browser established the first exact Visible frame after 1.463 seconds.
+- Normal: requested exposure + 700 ms.
+- Hard: requested exposure + 1,000 ms.
+- Therefore 5 s to 200 ms is 900 ms normal / 1,200 ms hard.
+- Therefore 30 s to 100 ms is 800 ms normal / 1,100 ms hard.
 
-For the return to 500 ms, camera application completed 51 ms after acceptance.
-No camera restart occurred for either transition.
+Timing uses the generation-correlated browser mark for the first exact frame,
+not button state or a retained prior image.
 
-The original 500 ms browser-visible acceptance threshold is not met. Honest
-transition-frame handling and the current Mac-to-Pi network path remain in that
-measurement; transition frames were not relabelled as exact.
+### Real-camera samples
 
-## Publication and correlation
+- 5 s to 200 ms: 824 ms, 623 ms, and 838 ms.
+- 30 s to 100 ms: 425 ms, 439 ms, and 550 ms.
+- All six samples met the normal target.
+- A move from 500 ms to 5 s becomes exact after one requested exposure plus
+  processing and delivery, rather than waiting for two 5 s frames.
 
-- FFmpeg input is paced at 20 fps (one publication every 50 ms).
-- Exposures slower than 50 ms repeat the latest completed frame.
-- Exposures faster than 50 ms use latest-only replacement and intentionally
-  discard intermediate camera frames before encoding.
-- Direct FFmpeg PTS and RTP marker pairs remain authoritative when the hardware
-  encoder skips an input. Skips no longer force a healthy encoder restart.
-- A real-camera soak exceeding seven minutes, including both settings changes,
-  completed with zero encoder replacements, zero camera restarts, and zero
-  correlation conflicts after direct-pair correlation was deployed.
+## Startup and primary status
 
-## Browser diagnostics
+- Fresh Mac browser samples reached `Live` in 909-1,417 ms.
+- Startup no longer waits for an RTCP sender report before declaring advancing
+  decoded media Live.
+- Primary status progresses through `Unavailable`, `Reconnecting`, and
+  `Waiting for first image` to `Live`.
+- Healthy retained media remains `Live` during a long exposure and during a
+  settings transition. Settings progress remains separately visible.
+- A normal source-generation advance does not reconnect WHEP. Runtime-epoch
+  changes and genuine component recovery retain their fail-closed reconnects.
 
-- Exposure, ISO, and treatment independently show Draft, Requested, Visible,
-  and Rejected evidence without claiming unproved application or visibility.
-- A replacement encoder stream fences the prior exact browser presentation.
-- Unknown observations remain unknown and are accepted by the diagnostics API;
-  stale-stream exact reports no longer produce repeated HTTP 400 responses.
-- Clock calibration takes three samples and retains the lowest-round-trip
-  result. Concurrent WHEP startup attempts share one quality-client connection.
-- Diagnostics initialization runs outside the media startup critical path. An
-  end-to-end browser contract blocks the clock endpoint and verifies that the
-  first WHEP request still begins without waiting for clock calibration.
+## Publication, correlation, and diagnostics
 
-The final Mac Playwright probe held clock calibration for 15 seconds. The WHEP
-POST began after 7.139 seconds, before calibration was released. The normal
-page produced no browser-console errors; the remote route was nevertheless
-degraded enough to report `Stale` at 0.7 presented frames per second during the
-sample.
+- FFmpeg input remains continuously paced at 20 fps. Slow camera exposures
+  repeat the latest completed image; faster camera rates use latest-only
+  replacement and may intentionally drop intermediate frames.
+- Exact RTP evidence is established directly from FFmpeg PTS and RTP markers;
+  correlation no longer waits roughly five seconds for the first RTCP sender
+  report.
+- A mapping that arrives one browser callback late still proves the most
+  recently presented frame while preserving the newer callback as pending.
+- Bounded Mac/Pi clock skew no longer rejects an exact RTP identity merely
+  because the calibrated browser timestamp is slightly earlier than the Pi
+  submission timestamp.
+- Service-quality reports are fenced across reconnect generations, preventing
+  queued or in-flight observations from a replaced track poisoning the next
+  connection.
+- The banner reports the current quality partition. Historical startup
+  unknowns remain available in the downloadable JSON instead of being mixed
+  into current settings diagnostics.
+- Final steady samples included `508 exact · 0 unknown` at 100 ms and
+  `5 exact · 0 unknown` immediately after the final 5 s to 200 ms transition.
 
-The Pi clock endpoint responded locally in 1.2 ms. During this run, the Mac
-observed roughly 830-970 ms per clock request over `10.44.0.1` and 688-1,198 ms
-over the LAN fallback. Consequently, browser clock uncertainty remained large
-and the displayed frame-age number cannot isolate application latency more
-precisely than that uncertainty on this network path.
+## Edge checks
 
-### Diagnostics traffic and startup
-
-The original live diagnostics response retained all 512 raw samples and was
-167,223 bytes. Fetching that response as often as every 500 ms created roughly
-2.7 Mbps of HTTP traffic per viewer and built TCP send queues on the constrained
-WAN path. The live browser now requests a distinct aggregate-only response;
-real-browser samples were 1,218-1,234 bytes. The full retained report remains
-available only when the operator requests the Quality JSON download.
-
-The production browser code is one minified 48,593-byte bundle instead of an
-entry module followed by eight separately discovered modules. Cold Mac browser
-contexts began WHEP after 2.942, 5.520, and 6.679 seconds. The remaining spread
-tracks the external WAN queue: Pi-to-router ICMP averaged 0.857 ms, while the
-same run observed 20-1,205 ms to the Mac WireGuard peer and approximately
-1.1 seconds to a public Internet address. WHEP began 162 ms after the runtime
-response in the detailed bundled trace.
-
-## Resource pressure
-
-At 500 ms exposure with continuous 20 fps hardware publication:
-
-- ObsCam: approximately 11-15% of one CPU core, 42 MB RSS.
-- FFmpeg: approximately 10% of one CPU core, 63 MB RSS.
-- Combined usage is approximately 6% of the Pi's four-core CPU capacity.
-- RSS was effectively unchanged from the prior variable-rate publication path.
-
-## Multi-viewer acceptance
-
-Four simultaneous Mac browser pages reached Live at native 1920x1080 and all
-continued advancing. In the corrected readiness sample, all four advanced over
-the same two-second interval. No secondary media path or spatial reduction was
-used.
+- Repeated settings changes retained one WHEP quality connection generation;
+  settings no longer caused media reconnects.
+- Browser-visible media remained Live through the settings series.
+- Exact settings partitions contained zero unknown samples.
+- No encoder replacement or camera reopen occurred during the final continuous
+  capture series.

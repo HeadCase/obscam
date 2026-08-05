@@ -56,6 +56,28 @@ test("an exact current-stream presentation survives qualified hardware pipeline 
   );
 });
 
+test("an exact RTP identity survives bounded browser and service clock skew", () => {
+  let state = initialPresentationState(runtimeEpoch, 2);
+  state = reducePresentation(state, { type: "mapping", mapping: parseFrameMapping(mapping) }).state;
+
+  assert.equal(
+    reducePresentation(state, {
+      type: "presented",
+      rtpTimestamp: mapping.rtpTimestamp,
+      nowUnixUs: mapping.submittedAtUnixUs - 250_000
+    }).presented?.sourceGeneration,
+    81
+  );
+  assert.equal(
+    reducePresentation(state, {
+      type: "presented",
+      rtpTimestamp: mapping.rtpTimestamp,
+      nowUnixUs: mapping.submittedAtUnixUs - 2_000_001
+    }).presented,
+    null
+  );
+});
+
 test("a mapping arriving after its video callback reconciles the pending presentation", () => {
   let state = initialPresentationState(runtimeEpoch, 2);
   const presentedAtUnixUs = mapping.submittedAtUnixUs + 50_000;
@@ -78,7 +100,7 @@ test("a mapping arriving after its video callback reconciles the pending present
   assert.equal(reconciled.state.pendingPresentations.length, 0);
 });
 
-test("a historical late mapping cannot replace a newer presented callback", () => {
+test("a late exact mapping remains evidence while a newer callback stays pending", () => {
   let state = initialPresentationState(runtimeEpoch, 2);
   state = reducePresentation(state, {
     type: "presented",
@@ -96,8 +118,8 @@ test("a historical late mapping cannot replace a newer presented callback", () =
     mapping: parseFrameMapping(mapping)
   });
 
-  assert.equal(historical.presented, null);
-  assert.equal(historical.presentedAtUnixUs, null);
+  assert.equal(historical.presented?.sourceGeneration, 81);
+  assert.equal(historical.presentedAtUnixUs, mapping.submittedAtUnixUs + 50_000);
   assert.equal(historical.state.pendingPresentations.length, 1);
 });
 

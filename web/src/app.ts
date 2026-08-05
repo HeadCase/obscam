@@ -231,6 +231,7 @@ async function boot(): Promise<void> {
     ): void => {
       const currentMedia = acceptsMediaPresentation(viewer, mediaConnectionGeneration);
       const nowUnixUs = currentServerUnixUs(quality, qualityRuntimeEpoch, viewer.runtimeEpoch);
+      let exactlyMappedStreamEpoch: number | null = null;
       if (nowUnixUs !== null) {
         const transition = dispatch({
           type: "presented",
@@ -238,21 +239,22 @@ async function boot(): Promise<void> {
           ...(metadata.rtpTimestamp === undefined ? {} : { rtpTimestamp: metadata.rtpTimestamp }),
           nowUnixUs
         });
-        if (transition.presentation !== null) {
+        if (transition.presentation !== null && !transition.presentation.mapping.repeat) {
+          exactlyMappedStreamEpoch = transition.presentation.mapping.streamEpoch;
           markSettingsTiming("browser-presented-exact", {
             settingsGeneration: transition.presentation.mapping.settingsGeneration,
             unixUs: transition.presentation.presentedAtUnixUs
           });
         }
       }
-      const exact =
+      const trustworthy =
         currentMedia &&
         nowUnixUs !== null &&
         !viewer.awaitingCurrentPresentation &&
         viewer.correlationLostAtUnixUs === null &&
         viewer.trustworthyFrame !== null &&
         viewer.trustworthyFrame.streamEpoch === viewer.presentation.streamEpoch;
-      if (exact && viewer.trustworthyFrame !== null) {
+      if (trustworthy && viewer.trustworthyFrame !== null) {
         const frame = viewer.trustworthyFrame;
         captureTrustworthyFrame(
           video,
@@ -261,10 +263,11 @@ async function boot(): Promise<void> {
         );
         retainedFrame.hidden = true;
       }
+      const exact = currentMedia && exactlyMappedStreamEpoch !== null;
       const observation: QualityObservation = {
         correlation: exact ? "exact" : "unknown",
         streamEpoch: exact
-          ? viewer.trustworthyFrame?.streamEpoch ?? null
+          ? exactlyMappedStreamEpoch
           : viewer.presentation.streamEpoch === 0 ? null : viewer.presentation.streamEpoch,
         presentedFrames: metadata.presentedFrames,
         visibility: document.visibilityState === "visible" ? "visible" : "hidden"
@@ -281,24 +284,23 @@ async function boot(): Promise<void> {
       () => viewer.control,
       controlTransition,
       (mapping) => {
-        markSettingsTiming("exposure-completed", {
-          settingsGeneration: mapping.settingsGeneration,
-          unixUs: mapping.exposureCompletedAtUnixUs
-        });
-        markSettingsTiming("encode-published", {
-          settingsGeneration: mapping.settingsGeneration,
-          unixUs: mapping.submittedAtUnixUs
-        });
+        if (!mapping.repeat) {
+          markSettingsTiming("exposure-completed", {
+            settingsGeneration: mapping.settingsGeneration,
+            unixUs: mapping.exposureCompletedAtUnixUs
+          });
+          markSettingsTiming("encode-published", {
+            settingsGeneration: mapping.settingsGeneration,
+            unixUs: mapping.submittedAtUnixUs
+          });
+        }
         const transition = dispatch({ type: "mapping", mapping });
-        if (transition.presentation !== null) {
+        qualitySettler.promote(mapping.rtpTimestamp, mapping.streamEpoch);
+        if (transition.presentation !== null && !transition.presentation.mapping.repeat) {
           markSettingsTiming("browser-presented-exact", {
             settingsGeneration: transition.presentation.mapping.settingsGeneration,
             unixUs: transition.presentation.presentedAtUnixUs
           });
-          qualitySettler.promote(
-            transition.presentation.mapping.rtpTimestamp,
-            transition.presentation.mapping.streamEpoch
-          );
         }
       },
       (value) => dispatch({ type: "lifecycle", facts: parseLifecycleFacts(value) })

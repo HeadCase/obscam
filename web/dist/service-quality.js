@@ -11,7 +11,10 @@ export class ServiceQualityClient {
     clientId;
     connectionGeneration = 0;
     pending = [];
+    acceptingReports = true;
     reporting = false;
+    reportsIdle = Promise.resolve();
+    finishReporting = null;
     reportTimer = null;
     lastEvidenceAtMs = 0;
     constructor(runtimeEpoch, clock, evidence) {
@@ -27,6 +30,8 @@ export class ServiceQualityClient {
         return client;
     }
     report(observation, presentedAtUnixUs = this.nowUnixUs()) {
+        if (!this.acceptingReports)
+            return;
         if (this.pending.length === MAX_REPORT_BATCH) {
             this.pending.shift();
         }
@@ -38,7 +43,15 @@ export class ServiceQualityClient {
     }
     /** Begins a new server-fenced media connection generation for this tab. */
     async reconnect() {
+        this.acceptingReports = false;
+        this.pending = [];
+        if (this.reportTimer !== null) {
+            window.clearTimeout(this.reportTimer);
+            this.reportTimer = null;
+        }
+        await this.reportsIdle;
         await this.beginConnection();
+        this.acceptingReports = true;
     }
     /** Returns Unix microseconds calibrated to the Rust service clock. */
     nowUnixUs() {
@@ -81,6 +94,9 @@ export class ServiceQualityClient {
             return;
         }
         this.reporting = true;
+        this.reportsIdle = new Promise((resolve) => {
+            this.finishReporting = resolve;
+        });
         const observations = this.pending.splice(0, MAX_REPORT_BATCH);
         try {
             await this.send(observations);
@@ -95,6 +111,8 @@ export class ServiceQualityClient {
         }
         finally {
             this.reporting = false;
+            this.finishReporting?.();
+            this.finishReporting = null;
             this.scheduleReport();
         }
     }
@@ -138,15 +156,16 @@ export function serviceQualityText(response) {
     if (client === undefined || client.sampleCount === 0) {
         return "No quality samples";
     }
-    const latestExact = [...client.partitions]
+    const current = [...client.partitions]
         .reverse()
         .find((partition) => partition.connectionGeneration === client.connectionGeneration &&
-        partition.visibility === "visible" &&
-        partition.exactCorrelation > 0);
-    const measured = latestExact === undefined
+        partition.visibility === "visible");
+    const measured = current === undefined || current.exactCorrelation === 0
         ? ""
-        : ` · ${formatCadence(latestExact.uniquePresentedCadenceHz)} · p95 ${formatLatency(latestExact.latencyUs?.p95 ?? null)}`;
-    return `${client.sampleCount} samples · ${client.exactCorrelation} exact · ${client.unknownCorrelation} unknown${measured}`;
+        : ` · ${formatCadence(current.uniquePresentedCadenceHz)} · p95 ${formatLatency(current.latencyUs?.p95 ?? null)}`;
+    return current === undefined
+        ? "No quality samples"
+        : `${current.sampleCount} samples · ${current.exactCorrelation} exact · ${current.unknownCorrelation} unknown${measured}`;
 }
 export function downloadServiceQuality(response, clientId) {
     const url = URL.createObjectURL(new Blob([`${JSON.stringify(response, null, 2)}\n`], { type: "application/json" }));

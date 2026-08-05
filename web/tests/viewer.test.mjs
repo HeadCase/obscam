@@ -72,7 +72,7 @@ test("primary media states follow authoritative progress and exact presentation"
   assert.equal(viewerProjection(state).status, "Reconnecting");
 
   state = dispatch(state, { type: "lifecycle", facts: ready });
-  assert.equal(viewerProjection(state).status, "Capturing");
+  assert.equal(viewerProjection(state).status, "Waiting for first image");
 
   state = dispatch(state, { type: "media_connected" });
   state = dispatch(state, { type: "mapping", mapping });
@@ -85,6 +85,22 @@ test("primary media states follow authoritative progress and exact presentation"
   assert.equal(viewerProjection(state).sourceGeneration, 81);
 });
 
+test("advancing decoded video is Live before exact correlation arrives", () => {
+  let state = readyState();
+  state = dispatch(state, { type: "media_connected" });
+  state = dispatch(state, {
+    type: "presented",
+    rtpTimestamp: mapping.rtpTimestamp,
+    nowUnixUs: mapping.submittedAtUnixUs + 20_000
+  });
+
+  const projection = viewerProjection(state);
+  assert.equal(projection.status, "Live");
+  assert.equal(projection.detail, "Frame identity pending");
+  assert.equal(projection.sourceGeneration, undefined);
+  assert.equal(state.awaitingCurrentPresentation, true, "Visible still requires exact evidence");
+});
+
 test("a mapping that follows its callback retroactively establishes the exact visible frame", () => {
   let state = readyState();
   state = dispatch(state, { type: "media_connected" });
@@ -93,7 +109,7 @@ test("a mapping that follows its callback retroactively establishes the exact vi
     rtpTimestamp: mapping.rtpTimestamp,
     nowUnixUs: mapping.submittedAtUnixUs + 20_000
   });
-  assert.equal(viewerProjection(state).status, "Capturing");
+  assert.equal(viewerProjection(state).status, "Live");
 
   const transition = reduceViewer(state, { type: "mapping", mapping });
   state = transition.state;
@@ -103,7 +119,7 @@ test("a mapping that follows its callback retroactively establishes the exact vi
   assert.equal(state.correlationLostAtUnixUs, null);
 });
 
-test("a mapping for an older callback cannot establish current visible state", () => {
+test("a late mapping establishes the newest proven frame without discarding a newer callback", () => {
   let state = readyState();
   state = dispatch(state, { type: "media_connected" });
   state = dispatch(state, {
@@ -119,9 +135,9 @@ test("a mapping for an older callback cannot establish current visible state", (
 
   const transition = reduceViewer(state, { type: "mapping", mapping });
 
-  assert.equal(transition.presentation, null);
-  assert.equal(transition.state.trustworthyFrame, null);
-  assert.equal(transition.state.correlationLostAtUnixUs, mapping.submittedAtUnixUs + 20_000);
+  assert.equal(transition.presentation?.mapping.sourceGeneration, 81);
+  assert.equal(transition.state.trustworthyFrame?.sourceGeneration, 81);
+  assert.equal(transition.state.presentation.pendingPresentations.length, 1);
 });
 
 test("a replacement encoder stream fences the prior exact presentation", () => {
@@ -170,7 +186,7 @@ test("lifecycle facts fail closed at the browser boundary", () => {
   );
 });
 
-test("a progressing long exposure retains the trustworthy frame as Capturing", () => {
+test("a progressing long exposure retains the trustworthy frame while Live", () => {
   let state = presentedState();
   const nextStartedAtUnixUs = mapping.exposureCompletedAtUnixUs + 1;
   state = dispatch(state, {
@@ -184,11 +200,11 @@ test("a progressing long exposure retains the trustworthy frame as Capturing", (
       }
     }
   });
-  assert.equal(viewerProjection(state).status, "Capturing");
+  assert.equal(viewerProjection(state).status, "Live");
   state = dispatch(state, { type: "tick", nowUnixUs: nextStartedAtUnixUs + 300_000 });
 
   const projection = viewerProjection(state);
-  assert.equal(projection.status, "Capturing");
+  assert.equal(projection.status, "Live");
   assert.equal(projection.sourceGeneration, 81);
   assert.equal(projection.frameCompletedAtUnixUs, mapping.exposureCompletedAtUnixUs);
   assert.equal(projection.frameAgeMs, 300);
@@ -197,7 +213,7 @@ test("a progressing long exposure retains the trustworthy frame as Capturing", (
   assert.equal(viewerProjection(state).status, "Stale");
 });
 
-test("long exposure progress stays Capturing when correlation facts become unknown", () => {
+test("advancing long-exposure video stays Live when correlation facts become unknown", () => {
   let state = presentedState();
   const nextStartedAtUnixUs = mapping.exposureCompletedAtUnixUs + 1;
   state = dispatch(state, {
@@ -213,10 +229,11 @@ test("long exposure progress stays Capturing when correlation facts become unkno
   });
   state = dispatch(state, { type: "presented", nowUnixUs: nextStartedAtUnixUs + 300_000 });
   state = dispatch(state, { type: "tick", nowUnixUs: nextStartedAtUnixUs + 1_300_001 });
+  state = dispatch(state, { type: "presented", nowUnixUs: nextStartedAtUnixUs + 1_300_001 });
 
   const projection = viewerProjection(state);
-  assert.equal(projection.status, "Capturing");
-  assert.equal(projection.detail, "Exposure in progress · frame freshness unknown");
+  assert.equal(projection.status, "Live");
+  assert.equal(projection.detail, "Frame identity pending");
   assert.equal(projection.sourceGeneration, undefined);
   assert.equal(projection.frameAgeMs, undefined);
 });
@@ -395,17 +412,27 @@ test("camera recovery cannot return live from a retained pre-recovery repeat", (
   assert.equal(viewerProjection(state).sourceGeneration, 82);
 });
 
-test("a coalesced source-floor jump leaves live until a recovered presentation", () => {
+test("a settings source-floor jump keeps the healthy media session live", () => {
   let state = presentedState();
   assert.equal(viewerProjection(state).status, "Live");
+  const settings = { exposureMs: 5_000, gain: 100, treatment: "monochrome" };
+  state = dispatch(state, {
+    type: "control",
+    event: { type: "accepted", targetGeneration: 1, settings }
+  });
+  state = dispatch(state, {
+    type: "control",
+    event: { type: "applied", settingsGeneration: 1, settings }
+  });
 
   const fenced = reduceViewer(state, {
     type: "lifecycle",
     facts: { ...ready, minimumSourceGeneration: 82 }
   });
   state = fenced.state;
-  assert.deepEqual(fenced.effects, ["reconnect_media"]);
-  assert.equal(viewerProjection(state).status, "Reconnecting");
+  assert.deepEqual(fenced.effects, []);
+  assert.equal(viewerProjection(state).status, "Live");
+  assert.equal(state.awaitingCurrentPresentation, true);
   assert.equal(viewerProjection(state).sourceGeneration, 81);
 });
 
@@ -452,7 +479,7 @@ test("backgrounding suspends liveness and foreground requests immediate reconnec
   assert.equal(viewerProjection(foreground.state).status, "Reconnecting");
 });
 
-test("pending settings stay Capturing until that exact generation is visible", () => {
+test("pending settings stay separately visible while decoded video remains Live", () => {
   let state = presentedState();
   const settings = { exposureMs: 20, gain: 350, treatment: "colour" };
   state = dispatch(state, {
@@ -463,7 +490,7 @@ test("pending settings stay Capturing until that exact generation is visible", (
     type: "control",
     event: { type: "applied", settingsGeneration: 1, settings }
   });
-  assert.equal(viewerProjection(state).status, "Capturing");
+  assert.equal(viewerProjection(state).status, "Live");
   assert.equal(state.control.settings.pending?.generation, 1);
 
   const newMapping = parseFrameMapping({

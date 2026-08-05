@@ -63,11 +63,11 @@ function summary(expectedClientId = clientId) {
   return value;
 }
 
-test("authoritative client evidence is parsed and rendered without new aggregates", () => {
+test("the banner renders the current partition instead of historical startup unknowns", () => {
   const evidence = parseServiceQualitySummary(summary(), clientId);
   assert.equal(
     serviceQualityText(evidence),
-    "2 samples · 1 exact · 1 unknown · 20.0 fps · p95 200 ms"
+    "1 samples · 1 exact · 0 unknown · 20.0 fps · p95 200 ms"
   );
 });
 
@@ -120,6 +120,149 @@ test("presentation observations are capped and sent in one bounded batch", async
   assert.equal(reports[0].samples[0].presentedFrames, 2);
   assert.equal(reports[0].samples[31].presentedFrames, 33);
   assert.equal(reports[0].samples[31].presentedAtUnixUs, 1_700_000_000_000_123);
+});
+
+test("a media reconnect discards queued observations from the previous track", async (context) => {
+  const originalFetch = globalThis.fetch;
+  const originalWindow = globalThis.window;
+  context.after(() => {
+    globalThis.fetch = originalFetch;
+    globalThis.window = originalWindow;
+  });
+  globalThis.window = { setTimeout, clearTimeout };
+  let connectionGeneration = 0;
+  const reports = [];
+  globalThis.fetch = async (url, options = {}) => {
+    if (url === "/api/v1/clock") {
+      return responseWithJson({ schemaVersion: 1, serverUnixUs: Date.now() * 1_000 });
+    }
+    if (url === "/api/v1/service-quality/connections") {
+      const request = JSON.parse(options.body);
+      connectionGeneration += 1;
+      return responseWithJson({
+        schemaVersion: 1,
+        clientId: request.clientId,
+        connectionGeneration,
+        reconnects: connectionGeneration - 1
+      });
+    }
+    if (url === "/api/v1/service-quality") {
+      reports.push(JSON.parse(options.body));
+      return { ok: true, status: 204 };
+    }
+    if (String(url).startsWith("/api/v1/service-quality/summary?")) {
+      const expectedClientId = new URL(String(url), "http://localhost").searchParams.get("clientId");
+      const value = summary(expectedClientId);
+      value.clients[0].connectionGeneration = connectionGeneration;
+      return responseWithJson(value);
+    }
+    throw new Error(`unexpected request ${url}`);
+  };
+
+  const client = await ServiceQualityClient.connect(runtimeEpoch, () => {});
+  client.report({
+    correlation: "unknown",
+    streamEpoch: 2,
+    presentedFrames: 3_493,
+    visibility: "visible"
+  });
+  await client.reconnect();
+  client.report({
+    correlation: "unknown",
+    streamEpoch: 3,
+    presentedFrames: 1,
+    visibility: "visible"
+  });
+  await new Promise((resolve) => setTimeout(resolve, 350));
+
+  assert.equal(reports.length, 1);
+  assert.equal(reports[0].connectionGeneration, 2);
+  assert.deepEqual(reports[0].samples.map((sample) => sample.presentedFrames), [1]);
+});
+
+test("a media reconnect fences an in-flight old-generation report", async (context) => {
+  const originalFetch = globalThis.fetch;
+  const originalWindow = globalThis.window;
+  context.after(() => {
+    globalThis.fetch = originalFetch;
+    globalThis.window = originalWindow;
+  });
+  globalThis.window = { setTimeout, clearTimeout };
+  let connectionGeneration = 0;
+  let releaseOldReport;
+  let oldReportStarted;
+  const oldReportIsStarted = new Promise((resolve) => { oldReportStarted = resolve; });
+  const oldReportMayFinish = new Promise((resolve) => { releaseOldReport = resolve; });
+  const reports = [];
+  globalThis.fetch = async (url, options = {}) => {
+    if (url === "/api/v1/clock") {
+      return responseWithJson({ schemaVersion: 1, serverUnixUs: Date.now() * 1_000 });
+    }
+    if (url === "/api/v1/service-quality/connections") {
+      const request = JSON.parse(options.body);
+      connectionGeneration += 1;
+      return responseWithJson({
+        schemaVersion: 1,
+        clientId: request.clientId,
+        connectionGeneration,
+        reconnects: connectionGeneration - 1
+      });
+    }
+    if (url === "/api/v1/service-quality") {
+      reports.push(JSON.parse(options.body));
+      if (reports.length === 1) {
+        oldReportStarted();
+        await oldReportMayFinish;
+      }
+      return { ok: true, status: 204 };
+    }
+    if (String(url).startsWith("/api/v1/service-quality/summary?")) {
+      const expectedClientId = new URL(String(url), "http://localhost").searchParams.get("clientId");
+      const value = summary(expectedClientId);
+      value.clients[0].connectionGeneration = connectionGeneration;
+      return responseWithJson(value);
+    }
+    throw new Error(`unexpected request ${url}`);
+  };
+
+  const client = await ServiceQualityClient.connect(runtimeEpoch, () => {});
+  client.report({
+    correlation: "unknown",
+    streamEpoch: 2,
+    presentedFrames: 3_493,
+    visibility: "visible"
+  });
+  await oldReportIsStarted;
+  const reconnect = client.reconnect();
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.equal(connectionGeneration, 1, "server generation waits for the old report");
+  client.report({
+    correlation: "unknown",
+    streamEpoch: 3,
+    presentedFrames: 1,
+    visibility: "visible"
+  });
+  releaseOldReport();
+  await reconnect;
+  client.report({
+    correlation: "unknown",
+    streamEpoch: 3,
+    presentedFrames: 1,
+    visibility: "visible"
+  });
+  await new Promise((resolve) => setTimeout(resolve, 350));
+
+  assert.equal(reports.length, 2);
+  assert.deepEqual(
+    reports.map((report) => ({
+      generation: report.connectionGeneration,
+      frames: report.samples.map((sample) => sample.presentedFrames)
+    })),
+    [
+      { generation: 1, frames: [3_493] },
+      { generation: 2, frames: [1] }
+    ]
+  );
 });
 
 test("full retained evidence is fetched only on demand", async (context) => {

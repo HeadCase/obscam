@@ -150,11 +150,10 @@ test("operator moves from short to long exposure and back without losing the ret
     await longExposure.click();
     await expect(longExposure).toHaveAttribute("aria-pressed", "true");
     await page.getByRole("button", { name: "Apply" }).click();
-    await expect(page.locator("[data-service-detail]")).toHaveText(
-      /Applying generation|Exposure in progress/
-    );
+    await expect(page.locator("[data-service-detail]")).toContainText("Applying generation");
     await page.waitForTimeout(3_000);
-    await expect(page.locator("[data-service-detail]")).toContainText("Exposure in progress");
+    await expect(page.locator("[data-viewer-status]")).toHaveText("Live");
+    await expect(page.locator("[data-service-detail]")).toContainText("Applying generation");
     const retainedAt = await video.evaluate((element: HTMLVideoElement) => element.currentTime);
     expect(retainedAt - startedAt, "retained video should keep playing during a long exposure")
       .toBeGreaterThan(2);
