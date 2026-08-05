@@ -39,7 +39,7 @@ struct ClientEvidence {
     reconnects: u64,
     presentation_skips: u64,
     last_presented_frames: Option<(u64, u64)>,
-    samples: VecDeque<PresentationSample>,
+    samples: Arc<VecDeque<PresentationSample>>,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize)]
@@ -138,6 +138,15 @@ pub(crate) struct ServiceQualityResponse {
     combined: AggregateReport,
 }
 
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ServiceQualitySummaryResponse {
+    schema_version: u8,
+    limits: EvidenceLimits,
+    clients: Vec<ClientSummary>,
+    combined: AggregateReport,
+}
+
 #[derive(Clone, Copy, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct EvidenceLimits {
@@ -151,6 +160,15 @@ struct ClientReport {
     client_id: Uuid,
     connection_generation: u64,
     samples: Vec<PresentationSample>,
+    #[serde(flatten)]
+    aggregate: AggregateReport,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ClientSummary {
+    client_id: Uuid,
+    connection_generation: u64,
     #[serde(flatten)]
     aggregate: AggregateReport,
 }
@@ -267,7 +285,7 @@ impl ServiceQualityState {
             reconnects: 0,
             presentation_skips: 0,
             last_presented_frames: None,
-            samples: VecDeque::with_capacity(MAX_SAMPLES_PER_CLIENT),
+            samples: Arc::new(VecDeque::with_capacity(MAX_SAMPLES_PER_CLIENT)),
         };
         let response = client.connection_response();
         store.clients.push(client);
@@ -335,11 +353,12 @@ impl ServiceQualityState {
         client.last_presented_frames =
             previous.map(|presented_frames| (batch.connection_generation, presented_frames));
         client.last_activity = activity;
+        let samples = Arc::make_mut(&mut client.samples);
         for (_, sample) in prepared {
-            if client.samples.len() == MAX_SAMPLES_PER_CLIENT {
-                client.samples.pop_front();
+            if samples.len() == MAX_SAMPLES_PER_CLIENT {
+                samples.pop_front();
             }
-            client.samples.push_back(sample);
+            samples.push_back(sample);
         }
         Ok(())
     }
@@ -374,6 +393,20 @@ impl ServiceQualityState {
         };
         let clients = clients.iter().collect::<Vec<_>>();
         response_for_clients(&clients)
+    }
+
+    pub(crate) fn summary(&self, client_id: Option<Uuid>) -> ServiceQualitySummaryResponse {
+        let clients = {
+            let store = self.inner.lock().expect("service-quality mutex poisoned");
+            store
+                .clients
+                .iter()
+                .filter(|client| client_id.is_none_or(|id| client.client_id == id))
+                .cloned()
+                .collect::<Vec<_>>()
+        };
+        let clients = clients.iter().collect::<Vec<_>>();
+        summary_for_clients(&clients)
     }
 
     fn prepare(
@@ -500,6 +533,26 @@ fn response_for_clients(clients: &[&ClientEvidence]) -> ServiceQualityResponse {
     }
 }
 
+fn summary_for_clients(clients: &[&ClientEvidence]) -> ServiceQualitySummaryResponse {
+    let combined = aggregate(clients);
+    let reports = match clients {
+        [client] => vec![client.summary(combined.clone())],
+        _ => clients
+            .iter()
+            .map(|client| client.summary(aggregate(&[client])))
+            .collect(),
+    };
+    ServiceQualitySummaryResponse {
+        schema_version: SCHEMA_VERSION,
+        limits: EvidenceLimits {
+            clients: MAX_CLIENTS,
+            samples_per_client: MAX_SAMPLES_PER_CLIENT,
+        },
+        clients: reports,
+        combined,
+    }
+}
+
 impl ClientEvidence {
     fn report(&self) -> ClientReport {
         ClientReport {
@@ -507,6 +560,14 @@ impl ClientEvidence {
             connection_generation: self.connection_generation,
             samples: self.samples.iter().copied().collect(),
             aggregate: aggregate(&[self]),
+        }
+    }
+
+    fn summary(&self, aggregate: AggregateReport) -> ClientSummary {
+        ClientSummary {
+            client_id: self.client_id,
+            connection_generation: self.connection_generation,
+            aggregate,
         }
     }
 }
@@ -519,7 +580,7 @@ fn aggregate(clients: &[&ClientEvidence]) -> AggregateReport {
         report.presentation_skips = report
             .presentation_skips
             .saturating_add(client.presentation_skips);
-        for sample in &client.samples {
+        for sample in client.samples.iter() {
             report.sample_count += 1;
             match sample.correlation {
                 CorrelationStatus::Exact => report.exact_correlation += 1,

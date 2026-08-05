@@ -253,6 +253,10 @@ impl SettingsController {
             });
         }
         let _ = self.updates.send(SettingsEvent::Accepted);
+        tracing::info!(
+            settings_generation = target.generation,
+            "settings target accepted"
+        );
         if let Some(interrupter) = self
             .interrupter
             .lock()
@@ -260,6 +264,10 @@ impl SettingsController {
             .as_ref()
         {
             interrupter.interrupt();
+            tracing::info!(
+                settings_generation = target.generation,
+                "active capture abandonment requested"
+            );
         }
         Ok(target)
     }
@@ -302,6 +310,10 @@ impl SettingsController {
             Ordering::Release,
         );
         let _ = self.updates.send(SettingsEvent::Applied(applied));
+        tracing::info!(
+            settings_generation = applied.generation,
+            "settings target applied"
+        );
     }
 
     /// Starts camera recovery, failing accepted work and retaining the applied tuple.

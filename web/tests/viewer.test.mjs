@@ -85,6 +85,71 @@ test("primary media states follow authoritative progress and exact presentation"
   assert.equal(viewerProjection(state).sourceGeneration, 81);
 });
 
+test("a mapping that follows its callback retroactively establishes the exact visible frame", () => {
+  let state = readyState();
+  state = dispatch(state, { type: "media_connected" });
+  state = dispatch(state, {
+    type: "presented",
+    rtpTimestamp: mapping.rtpTimestamp,
+    nowUnixUs: mapping.submittedAtUnixUs + 20_000
+  });
+  assert.equal(viewerProjection(state).status, "Capturing");
+
+  const transition = reduceViewer(state, { type: "mapping", mapping });
+  state = transition.state;
+  assert.equal(transition.presentation?.mapping.sourceGeneration, 81);
+  assert.equal(transition.presentation?.presentedAtUnixUs, mapping.submittedAtUnixUs + 20_000);
+  assert.equal(viewerProjection(state).status, "Live");
+  assert.equal(state.correlationLostAtUnixUs, null);
+});
+
+test("a mapping for an older callback cannot establish current visible state", () => {
+  let state = readyState();
+  state = dispatch(state, { type: "media_connected" });
+  state = dispatch(state, {
+    type: "presented",
+    rtpTimestamp: mapping.rtpTimestamp,
+    nowUnixUs: mapping.submittedAtUnixUs + 20_000
+  });
+  state = dispatch(state, {
+    type: "presented",
+    rtpTimestamp: mapping.rtpTimestamp + 1,
+    nowUnixUs: mapping.submittedAtUnixUs + 30_000
+  });
+
+  const transition = reduceViewer(state, { type: "mapping", mapping });
+
+  assert.equal(transition.presentation, null);
+  assert.equal(transition.state.trustworthyFrame, null);
+  assert.equal(transition.state.correlationLostAtUnixUs, mapping.submittedAtUnixUs + 20_000);
+});
+
+test("a replacement encoder stream fences the prior exact presentation", () => {
+  const state = presentedState();
+  const replacement = parseFrameMapping({
+    schemaVersion: 1,
+    type: "frame_mapping",
+    runtimeEpoch,
+    streamEpoch: mapping.streamEpoch + 1,
+    rtpTimestamp: mapping.rtpTimestamp + 4_500,
+    sourceGeneration: mapping.sourceGeneration + 1,
+    settingsGeneration: mapping.settingsGeneration,
+    treatment: mapping.treatment,
+    width: mapping.width,
+    height: mapping.height,
+    exposureCompletedAtUnixUs: mapping.exposureCompletedAtUnixUs + 50_000,
+    submittedAtUnixUs: mapping.submittedAtUnixUs + 50_000,
+    repeat: false
+  });
+
+  const transition = reduceViewer(state, { type: "mapping", mapping: replacement });
+
+  assert.equal(transition.state.presentation.streamEpoch, replacement.streamEpoch);
+  assert.equal(transition.state.awaitingCurrentPresentation, true);
+  assert.equal(transition.state.trustworthyFrame?.streamEpoch, mapping.streamEpoch);
+  assert.equal(transition.presentation, null);
+});
+
 test("lifecycle facts fail closed at the browser boundary", () => {
   assert.deepEqual(
     parseLifecycleFacts({ schemaVersion: 1, type: "lifecycle", ...ready }),

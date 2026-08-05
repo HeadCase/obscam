@@ -143,6 +143,40 @@ input {
   justify-content: space-between;
 }
 
+.draft-actions {
+  display: grid;
+  grid-template-columns: 1fr 2fr;
+  gap: 0.45rem;
+}
+
+.draft-actions [data-control="apply-settings"]:not(:disabled) {
+  border-color: #9baab8;
+  color: #fff;
+  background: #465665;
+}
+
+.setting-evidence {
+  display: flex;
+  min-height: 1.35rem;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+}
+
+.setting-evidence__marker {
+  padding: 0.12rem 0.38rem;
+  border: 1px solid currentcolor;
+  border-radius: 999px;
+  font-size: 0.68rem;
+  line-height: 1.2;
+}
+
+.setting-evidence__marker--draft { color: #bf8cff; }
+.setting-evidence__marker--submitted { color: #d8dee5; }
+.setting-evidence__marker--requested { color: #e7c65f; }
+.setting-evidence__marker--applied { color: #77c99e; }
+.setting-evidence__marker--visible { color: #72aef5; }
+.setting-evidence__marker--rejected { color: #ef766c; }
+
 .control-tray__heading,
 .gain-control > span {
   color: #cbd0d6;

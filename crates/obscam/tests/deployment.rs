@@ -14,7 +14,7 @@ fn mediamtx_advertises_only_permitted_browser_hosts() {
     assert_eq!(scalar_values(&config, "webrtcIPsFromInterfaces"), ["no"]);
     assert_eq!(
         list_values(&config, "webrtcAdditionalHosts"),
-        ["10.164.190.1", "192.168.1.200"]
+        ["10.44.0.1", "192.168.1.200"]
     );
     assert_eq!(
         scalar_values(&config, "webrtcAddress"),
@@ -99,13 +99,13 @@ fn media_namespace_contains_only_a_private_point_to_point_link() {
 fn media_forwarding_is_limited_to_approved_addresses_and_ports() {
     let rules = repository_file("deploy/obscam-media.nft");
 
-    assert!(rules.contains("10.164.190.1, 192.168.1.200"));
+    assert!(rules.contains("10.44.0.1, 192.168.1.200"));
     assert!(rules.contains("tcp dport 8889"));
     assert!(rules.contains("udp dport 8189"));
     assert!(rules.contains("dnat ip to 169.254.218.2"));
     assert!(rules.contains("iifname \"obscam-media0\""));
     assert!(rules.contains("oifname \"obscam-media0\""));
-    assert!(rules.contains("10.164.190.0/24, 192.168.1.0/24"));
+    assert!(rules.contains("10.44.0.0/24, 192.168.1.0/24"));
     assert!(rules.contains("ct state established,related accept"));
     assert!(rules.contains("ct status dnat"));
     assert!(rules.matches("drop").count() >= 3);

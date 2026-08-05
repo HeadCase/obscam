@@ -126,7 +126,7 @@ Prohibited unless a later approved Linear decision changes the map:
 - For graphical browser verification, follow
   `docs/agents/browser-testing.md`. A Playwright MCP runs on the operator's Mac
   and is available to agents through an SSH tunnel; the Mac browser reaches the
-  Pi service over WireGuard at `10.164.190.1` or, as a LAN fallback only, at
+  Pi service over WireGuard at `10.44.0.1` or, as a LAN fallback only, at
   `192.168.1.200`. Never infer that browser testing is unavailable from the
   absence of a browser executable on the headless Pi.
 - Never use or probe `wg1` (`192.168.4.9`) for browser testing. It is unrelated

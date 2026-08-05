@@ -13,7 +13,7 @@ import {
   type PresentationState
 } from "./presentation.js";
 import { parseRuntimeComponents, type RuntimeComponents } from "./model.js";
-import type { ServiceQualityResponse } from "./service-quality.js";
+import type { ServiceQualitySummary } from "./service-quality.js";
 
 const MIN_DELIVERY_ALLOWANCE_US = 250_000;
 const MAX_DELIVERY_ALLOWANCE_US = 500_000;
@@ -46,7 +46,7 @@ export interface ViewerState {
   trustworthyPresentedAtUnixUs: number | null;
   correlationLostAtUnixUs: number | null;
   deliveryAllowanceUs: number;
-  evidence: { p99DeliveryUs: number | null; response: ServiceQualityResponse | null };
+  evidence: { p99DeliveryUs: number | null; response: ServiceQualitySummary | null };
   nowUnixUs: number;
 }
 
@@ -69,7 +69,7 @@ export type ViewerEvent =
   | {
       type: "evidence";
       p99DeliveryUs: number | null;
-      response: ServiceQualityResponse;
+      response: ServiceQualitySummary;
     };
 
 /** Reducer output plus the narrowly-scoped effects/storage actions it requests. */
@@ -77,6 +77,7 @@ export interface ViewerTransition {
   state: ViewerState;
   effects: readonly "reconnect_media"[];
   controlStorage: ControlTransition["storage"];
+  presentation: { mapping: FrameMapping; presentedAtUnixUs: number } | null;
 }
 
 /** Truthful primary state and only the frame facts currently justified. */
@@ -118,6 +119,7 @@ export function reduceViewer(state: ViewerState, event: ViewerEvent): ViewerTran
   let next = state;
   let effects: ViewerTransition["effects"] = [];
   let controlStorage: ViewerTransition["controlStorage"] = "none";
+  let presentation: ViewerTransition["presentation"] = null;
 
   switch (event.type) {
     case "lifecycle": {
@@ -156,7 +158,27 @@ export function reduceViewer(state: ViewerState, event: ViewerEvent): ViewerTran
         type: "mapping",
         mapping: event.mapping
       });
-      next = { ...state, presentation: transition.state };
+      const streamChanged = transition.state.streamEpoch > state.presentation.streamEpoch;
+      if (transition.presented !== null && transition.presentedAtUnixUs !== null) {
+        const exact = acceptExactPresentation(
+          state,
+          transition.state,
+          transition.presented,
+          transition.presentedAtUnixUs
+        );
+        next = exact.state;
+        controlStorage = exact.controlStorage;
+        presentation = {
+          mapping: transition.presented,
+          presentedAtUnixUs: transition.presentedAtUnixUs
+        };
+      } else {
+        next = {
+          ...state,
+          presentation: transition.state,
+          awaitingCurrentPresentation: streamChanged || state.awaitingCurrentPresentation
+        };
+      }
       break;
     }
     case "media_connecting": {
@@ -205,33 +227,15 @@ export function reduceViewer(state: ViewerState, event: ViewerEvent): ViewerTran
           nowUnixUs: event.nowUnixUs
         };
       } else {
-        const currentSource = state.lifecycle !== null &&
-          transition.presented.sourceGeneration >= state.lifecycle.minimumSourceGeneration;
-        const advancesFrame = currentSource && (
-          state.trustworthyFrame === null ||
-          transition.presented.sourceGeneration >= state.trustworthyFrame.sourceGeneration
+        const exact = acceptExactPresentation(
+          state,
+          transition.state,
+          transition.presented,
+          event.nowUnixUs
         );
-        const control = currentSource
-          ? reduceControl(state.control, {
-              type: "visible",
-              settingsGeneration: transition.presented.settingsGeneration
-            })
-          : { state: state.control, storage: "none" as const };
-        next = {
-          ...state,
-          control: control.state,
-          presentation: transition.state,
-          trustworthyFrame: advancesFrame ? transition.presented : state.trustworthyFrame,
-          trustworthyPresentedAtUnixUs: advancesFrame
-            ? event.nowUnixUs
-            : state.trustworthyPresentedAtUnixUs,
-          awaitingCurrentPresentation: currentSource
-            ? false
-            : state.awaitingCurrentPresentation,
-          correlationLostAtUnixUs: null,
-          nowUnixUs: event.nowUnixUs
-        };
-        controlStorage = control.storage;
+        next = exact.state;
+        controlStorage = exact.controlStorage;
+        presentation = { mapping: transition.presented, presentedAtUnixUs: event.nowUnixUs };
       }
       break;
     }
@@ -269,7 +273,42 @@ export function reduceViewer(state: ViewerState, event: ViewerEvent): ViewerTran
     }
   }
 
-  return { state: next, effects, controlStorage };
+  return { state: next, effects, controlStorage, presentation };
+}
+
+function acceptExactPresentation(
+  state: ViewerState,
+  presentation: PresentationState,
+  mapping: FrameMapping,
+  presentedAtUnixUs: number
+): { state: ViewerState; controlStorage: ControlTransition["storage"] } {
+  const currentSource = state.lifecycle !== null &&
+    mapping.sourceGeneration >= state.lifecycle.minimumSourceGeneration;
+  const advancesFrame = currentSource && (
+    state.trustworthyFrame === null ||
+    mapping.sourceGeneration >= state.trustworthyFrame.sourceGeneration
+  );
+  const control = currentSource
+    ? reduceControl(state.control, {
+        type: "visible",
+        settingsGeneration: mapping.settingsGeneration
+      })
+    : { state: state.control, storage: "none" as const };
+  return {
+    state: {
+      ...state,
+      control: control.state,
+      presentation,
+      trustworthyFrame: advancesFrame ? mapping : state.trustworthyFrame,
+      trustworthyPresentedAtUnixUs: advancesFrame
+        ? presentedAtUnixUs
+        : state.trustworthyPresentedAtUnixUs,
+      awaitingCurrentPresentation: currentSource ? false : state.awaitingCurrentPresentation,
+      correlationLostAtUnixUs: null,
+      nowUnixUs: presentedAtUnixUs
+    },
+    controlStorage: control.storage
+  };
 }
 
 /** Whether a frame observation belongs to the currently connected media session. */

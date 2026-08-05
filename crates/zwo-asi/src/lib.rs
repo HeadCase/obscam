@@ -234,6 +234,18 @@ pub trait CameraSource {
     /// Returns [`CameraError`] when the lifecycle state rejects configuration.
     fn configure(&mut self, settings: Settings) -> Result<(), CameraError>;
 
+    /// Applies one validated complete settings tuple while acquisition remains active.
+    ///
+    /// The active exposure is abandoned at this seam. A source may still emit a
+    /// bounded number of visually transitional frames before the new tuple is
+    /// trustworthy; callers must not infer exact settings identity for them.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`CameraError`] when the source is not capturing or the live
+    /// control mutation fails.
+    fn apply_live_settings(&mut self, settings: Settings) -> Result<(), CameraError>;
+
     /// Starts continuously warm acquisition.
     ///
     /// # Errors
@@ -427,6 +439,29 @@ impl CameraOwner {
         Ok(())
     }
 
+    /// Applies exposure and gain without stopping continuously warm acquisition.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`CameraError`] when capture is stopped or either SDK control
+    /// mutation fails. A partial SDK mutation is recovered by the pipeline's
+    /// existing fail-closed camera recovery path.
+    pub fn apply_live_settings(&mut self, settings: Settings) -> Result<(), CameraError> {
+        if !self.capturing {
+            return Err(CameraError::InvalidState {
+                operation: "apply live settings while stopped",
+            });
+        }
+        check(
+            "set live exposure",
+            ffi::set_control(self.id, CONTROL_EXPOSURE, settings.exposure_us),
+        )?;
+        check(
+            "set live gain",
+            ffi::set_control(self.id, CONTROL_GAIN, settings.gain),
+        )
+    }
+
     /// Starts continuously warm SDK video acquisition.
     ///
     /// # Errors
@@ -548,6 +583,10 @@ impl CameraSource for CameraOwner {
 
     fn configure(&mut self, settings: Settings) -> Result<(), CameraError> {
         Self::configure(self, settings)
+    }
+
+    fn apply_live_settings(&mut self, settings: Settings) -> Result<(), CameraError> {
+        Self::apply_live_settings(self, settings)
     }
 
     fn start(&mut self) -> Result<(), CameraError> {

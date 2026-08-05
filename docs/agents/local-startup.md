@@ -90,7 +90,7 @@ sudo journalctl --follow --unit obscam-mediamtx.service
 ```
 
 The installed configuration disables candidate advertisement from discovered
-interfaces and advertises only `10.164.190.1` and `192.168.1.200`. The namespace
+interfaces and advertises only `10.44.0.1` and `192.168.1.200`. The namespace
 is the independent discovery boundary: MediaMTX can enumerate only `lo` and
 `media0`, while nftables translates only the two approved destination addresses
 and service ports. Forwarded namespace traffic is limited to established flows
@@ -118,7 +118,7 @@ http://192.168.1.200:8080
 Over the permitted WireGuard route, open:
 
 ```text
-http://10.164.190.1:8080
+http://10.44.0.1:8080
 ```
 
 The local health contracts are:

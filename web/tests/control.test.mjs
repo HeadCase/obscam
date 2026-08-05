@@ -203,6 +203,63 @@ test("settings messages preserve complete accepted and applied tuples", () => {
   assert.deepEqual(state.settings.visible, { generation: 1, settings });
 });
 
+test("camera edits remain a local draft until Apply is queued", () => {
+  const applied = { exposureMs: 500, gain: 100, treatment: "monochrome" };
+  const draft = { exposureMs: 20, gain: 350, treatment: "colour" };
+  let state = reduceControl(initialControlState(null), {
+    type: "connected",
+    connectionGeneration: 0
+  }).state;
+  state = reduceControl(state, { type: "granted", credentials }).state;
+
+  state = reduceControl(state, { type: "draft_changed", settings: draft }).state;
+  assert.deepEqual(state.draft, draft);
+  assert.deepEqual(state.settings.applied.settings, applied);
+  assert.equal(state.settings.pending, null);
+  assert.equal(state.pendingIntent, false);
+
+  state = reduceControl(state, { type: "intent_queued", settings: draft }).state;
+  assert.equal(state.pendingIntent, true);
+  assert.equal(state.draft, null);
+  assert.deepEqual(state.submitted, draft);
+  assert.equal(state.notice, "Settings submitted");
+  const nextDraft = { ...draft, exposureMs: 100 };
+  state = reduceControl(state, { type: "draft_changed", settings: nextDraft }).state;
+  assert.deepEqual(state.draft, nextDraft);
+  state = reduceControl(state, {
+    type: "accepted",
+    targetGeneration: 1,
+    settings: draft
+  }).state;
+  assert.deepEqual(state.draft, nextDraft);
+  assert.equal(state.submitted, null);
+  assert.deepEqual(state.settings.pending, { generation: 1, settings: draft });
+
+  const superseding = { ...draft, exposureMs: 200 };
+  state = reduceControl(state, { type: "draft_changed", settings: superseding }).state;
+  assert.deepEqual(state.draft, superseding);
+});
+
+test("Discard restores the authoritative tuple and authority loss removes a draft", () => {
+  const draft = { exposureMs: 20, gain: 350, treatment: "colour" };
+  let state = reduceControl(initialControlState(null), {
+    type: "connected",
+    connectionGeneration: 0
+  }).state;
+  state = reduceControl(state, { type: "granted", credentials }).state;
+  state = reduceControl(state, { type: "draft_changed", settings: draft }).state;
+  state = reduceControl(state, { type: "draft_discarded" }).state;
+  assert.equal(state.draft, null);
+
+  state = reduceControl(state, { type: "draft_changed", settings: draft }).state;
+  state = reduceControl(state, {
+    type: "authority",
+    state: "held",
+    generation: credentials.generation + 1
+  }).state;
+  assert.equal(state.draft, null);
+});
+
 test("presentation before applied still advances the exact target to visible", () => {
   const settings = { exposureMs: 20, gain: 350, treatment: "colour" };
   let state = reduceControl(initialControlState(null), {
@@ -225,16 +282,40 @@ test("presentation before applied still advances the exact target to visible", (
   assert.deepEqual(state.settings.visible, { generation: 1, settings });
 });
 
+test("the initially applied generation becomes independently visible", () => {
+  let state = initialControlState(null);
+
+  state = reduceControl(state, { type: "visible", settingsGeneration: 0 }).state;
+
+  assert.deepEqual(state.settings.visible, state.settings.applied);
+});
+
 test("invalid settings rejection keeps a healthy lease", () => {
   let state = reduceControl(initialControlState(null), { type: "connected", connectionGeneration: 0 }).state;
   state = reduceControl(state, { type: "granted", credentials }).state;
-  state = reduceControl(state, { type: "intent_queued" }).state;
+  const rejectedSettings = { exposureMs: 20, gain: 350, treatment: "colour" };
+  state = reduceControl(state, { type: "intent_queued", settings: rejectedSettings }).state;
 
   const rejected = reduceControl(state, { type: "rejected", reason: "invalid_settings" });
   assert.equal(rejected.state.ownership, "you");
   assert.equal(rejected.state.mayMutate, true);
   assert.deepEqual(rejected.state.credentials, credentials);
   assert.equal(rejected.state.pendingIntent, false);
+  assert.deepEqual(rejected.state.rejected, rejectedSettings);
+  assert.equal(rejected.state.draft, null);
+});
+
+test("reconnect discards unsafe unsent intent and announces the restoration", () => {
+  const draft = { exposureMs: 20, gain: 350, treatment: "colour" };
+  let state = reduceControl(initialControlState(null), { type: "connected", connectionGeneration: 0 }).state;
+  state = reduceControl(state, { type: "granted", credentials }).state;
+  state = reduceControl(state, { type: "draft_changed", settings: draft }).state;
+
+  state = reduceControl(state, { type: "connecting", connectionGeneration: 1 }).state;
+
+  assert.equal(state.draft, null);
+  assert.equal(state.submitted, null);
+  assert.equal(state.notice, "Draft discarded: control reconnecting");
 });
 
 test("camera recovery rejection is a valid non-authority failure", () => {

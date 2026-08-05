@@ -156,6 +156,17 @@ async fn browser_reports_unknown_presentation_into_authoritative_scoped_evidence
         Value::Null
     );
     assert_eq!(evidence["combined"]["sampleCount"], 1);
+
+    let summary = get_json(
+        address,
+        &format!("/api/v1/service-quality/summary?clientId={client_id}"),
+    )
+    .await;
+    assert_eq!(summary["limits"], evidence["limits"]);
+    assert_eq!(summary["clients"][0]["sampleCount"], 1);
+    assert_eq!(summary["clients"][0]["unknownCorrelation"], 1);
+    assert!(summary["clients"][0].get("samples").is_none());
+    assert_eq!(summary["combined"], evidence["combined"]);
 }
 
 #[tokio::test]
@@ -243,35 +254,10 @@ async fn production_assets_expose_the_complete_unavailable_viewer_shell() {
         script_head.contains("content-type: text/javascript"),
         "{script_head}"
     );
-    assert!(script.contains("parseRuntimeContract"));
-
-    let (control_head, control) = get(address, "/assets/control.js").await;
-    assert!(
-        control_head.contains("content-type: text/javascript"),
-        "{control_head}"
-    );
-    assert!(control.contains("ControlClient"));
-
-    let (reconnect_head, reconnect) = get(address, "/assets/reconnect.js").await;
-    assert!(
-        reconnect_head.contains("content-type: text/javascript"),
-        "{reconnect_head}"
-    );
-    assert!(reconnect.contains("ReconnectLoop"));
-
-    let (presentation_head, presentation) = get(address, "/assets/presentation.js").await;
-    assert!(
-        presentation_head.contains("content-type: text/javascript"),
-        "{presentation_head}"
-    );
-    assert!(presentation.contains("reducePresentation"));
-
-    let (quality_head, quality) = get(address, "/assets/service-quality.js").await;
-    assert!(
-        quality_head.contains("content-type: text/javascript"),
-        "{quality_head}"
-    );
-    assert!(quality.contains("ServiceQualityClient"));
+    assert!(script.contains("/api/v1/runtime"));
+    assert!(script.contains("/api/v1/service-quality/summary"));
+    assert!(script.contains("RTCPeerConnection"));
+    assert!(!script.contains(" from \"./"));
 
     let (style_head, style) = get(address, "/assets/styles.css").await;
     assert!(
@@ -281,19 +267,23 @@ async fn production_assets_expose_the_complete_unavailable_viewer_shell() {
     assert!(style.contains(".viewer"));
     assert!(style.contains("object-fit: contain"));
 
-    let (whep_head, whep) = get(address, "/assets/whep.js").await;
-    assert!(
-        whep_head.contains("content-type: text/javascript"),
-        "{whep_head}"
-    );
-    assert!(whep.contains("RTCPeerConnection"));
-
-    let (viewer_head, viewer) = get(address, "/assets/viewer.js").await;
-    assert!(
-        viewer_head.contains("content-type: text/javascript"),
-        "{viewer_head}"
-    );
-    assert!(viewer.contains("reduceViewer"));
+    for obsolete_asset in [
+        "/assets/control.js",
+        "/assets/model.js",
+        "/assets/presentation.js",
+        "/assets/quality-settling.js",
+        "/assets/reconnect.js",
+        "/assets/service-quality.js",
+        "/assets/whep.js",
+        "/assets/viewer.js",
+    ] {
+        let (obsolete_head, obsolete_body) = get(address, obsolete_asset).await;
+        assert!(
+            obsolete_head.starts_with("HTTP/1.1 404 Not Found"),
+            "{obsolete_asset}: {obsolete_head}"
+        );
+        assert!(obsolete_body.is_empty());
+    }
 }
 
 async fn spawn_service() -> SocketAddr {

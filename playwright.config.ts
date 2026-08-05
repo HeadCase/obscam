@@ -1,6 +1,6 @@
 import { defineConfig, devices } from "@playwright/test";
 
-const baseURL = process.env.OBSCAM_BASE_URL ?? "http://10.164.190.1:8080";
+const baseURL = process.env.OBSCAM_BASE_URL ?? "http://10.44.0.1:8080";
 
 export default defineConfig({
   testDir: "web/e2e",

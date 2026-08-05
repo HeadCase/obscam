@@ -15,14 +15,14 @@ Playwright MCP and browser on the Mac
         |
         | WireGuard through wg0
         v
-ObsCam on 10.164.190.1:<service-port>
+ObsCam on 10.44.0.1:<service-port>
 ```
 
 - Agents control the Mac browser with the `playwright_mac` MCP tools.
 - The SSH tunnel carries the MCP connection between Codex and the Mac. It is
   not the route used by the browser to reach ObsCam.
 - The browser reaches ObsCam on the Pi through WireGuard `wg0` at
-  `10.164.190.1`.
+  `10.44.0.1`.
 - When the LAN route is appropriate, the only fallback service address is
   `192.168.1.200`.
 - Navigating to the LAN address does not by itself prove physical-LAN ingress;
@@ -46,7 +46,7 @@ route or fallback.
 2. Confirm that the `playwright_mac` MCP tools are available. Do not check for a
    local Pi browser as a proxy for this capability.
 3. Navigate the Mac browser to
-   `http://10.164.190.1:<service-port>`. Use
+   `http://10.44.0.1:<service-port>`. Use
    `http://192.168.1.200:<service-port>` only as the LAN fallback.
 4. Exercise the browser-facing contracts and inspect the rendered accessibility
    tree, mobile and desktop viewports, console messages, and network requests.
@@ -87,7 +87,7 @@ on the Pi:
 ```sh
 npm ci
 npx playwright install chromium
-OBSCAM_BASE_URL=http://10.164.190.1:8080 npm run test:browser
+OBSCAM_BASE_URL=http://10.44.0.1:8080 npm run test:browser
 ```
 
 Use `http://192.168.1.200:8080` only for the permitted LAN fallback described
@@ -103,7 +103,7 @@ the Mac against the deployed Rust, FFmpeg, and MediaMTX path.
 ## GRE-211 Known-Good Check
 
 The truthful unavailable viewer was verified from the Mac browser against
-`http://10.164.190.1:8080` with a `390x844` mobile viewport and a `1440x900`
+`http://10.44.0.1:8080` with a `390x844` mobile viewport and a `1440x900`
 desktop viewport. The browser observed:
 
 - HTTP 200 responses from `/api/v1/runtime` and `/api/v1/health`
@@ -115,6 +115,5 @@ desktop viewport. The browser observed:
 - all fourteen exposure choices and all unavailable controls disabled
 - no horizontal or vertical viewport overflow
 
-The browser also requested `/favicon.ico`, which currently returns HTTP 404.
-That does not contradict GRE-211's acceptance criteria, but it remains visible
-as a console error and should be addressed by later browser-shell work.
+The production shell uses an inline data-URL favicon, so browser verification
+must not produce a `/favicon.ico` request or a favicon-related console error.

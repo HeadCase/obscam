@@ -3,7 +3,9 @@ import test from "node:test";
 
 import {
   ServiceQualityClient,
+  fetchServiceQualityReport,
   parseServiceQualityResponse,
+  parseServiceQualitySummary,
   serviceQualityText
 } from "../dist/service-quality.js";
 
@@ -55,8 +57,14 @@ function response(expectedClientId = clientId) {
   };
 }
 
+function summary(expectedClientId = clientId) {
+  const value = structuredClone(response(expectedClientId));
+  for (const client of value.clients) delete client.samples;
+  return value;
+}
+
 test("authoritative client evidence is parsed and rendered without new aggregates", () => {
-  const evidence = parseServiceQualityResponse(response(), clientId);
+  const evidence = parseServiceQualitySummary(summary(), clientId);
   assert.equal(
     serviceQualityText(evidence),
     "2 samples · 1 exact · 1 unknown · 20.0 fps · p95 200 ms"
@@ -89,9 +97,9 @@ test("presentation observations are capped and sent in one bounded batch", async
       reports.push(JSON.parse(options.body));
       return { ok: true, status: 204 };
     }
-    if (String(url).startsWith("/api/v1/service-quality?")) {
+    if (String(url).startsWith("/api/v1/service-quality/summary?")) {
       const expectedClientId = new URL(String(url), "http://localhost").searchParams.get("clientId");
-      return responseWithJson(response(expectedClientId));
+      return responseWithJson(summary(expectedClientId));
     }
     throw new Error(`unexpected request ${url}`);
   };
@@ -103,7 +111,7 @@ test("presentation observations are capped and sent in one bounded batch", async
       streamEpoch: null,
       presentedFrames,
       visibility: "visible"
-    });
+    }, presentedFrames === 33 ? 1_700_000_000_000_123 : undefined);
   }
   await new Promise((resolve) => setTimeout(resolve, 350));
 
@@ -111,6 +119,24 @@ test("presentation observations are capped and sent in one bounded batch", async
   assert.equal(reports[0].samples.length, 32);
   assert.equal(reports[0].samples[0].presentedFrames, 2);
   assert.equal(reports[0].samples[31].presentedFrames, 33);
+  assert.equal(reports[0].samples[31].presentedAtUnixUs, 1_700_000_000_000_123);
+});
+
+test("full retained evidence is fetched only on demand", async (context) => {
+  const originalFetch = globalThis.fetch;
+  context.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+  const requests = [];
+  globalThis.fetch = async (url) => {
+    requests.push(String(url));
+    return responseWithJson(response(clientId));
+  };
+
+  const evidence = await fetchServiceQualityReport(clientId);
+
+  assert.equal(evidence.clients[0].samples.length, 2);
+  assert.deepEqual(requests, [`/api/v1/service-quality?clientId=${clientId}`]);
 });
 
 test("viewer timestamps use the calibrated Rust service clock", async (context) => {
@@ -121,11 +147,19 @@ test("viewer timestamps use the calibrated Rust service clock", async (context) 
     Date.now = originalNow;
   });
   let localNowMs = 1_000;
+  let clockRequests = 0;
   Date.now = () => localNowMs;
   globalThis.fetch = async (url, options = {}) => {
     if (url === "/api/v1/clock") {
-      localNowMs = 1_020;
-      return responseWithJson({ schemaVersion: 1, serverUnixUs: 2_010_000 });
+      const delaysMs = [20, 2, 10];
+      const offsetsUs = [1_000_000, 2_000_000, 3_000_000];
+      const delayMs = delaysMs[clockRequests++];
+      const startedAtMs = localNowMs;
+      localNowMs += delayMs;
+      return responseWithJson({
+        schemaVersion: 1,
+        serverUnixUs: (startedAtMs + delayMs / 2) * 1_000 + offsetsUs[clockRequests - 1]
+      });
     }
     if (url === "/api/v1/service-quality/connections") {
       const request = JSON.parse(options.body);
@@ -140,8 +174,9 @@ test("viewer timestamps use the calibrated Rust service clock", async (context) 
   };
 
   const client = await ServiceQualityClient.connect(runtimeEpoch, () => {});
-  localNowMs = 1_030;
-  assert.equal(client.nowUnixUs(), 2_030_000);
+  localNowMs = 1_100;
+  assert.equal(clockRequests, 3);
+  assert.equal(client.nowUnixUs(), 3_100_000);
 });
 
 function responseWithJson(value) {

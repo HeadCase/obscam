@@ -144,6 +144,28 @@ fn virtual_exposure_interruption_and_timeouts_never_publish_stale_generations() 
 }
 
 #[test]
+fn live_settings_abandon_the_active_exposure_without_stopping_capture() {
+    let mut camera =
+        DeterministicCamera::connect(DeterministicScenario::new([])).expect("camera present");
+    camera
+        .configure(Settings::new(30_000_000, 100).expect("long exposure"))
+        .expect("configure");
+    camera.start().expect("start");
+
+    assert_eq!(capture_one(&mut camera), Err(CaptureError::Timeout));
+
+    camera
+        .apply_live_settings(Settings::new(100_000, 200).expect("responsive exposure"))
+        .expect("apply while capture remains active");
+
+    let frame = camera
+        .capture_next(100)
+        .expect("new exposure completes without restart");
+    assert_eq!(frame.generation(), 1);
+    assert_eq!(frame.data()[258 * 1920 + 258], 171, "new gain applied");
+}
+
+#[test]
 fn deterministic_source_uses_the_production_capture_contract() {
     let scenario = DeterministicScenario::new([
         CapturePlan::Timeout,

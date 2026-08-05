@@ -3,6 +3,7 @@ const CLIENT_STORAGE_KEY = "obscam.service-quality.client.v1";
 const EVIDENCE_REFRESH_MS = 500;
 const REPORT_INTERVAL_MS = 250;
 const MAX_REPORT_BATCH = 32;
+const CLOCK_CALIBRATION_SAMPLES = 3;
 
 export interface QualityObservation {
   correlation: "exact" | "unknown";
@@ -51,17 +52,24 @@ export interface QualityAggregate {
   partitions: QualityPartition[];
 }
 
-export interface QualityClientReport extends QualityAggregate {
+export interface QualityClientSummary extends QualityAggregate {
   clientId: string;
   connectionGeneration: number;
+}
+
+export interface QualityClientReport extends QualityClientSummary {
   samples: unknown[];
 }
 
-export interface ServiceQualityResponse {
+export interface ServiceQualitySummary {
   schemaVersion: typeof SCHEMA_VERSION;
   limits: { clients: 16; samplesPerClient: 512 };
-  clients: QualityClientReport[];
+  clients: QualityClientSummary[];
   combined: QualityAggregate;
+}
+
+export interface ServiceQualityResponse extends Omit<ServiceQualitySummary, "clients"> {
+  clients: QualityClientReport[];
 }
 
 interface ClockCalibration {
@@ -80,14 +88,14 @@ export class ServiceQualityClient {
   private constructor(
     private readonly runtimeEpoch: string,
     private readonly clock: ClockCalibration,
-    private readonly evidence: (response: ServiceQualityResponse) => void
+    private readonly evidence: (response: ServiceQualitySummary) => void
   ) {
     this.clientId = clientId();
   }
 
   static async connect(
     runtimeEpoch: string,
-    evidence: (response: ServiceQualityResponse) => void
+    evidence: (response: ServiceQualitySummary) => void
   ): Promise<ServiceQualityClient> {
     const clock = await calibrateClock();
     const client = new ServiceQualityClient(runtimeEpoch, clock, evidence);
@@ -95,13 +103,16 @@ export class ServiceQualityClient {
     return client;
   }
 
-  report(observation: QualityObservation): void {
+  report(
+    observation: QualityObservation,
+    presentedAtUnixUs = this.nowUnixUs()
+  ): void {
     if (this.pending.length === MAX_REPORT_BATCH) {
       this.pending.shift();
     }
     this.pending.push({
       ...observation,
-      presentedAtUnixUs: Date.now() * 1_000 + this.clock.offsetUs
+      presentedAtUnixUs
     });
     this.scheduleReport();
   }
@@ -201,19 +212,19 @@ export class ServiceQualityClient {
     }
   }
 
-  private async fetchEvidence(): Promise<ServiceQualityResponse> {
+  private async fetchEvidence(): Promise<ServiceQualitySummary> {
     const response = await fetch(
-      `/api/v1/service-quality?clientId=${encodeURIComponent(this.clientId)}`,
+      `/api/v1/service-quality/summary?clientId=${encodeURIComponent(this.clientId)}`,
       { cache: "no-store", headers: { Accept: "application/json" } }
     );
     if (!response.ok) {
       throw new Error(`quality evidence request failed with ${response.status}`);
     }
-    return parseServiceQualityResponse(await response.json(), this.clientId);
+    return parseServiceQualitySummary(await response.json(), this.clientId);
   }
 }
 
-export function serviceQualityText(response: ServiceQualityResponse): string {
+export function serviceQualityText(response: ServiceQualitySummary): string {
   const client = response.clients[0];
   if (client === undefined || client.sampleCount === 0) {
     return "No quality samples";
@@ -246,10 +257,52 @@ export function downloadServiceQuality(
   URL.revokeObjectURL(url);
 }
 
+export async function fetchServiceQualityReport(
+  clientId: string
+): Promise<ServiceQualityResponse> {
+  const response = await fetch(
+    `/api/v1/service-quality?clientId=${encodeURIComponent(clientId)}`,
+    { cache: "no-store", headers: { Accept: "application/json" } }
+  );
+  if (!response.ok) {
+    throw new Error(`quality evidence request failed with ${response.status}`);
+  }
+  return parseServiceQualityResponse(await response.json(), clientId);
+}
+
+export function parseServiceQualitySummary(
+  value: unknown,
+  expectedClientId: string
+): ServiceQualitySummary {
+  validateServiceQualityEnvelope(value);
+  for (const client of value.clients) {
+    if (!validClientSummary(client, expectedClientId) || "samples" in client) {
+      throw new Error("invalid service-quality client summary");
+    }
+  }
+  return value as unknown as ServiceQualitySummary;
+}
+
 export function parseServiceQualityResponse(
   value: unknown,
   expectedClientId: string
 ): ServiceQualityResponse {
+  validateServiceQualityEnvelope(value);
+  for (const client of value.clients) {
+    if (
+      !validClientSummary(client, expectedClientId) ||
+      !Array.isArray(client.samples) ||
+      client.samples.length > 512
+    ) {
+      throw new Error("invalid service-quality client response");
+    }
+  }
+  return value as unknown as ServiceQualityResponse;
+}
+
+function validateServiceQualityEnvelope(
+  value: unknown
+): asserts value is Record<string, unknown> & { clients: unknown[] } {
   if (
     !isRecord(value) ||
     value.schemaVersion !== SCHEMA_VERSION ||
@@ -262,22 +315,30 @@ export function parseServiceQualityResponse(
   ) {
     throw new Error("invalid service-quality response");
   }
-  for (const client of value.clients) {
-    if (
-      !isRecord(client) ||
-      client.clientId !== expectedClientId ||
-      !positiveInteger(client.connectionGeneration) ||
-      !Array.isArray(client.samples) ||
-      client.samples.length > 512 ||
-      !validAggregate(client)
-    ) {
-      throw new Error("invalid service-quality client response");
-    }
-  }
-  return value as unknown as ServiceQualityResponse;
+}
+
+function validClientSummary(value: unknown, expectedClientId: string): value is Record<string, unknown> {
+  return (
+    isRecord(value) &&
+    value.clientId === expectedClientId &&
+    positiveInteger(value.connectionGeneration) &&
+    validAggregate(value)
+  );
 }
 
 async function calibrateClock(): Promise<ClockCalibration> {
+  let best: ClockCalibration | null = null;
+  for (let sample = 0; sample < CLOCK_CALIBRATION_SAMPLES; sample += 1) {
+    const calibration = await sampleClock();
+    if (best === null || calibration.uncertaintyUs < best.uncertaintyUs) {
+      best = calibration;
+    }
+  }
+  if (best === null) throw new Error("clock calibration produced no samples");
+  return best;
+}
+
+async function sampleClock(): Promise<ClockCalibration> {
   const startedAtUs = Date.now() * 1_000;
   const response = await fetch("/api/v1/clock", {
     cache: "no-store",

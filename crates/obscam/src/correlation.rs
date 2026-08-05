@@ -236,6 +236,11 @@ impl CorrelationState {
         Some(inner.tracker.submit(submission))
     }
 
+    pub(crate) fn skip_submission(&self, stream_epoch: u64) -> Option<u64> {
+        let mut inner = self.inner.lock().expect("correlation mutex poisoned");
+        (inner.stream_epoch == stream_epoch).then(|| inner.tracker.skip_submission())
+    }
+
     pub(crate) fn observe(
         &self,
         stream_epoch: u64,
@@ -246,7 +251,7 @@ impl CorrelationState {
         if inner.stream_epoch != stream_epoch {
             return Err(CorrelationError::Reset);
         }
-        let mapping = inner.tracker.observe_index(input_index, rtp_timestamp)?;
+        let mapping = inner.tracker.anchor(input_index, rtp_timestamp)?;
         let _ = self.updates.send(mapping);
         Ok(mapping)
     }
@@ -311,6 +316,15 @@ impl CorrelationTracker {
         input_index
     }
 
+    fn skip_submission(&mut self) -> u64 {
+        let input_index = self.next_input_index;
+        self.next_input_index = self
+            .next_input_index
+            .checked_add(1)
+            .expect("encoder input timeline exhausted");
+        input_index
+    }
+
     /// Establishes an exact output/input point from direct encoder evidence.
     ///
     /// # Errors
@@ -332,8 +346,9 @@ impl CorrelationTracker {
         if self.poisoned.contains(&rtp_timestamp) {
             return Err(CorrelationError::Conflict);
         }
+        let mapping = self.map_index(input_index, rtp_timestamp)?;
         self.anchor = Some((input_index, rtp_timestamp));
-        self.map_index(input_index, rtp_timestamp)
+        Ok(mapping)
     }
 
     /// Maps an observed RTP timestamp by the anchored input timeline.
@@ -363,35 +378,9 @@ impl CorrelationTracker {
         let input_index = anchor_index
             .checked_add(u64::from(delta / self.rtp_step))
             .ok_or(CorrelationError::Reset)?;
-        self.map_index(input_index, rtp_timestamp)
-    }
-
-    fn observe_index(
-        &mut self,
-        input_index: u64,
-        rtp_timestamp: u32,
-    ) -> Result<CorrelationMapping, CorrelationError> {
-        let Some((anchor_index, anchor_timestamp)) = self.anchor else {
-            return self.anchor(input_index, rtp_timestamp);
-        };
-        let delta = rtp_timestamp.wrapping_sub(anchor_timestamp);
-        if delta == 0x8000_0000 {
-            return Err(CorrelationError::AmbiguousGap);
-        }
-        if delta > 0x8000_0000 {
-            return Err(CorrelationError::Reset);
-        }
-        if delta % self.rtp_step != 0 {
-            return Err(CorrelationError::FractionalGap);
-        }
-        let observed_index = anchor_index
-            .checked_add(u64::from(delta / self.rtp_step))
-            .ok_or(CorrelationError::Reset)?;
-        if observed_index != input_index {
-            self.poison(rtp_timestamp);
-            return Err(CorrelationError::Conflict);
-        }
-        self.map_index(input_index, rtp_timestamp)
+        let mapping = self.map_index(input_index, rtp_timestamp)?;
+        self.anchor = Some((input_index, rtp_timestamp));
+        Ok(mapping)
     }
 
     /// Looks up only retained, non-conflicting exact evidence.
@@ -476,24 +465,16 @@ mod tests {
     }
 
     #[test]
-    fn direct_pts_must_agree_with_the_observed_rtp_timeline() {
+    fn direct_pts_map_an_encoder_input_skip_without_inventing_a_frame() {
         let mut tracker = CorrelationTracker::new(4, 4_500);
         tracker.submit(submission(1));
         tracker.submit(submission(2));
         tracker.submit(submission(3));
 
-        assert_eq!(
-            tracker
-                .observe_index(0, 90_000)
-                .unwrap()
-                .source_generation(),
-            1
-        );
-        assert_eq!(
-            tracker.observe_index(1, 99_000),
-            Err(CorrelationError::Conflict)
-        );
-        assert!(tracker.lookup(99_000).is_none());
+        assert_eq!(tracker.anchor(0, 90_000).unwrap().source_generation(), 1);
+        assert_eq!(tracker.anchor(2, 94_500).unwrap().source_generation(), 3);
+        assert_eq!(tracker.encoder_skips(), 1);
+        assert!(tracker.lookup(94_500).is_some());
     }
 
     #[test]
@@ -522,6 +503,39 @@ mod tests {
         assert_eq!(
             state.observe(first_stream, 0, 90_000),
             Err(CorrelationError::Reset)
+        );
+    }
+
+    #[test]
+    fn an_untrusted_input_advances_the_timeline_without_creating_a_mapping() {
+        let state = CorrelationState::new(Uuid::from_u128(1));
+        let stream = state.begin_stream();
+        assert_eq!(state.skip_submission(stream), Some(0));
+        assert_eq!(
+            state.submit(
+                stream,
+                CapturedFrameMetadata {
+                    settings_generation: 1,
+                    treatment: Treatment::Monochrome,
+                    exposure_completed_at_unix_us: 1,
+                },
+                7,
+                2,
+                false,
+            ),
+            Some(1)
+        );
+
+        assert_eq!(
+            state.observe(stream, 0, 90_000),
+            Err(CorrelationError::Evicted)
+        );
+        assert_eq!(
+            state
+                .observe(stream, 1, 94_500)
+                .expect("trusted input after transition")
+                .source_generation(),
+            7
         );
     }
 }

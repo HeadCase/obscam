@@ -24,9 +24,35 @@ use crate::{
 const RAW8_BYTES: usize = WIDTH * HEIGHT;
 const MAX_ENCODER_RECOVERY_DELAY: Duration = Duration::from_secs(5);
 const ENCODER_PUBLICATION_TIMEOUT: Duration = Duration::from_secs(2);
+const ENCODER_PUBLICATION_INTERVAL: Duration = Duration::from_millis(50);
 const RELAY_METRICS_ADDRESS: &str = "169.254.218.2:9998";
 const RELAY_PROBE_INTERVAL: Duration = Duration::from_millis(500);
 const RELAY_PROBE_TIMEOUT: Duration = Duration::from_millis(250);
+const MAX_LIVE_SETTINGS_TRANSITION_FRAMES: u8 = 2;
+
+#[derive(Debug, Default)]
+struct SettingsFrameTrust {
+    untrusted_remaining: u8,
+}
+
+impl SettingsFrameTrust {
+    const fn begin_transition(&mut self, camera_controls_changed: bool) {
+        self.untrusted_remaining = if camera_controls_changed {
+            MAX_LIVE_SETTINGS_TRANSITION_FRAMES
+        } else {
+            0
+        };
+    }
+
+    const fn permits_exact_metadata(&mut self) -> bool {
+        if self.untrusted_remaining == 0 {
+            true
+        } else {
+            self.untrusted_remaining -= 1;
+            false
+        }
+    }
+}
 
 #[derive(Debug, Default)]
 struct EncoderRecoveryBackoff {
@@ -438,6 +464,7 @@ fn capture_session(
     let session_started = Instant::now();
     let mut validation = ValidationWindow::new(Duration::from_secs(10));
     let mut last_generation = 0;
+    let mut settings_frame_trust = SettingsFrameTrust::default();
 
     loop {
         if processing_recovery.try_recv().is_ok() {
@@ -459,7 +486,10 @@ fn capture_session(
         match apply_pending_settings(source, &settings, |generation| {
             raw.begin_epoch(generation);
         }) {
-            Ok(SettingsTransition::Applied) => {
+            Ok(SettingsTransition::Applied {
+                camera_controls_changed,
+            }) => {
+                settings_frame_trust.begin_transition(camera_controls_changed);
                 if let Some(token) = watchdog_token.take() {
                     if watchdog.cancellation_requested(token) {
                         return CaptureSessionEnd {
@@ -530,17 +560,17 @@ fn capture_session(
                     continue;
                 }
                 let applied = settings.snapshot().applied();
+                let metadata =
+                    settings_frame_trust
+                        .permits_exact_metadata()
+                        .then(|| CapturedFrameMetadata {
+                            settings_generation: applied.generation(),
+                            treatment: applied.settings().treatment(),
+                            exposure_completed_at_unix_us: unix_time_us(),
+                        });
                 *source_generation = source_generation.saturating_add(1);
-                let skipped = raw.publish_with_metadata(
-                    epoch,
-                    *source_generation,
-                    frame.data(),
-                    Some(CapturedFrameMetadata {
-                        settings_generation: applied.generation(),
-                        treatment: applied.settings().treatment(),
-                        exposure_completed_at_unix_us: unix_time_us(),
-                    }),
-                );
+                let skipped =
+                    raw.publish_with_metadata(epoch, *source_generation, frame.data(), metadata);
                 runtime.record_pipeline_skips(skipped);
                 last_generation = frame.generation();
                 backoff.reset();
@@ -625,8 +655,8 @@ fn validation_failure(
 
 /// Applies at most one claimed settings target through the camera-owner lifecycle.
 ///
-/// The boundary callback is invoked exactly once after capture restarts and before
-/// the target becomes authoritative as Applied.
+/// The boundary callback is invoked exactly once after live controls change and
+/// before the target becomes authoritative as Applied.
 ///
 /// # Errors
 ///
@@ -644,11 +674,10 @@ fn apply_pending_settings(
         return Ok(SettingsTransition::Idle);
     };
     let previous = controller.snapshot().applied().settings();
-    let transition = source
-        .stop()
-        .and_then(|()| source.configure(target.settings().camera_settings()))
-        .and_then(|()| source.start());
-    if let Err(error) = transition {
+    let camera_controls_changed = previous.camera_settings() != target.settings().camera_settings();
+    if camera_controls_changed
+        && let Err(error) = source.apply_live_settings(target.settings().camera_settings())
+    {
         controller.begin_recovery();
         source.stop()?;
         source.configure(previous.camera_settings())?;
@@ -658,7 +687,9 @@ fn apply_pending_settings(
     }
     begin_epoch(target.generation());
     controller.mark_applied(target);
-    Ok(SettingsTransition::Applied)
+    Ok(SettingsTransition::Applied {
+        camera_controls_changed,
+    })
 }
 
 /// Outcome of one bounded settings transition attempt.
@@ -666,8 +697,11 @@ fn apply_pending_settings(
 enum SettingsTransition {
     /// No settings target was pending.
     Idle,
-    /// The target restarted capture and became Applied.
-    Applied,
+    /// The target became Applied without stopping capture.
+    Applied {
+        /// Whether sensor controls changed and may yield transitional frames.
+        camera_controls_changed: bool,
+    },
     /// Applying failed, the target was failed, and the prior tuple was restored.
     Restored(zwo_asi::CameraError),
 }
@@ -775,6 +809,7 @@ fn spawn_encoder(
             let mut completed = None;
             let mut recovering = false;
             let mut backoff = EncoderRecoveryBackoff::new();
+            let mut next_publication_at: Option<Instant> = None;
             loop {
                 if encoder.is_none() {
                     if recovering {
@@ -791,6 +826,7 @@ fn spawn_encoder(
                                 runtime.record_encoder_replacement();
                             }
                             encoder = Some(replacement);
+                            next_publication_at = None;
                         }
                         Err(error) => {
                             runtime.set_encoder_readiness(ComponentReadiness::Unavailable);
@@ -800,11 +836,14 @@ fn spawn_encoder(
                         }
                     }
                 }
-                let next = mailbox.wait_take(if completed.is_some() {
-                    Duration::from_millis(500)
+                let next = if completed.is_some() {
+                    if let Some(deadline) = next_publication_at {
+                        thread::sleep(deadline.saturating_duration_since(Instant::now()));
+                    }
+                    mailbox.take()
                 } else {
-                    Duration::from_secs(1)
-                });
+                    mailbox.wait_take(Duration::from_secs(1))
+                };
                 let publication = if let Some(frame) = next {
                     if let Some(previous) = completed.take() {
                         mailbox.recycle(previous);
@@ -823,10 +862,16 @@ fn spawn_encoder(
                         }
                     }
                 } else if let Some(frame) = completed.take() {
-                    encoder
-                        .as_mut()
-                        .expect("completed frame has an encoder")
-                        .publish_owned(frame, true, ENCODER_PUBLICATION_TIMEOUT)
+                    if mailbox.is_current(&frame) {
+                        encoder
+                            .as_mut()
+                            .expect("completed frame has an encoder")
+                            .publish_owned(frame, true, ENCODER_PUBLICATION_TIMEOUT)
+                    } else {
+                        mailbox.recycle(frame);
+                        next_publication_at = None;
+                        continue;
+                    }
                 } else {
                     if replace_exited_encoder(&mut encoder, &runtime, &mailbox) {
                         recovering = true;
@@ -839,6 +884,10 @@ fn spawn_encoder(
                         completed = Some(frame);
                         recovering = false;
                         backoff.reset();
+                        next_publication_at = Some(next_encoder_publication_at(
+                            next_publication_at.unwrap_or_else(Instant::now),
+                            Instant::now(),
+                        ));
                     }
                     Err(failure) => {
                         let (frame, error) = failure.into_parts();
@@ -852,6 +901,13 @@ fn spawn_encoder(
                 }
             }
         })
+}
+
+fn next_encoder_publication_at(scheduled_at: Instant, now: Instant) -> Instant {
+    scheduled_at
+        .checked_add(ENCODER_PUBLICATION_INTERVAL)
+        .filter(|next| *next > now)
+        .unwrap_or_else(|| now + ENCODER_PUBLICATION_INTERVAL)
 }
 
 fn replace_exited_encoder(
@@ -905,6 +961,24 @@ mod tests {
     }
 
     #[test]
+    fn encoder_publication_deadline_holds_twenty_fps_without_catch_up_bursts() {
+        let start = Instant::now();
+
+        assert_eq!(
+            next_encoder_publication_at(start, start + Duration::from_millis(10)),
+            start + ENCODER_PUBLICATION_INTERVAL
+        );
+        assert_eq!(
+            next_encoder_publication_at(start, start + ENCODER_PUBLICATION_INTERVAL),
+            start + ENCODER_PUBLICATION_INTERVAL * 2
+        );
+        assert_eq!(
+            next_encoder_publication_at(start, start + Duration::from_millis(80)),
+            start + Duration::from_millis(130)
+        );
+    }
+
+    #[test]
     fn relay_probe_accepts_only_a_ready_obscam_path() {
         let ready = b"HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\n\r\npaths{name=\"obscam\",state=\"ready\"} 1\n";
         let unavailable = b"HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\n\r\npaths{name=\"obscam\",state=\"notReady\"} 1\n";
@@ -915,13 +989,60 @@ mod tests {
     }
 
     #[test]
-    fn pending_tuple_runs_the_complete_camera_and_generation_transition() {
-        let mut camera =
+    fn live_camera_control_changes_keep_two_transition_frames_visible_but_untrusted() {
+        let mut trust = SettingsFrameTrust::default();
+
+        trust.begin_transition(true);
+
+        assert!(!trust.permits_exact_metadata());
+        assert!(!trust.permits_exact_metadata());
+        assert!(trust.permits_exact_metadata());
+    }
+
+    #[test]
+    fn browser_only_treatment_changes_do_not_touch_sensor_controls_or_need_a_fence() {
+        let mut inner =
             DeterministicCamera::connect(DeterministicScenario::new([])).expect("camera present");
-        camera
+        inner
             .configure(Settings::new(500_000, 100).expect("defaults"))
             .expect("configure");
-        camera.start().expect("start");
+        inner.start().expect("start");
+        let stops = Arc::new(AtomicUsize::new(0));
+        let mut camera = StopCountingCamera::new(inner, Arc::clone(&stops));
+        let controller = ready_controller();
+        controller.install_interrupter(camera.interrupter());
+        controller
+            .accept(
+                CameraSettings::new(500, 100, Treatment::Colour).expect("treatment-only target"),
+            )
+            .expect("camera ready");
+
+        let transition = apply_pending_settings(&mut camera, &controller, |_| {})
+            .expect("treatment-only transition");
+
+        assert!(matches!(
+            transition,
+            SettingsTransition::Applied {
+                camera_controls_changed: false
+            }
+        ));
+        assert_eq!(camera.live_settings_applications, 0);
+        assert_eq!(stops.load(Ordering::SeqCst), 0);
+        let mut trust = SettingsFrameTrust::default();
+        trust.begin_transition(false);
+        assert!(trust.permits_exact_metadata());
+    }
+
+    #[test]
+    fn pending_tuple_runs_the_complete_camera_and_generation_transition() {
+        let mut inner =
+            DeterministicCamera::connect(DeterministicScenario::new([])).expect("camera present");
+        inner
+            .configure(Settings::new(500_000, 100).expect("defaults"))
+            .expect("configure");
+        inner.start().expect("start");
+        let stops = Arc::new(AtomicUsize::new(0));
+        let mut camera = StopCountingCamera::new(inner, Arc::clone(&stops));
         let controller = ready_controller();
         controller.install_interrupter(camera.interrupter());
         let target = controller
@@ -937,9 +1058,15 @@ mod tests {
             boundaries.push(generation);
         })
         .expect("transition");
-        assert!(matches!(transition, SettingsTransition::Applied));
+        assert!(matches!(
+            transition,
+            SettingsTransition::Applied {
+                camera_controls_changed: true
+            }
+        ));
 
         assert_eq!(boundaries, [target.generation()]);
+        assert_eq!(stops.load(Ordering::SeqCst), 0, "capture remains active");
         assert_eq!(controller.snapshot().applied(), target);
         let frame = camera
             .capture_next(100)
@@ -955,7 +1082,7 @@ mod tests {
             .configure(Settings::new(500_000, 100).expect("defaults"))
             .expect("configure");
         inner.start().expect("start");
-        let mut camera = FailNextConfiguration::new(inner);
+        let mut camera = FailNextLiveSettings::new(inner);
         let controller = ready_controller();
         controller.install_interrupter(camera.interrupter());
         let target = controller
@@ -1418,6 +1545,10 @@ mod tests {
             self.inner_mut().configure(settings)
         }
 
+        fn apply_live_settings(&mut self, settings: Settings) -> Result<(), zwo_asi::CameraError> {
+            self.inner_mut().apply_live_settings(settings)
+        }
+
         fn start(&mut self) -> Result<(), zwo_asi::CameraError> {
             self.inner_mut().start()
         }
@@ -1444,11 +1575,16 @@ mod tests {
     struct StopCountingCamera {
         inner: DeterministicCamera,
         stops: Arc<AtomicUsize>,
+        live_settings_applications: usize,
     }
 
     impl StopCountingCamera {
         fn new(inner: DeterministicCamera, stops: Arc<AtomicUsize>) -> Self {
-            Self { inner, stops }
+            Self {
+                inner,
+                stops,
+                live_settings_applications: 0,
+            }
         }
     }
 
@@ -1459,6 +1595,11 @@ mod tests {
 
         fn configure(&mut self, settings: Settings) -> Result<(), zwo_asi::CameraError> {
             self.inner.configure(settings)
+        }
+
+        fn apply_live_settings(&mut self, settings: Settings) -> Result<(), zwo_asi::CameraError> {
+            self.live_settings_applications += 1;
+            self.inner.apply_live_settings(settings)
         }
 
         fn start(&mut self) -> Result<(), zwo_asi::CameraError> {
@@ -1496,6 +1637,10 @@ mod tests {
 
         fn configure(&mut self, settings: Settings) -> Result<(), zwo_asi::CameraError> {
             self.inner.configure(settings)
+        }
+
+        fn apply_live_settings(&mut self, settings: Settings) -> Result<(), zwo_asi::CameraError> {
+            self.inner.apply_live_settings(settings)
         }
 
         fn start(&mut self) -> Result<(), zwo_asi::CameraError> {
@@ -1561,10 +1706,63 @@ mod tests {
             if self.fail_next {
                 self.fail_next = false;
                 return Err(zwo_asi::CameraError::InvalidState {
-                    operation: "injected settings failure",
+                    operation: "injected configuration failure",
                 });
             }
             self.inner.configure(settings)
+        }
+
+        fn apply_live_settings(&mut self, settings: Settings) -> Result<(), zwo_asi::CameraError> {
+            self.inner.apply_live_settings(settings)
+        }
+
+        fn start(&mut self) -> Result<(), zwo_asi::CameraError> {
+            self.inner.start()
+        }
+
+        fn capture_next(
+            &mut self,
+            wait_ms: i32,
+        ) -> Result<zwo_asi::FrameGeneration<'_>, CaptureError> {
+            self.inner.capture_next(wait_ms)
+        }
+
+        fn stop(&mut self) -> Result<(), zwo_asi::CameraError> {
+            self.inner.stop()
+        }
+    }
+
+    struct FailNextLiveSettings {
+        inner: DeterministicCamera,
+        fail_next: bool,
+    }
+
+    impl FailNextLiveSettings {
+        const fn new(inner: DeterministicCamera) -> Self {
+            Self {
+                inner,
+                fail_next: true,
+            }
+        }
+    }
+
+    impl CameraSource for FailNextLiveSettings {
+        fn interrupter(&self) -> zwo_asi::CaptureInterrupter {
+            self.inner.interrupter()
+        }
+
+        fn configure(&mut self, settings: Settings) -> Result<(), zwo_asi::CameraError> {
+            self.inner.configure(settings)
+        }
+
+        fn apply_live_settings(&mut self, settings: Settings) -> Result<(), zwo_asi::CameraError> {
+            if self.fail_next {
+                self.fail_next = false;
+                return Err(zwo_asi::CameraError::InvalidState {
+                    operation: "injected live settings failure",
+                });
+            }
+            self.inner.apply_live_settings(settings)
         }
 
         fn start(&mut self) -> Result<(), zwo_asi::CameraError> {
