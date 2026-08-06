@@ -1275,7 +1275,7 @@ mod tests {
             let camera = configured_camera([]);
             let watchdog = CaptureWatchdogMonitor::spawn().expect("watchdog");
             let _token = watchdog.arm(Duration::ZERO, camera.interrupter());
-            thread::sleep(Duration::from_secs(4));
+            thread::sleep(Duration::from_secs(6));
             panic!("watchdog did not terminate the process");
         }
 

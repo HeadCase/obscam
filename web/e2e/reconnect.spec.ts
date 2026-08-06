@@ -126,9 +126,8 @@ test("repeated media failures preserve control authority until video recovers", 
   const original = await visibleSettings(page);
   try {
     await takeControl(page);
-    await expect(page.locator("[data-control-status]")).toHaveText("You have control");
     await expect(page.locator("[data-service-status]")).toHaveText("Live");
-    await expect(page.locator("[data-control-status]")).toHaveText("You have control");
+    await expect(page.getByRole("button", { name: "Release", exact: true })).toBeVisible();
     expect(attempts).toBeGreaterThanOrEqual(5);
   } finally {
     await restoreAndRelease(page, original);
@@ -158,16 +157,16 @@ test("control reconnect disables mutation, keeps video Live, and never replays s
   const original = await visibleSettings(page);
   try {
     await takeControl(page);
-    const replacement = original.exposureMs === 20 ? 50 : 20;
+    const replacement = original.exposureMs === 50 ? 100 : 50;
     await setExposure(page, replacement);
     const mutationsBeforeReconnect = sentMessages.filter(isSettingsMutation).length;
 
     await browserSockets[0]?.close({ code: 1012, reason: "test control loss" });
-    await expect(page.locator("[data-control-status]")).toContainText("Control reconnecting");
     await expect(page.locator("[data-gain]")).toBeDisabled();
+    await expect(page.getByRole("button", { name: "Settings" })).toBeDisabled();
     await expect(page.locator("[data-service-status]")).toHaveText("Live");
     await expect.poll(() => connections).toBeGreaterThanOrEqual(3);
-    await expect(page.locator("[data-control-status]")).toHaveText("You have control");
+    await expect(page.getByRole("button", { name: "Release", exact: true })).toBeVisible();
     await page.waitForTimeout(1_000);
     expect(sentMessages.filter(isSettingsMutation)).toHaveLength(mutationsBeforeReconnect);
   } finally {
@@ -199,7 +198,7 @@ test("stale same-runtime credentials attempt only lease resume", async ({ page }
   sentMessages.length = 0;
 
   await page.reload();
-  await expect(page.locator("[data-control-status]")).toHaveText("No one has control");
+  await expect(page.getByRole("button", { name: "Take control" })).toBeVisible();
   await expect.poll(() => sentMessages.some((message) => JSON.parse(message).type === "resume"))
     .toBe(true);
   expect(sentMessages.some(isSettingsMutation)).toBe(false);
@@ -325,7 +324,7 @@ test("network restoration bypasses delayed transport retries", async ({ page }) 
   failedControlConnections = 4;
   await page.evaluate(() => window.dispatchEvent(new Event("online")));
   await expect.poll(() => failedControlConnections).toBe(0);
-  await expect(page.locator("[data-control-status]")).toContainText("Control reconnecting in");
+  await expect(page.getByRole("button", { name: "Settings" })).toBeDisabled();
   await page.waitForTimeout(100);
   const controlConnectionsDuringBackoff = controlConnections;
   await page.waitForTimeout(100);
