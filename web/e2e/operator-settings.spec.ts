@@ -177,21 +177,49 @@ test("authoritative exposure rail advances smoothly without mid-capture rewinds"
   try {
     await page.evaluate(() => {
       const rail = document.querySelector<HTMLElement>("[data-exposure-rail]")!;
-      const classes = new Set<string>();
+      const fill = document.querySelector<HTMLElement>("[data-exposure-rail-fill]")!;
+      const samples: Array<{ hidden: boolean; applying: boolean; progress: number }> = [];
       const record = (): void => {
-        for (const value of Array.from(rail.classList)) classes.add(value);
+        samples.push({
+          hidden: rail.hidden,
+          applying: rail.classList.contains("is-applying"),
+          progress: Number.parseFloat(fill.style.width || "0") / 100
+        });
       };
       new MutationObserver(record).observe(rail, {
         attributes: true,
-        attributeFilter: ["class"]
+        attributeFilter: ["class", "hidden"]
+      });
+      new MutationObserver(record).observe(fill, {
+        attributes: true,
+        attributeFilter: ["style"]
       });
       record();
-      (window as Window & { __observedRailClasses?: Set<string> }).__observedRailClasses = classes;
+      (window as Window & {
+        __observedRailSamples?: Array<{ hidden: boolean; applying: boolean; progress: number }>;
+      }).__observedRailSamples = samples;
     });
     await setExposure(page, 1_000);
-    expect(await page.evaluate(() => [
-      ...((window as Window & { __observedRailClasses?: Set<string> }).__observedRailClasses ?? [])
-    ])).toContain("is-applying");
+    const transitionSamples = await page.evaluate(() =>
+      (window as Window & {
+        __observedRailSamples?: Array<{ hidden: boolean; applying: boolean; progress: number }>;
+      }).__observedRailSamples ?? []
+    );
+    expect(transitionSamples.some((sample) => sample.applying)).toBe(false);
+    let prior: number | null = null;
+    for (const sample of transitionSamples) {
+      if (sample.hidden) {
+        prior = null;
+        continue;
+      }
+      if (prior !== null && sample.progress < prior - 0.02) {
+        expect(
+          prior >= 0.9 && sample.progress <= 0.1,
+          `rail rewound from ${prior} to ${sample.progress}`
+        ).toBe(true);
+      }
+      prior = sample.progress;
+    }
     const samples = await page.evaluate(async () => {
       const fill = document.querySelector<HTMLElement>("[data-exposure-rail-fill]")!;
       const rail = document.querySelector<HTMLElement>("[data-exposure-rail]")!;
@@ -213,7 +241,7 @@ test("authoritative exposure rail advances smoothly without mid-capture rewinds"
     for (let index = 1; index < visible.length; index += 1) {
       const prior = visible[index - 1]!;
       const current = visible[index]!;
-      if (prior < 0.8) {
+      if (prior < 0.9) {
         expect(current, `rail rewound from ${prior} to ${current}`).toBeGreaterThanOrEqual(
           prior - 0.02
         );
@@ -327,10 +355,10 @@ test("operator moves from short to long exposure and back without losing the ret
     await longExposure.fill("11");
     await expect(longExposure).toHaveAttribute("data-exposure-ms", "30000");
     await page.getByRole("button", { name: "Apply" }).click();
-    await expect(page.locator("[data-service-detail]")).toContainText("Exposure in progress");
+    await expect(page.locator("[data-service-detail]")).toHaveCount(0);
     await page.waitForTimeout(3_000);
     await expect(page.locator("[data-viewer-status]")).toHaveText("Live");
-    await expect(page.locator("[data-service-detail]")).toContainText("Exposure in progress");
+    await expect(page.locator("[data-service-detail]")).toHaveCount(0);
     const retainedAt = await video.evaluate((element: HTMLVideoElement) => element.currentTime);
     expect(retainedAt - startedAt, "retained video should keep playing during a long exposure")
       .toBeGreaterThan(2);

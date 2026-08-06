@@ -29,7 +29,7 @@ const RELAY_METRICS_ADDRESS: &str = "169.254.218.2:9998";
 const RELAY_PROBE_INTERVAL: Duration = Duration::from_millis(500);
 const RELAY_PROBE_TIMEOUT: Duration = Duration::from_millis(250);
 const CAPTURE_INTERRUPT_POLL_MS: i32 = 25;
-const MAX_SENSOR_TRANSITION_FRAMES: u8 = 2;
+const MAX_SENSOR_TRANSITION_FRAMES: u8 = 3;
 
 #[derive(Debug, Default)]
 struct SettingsFrameTrust {
@@ -39,6 +39,10 @@ struct SettingsFrameTrust {
 impl SettingsFrameTrust {
     const fn begin_transition(&mut self, untrusted_frames: u8) {
         self.untrusted_remaining = untrusted_frames;
+    }
+
+    const fn permits_capture_progress(&self) -> bool {
+        self.untrusted_remaining == 0
     }
 
     const fn permits_exact_metadata(&mut self) -> bool {
@@ -518,11 +522,13 @@ fn capture_session(
         }
         if !capture_in_progress {
             let applied = settings.snapshot().applied();
-            runtime.capture_started(
-                applied.generation(),
-                applied.settings().exposure_ms(),
-                unix_time_us(),
-            );
+            if settings_frame_trust.permits_capture_progress() {
+                runtime.capture_started(
+                    applied.generation(),
+                    applied.settings().exposure_ms(),
+                    unix_time_us(),
+                );
+            }
             watchdog_token = Some(watchdog.arm(
                 Duration::from_millis(u64::from(applied.settings().exposure_ms())),
                 source.interrupter(),
@@ -990,13 +996,18 @@ mod tests {
     }
 
     #[test]
-    fn gain_changes_keep_two_transition_frames_visible_but_untrusted() {
+    fn gain_changes_keep_three_transition_frames_visible_but_untrusted() {
         let mut trust = SettingsFrameTrust::default();
 
-        trust.begin_transition(2);
+        trust.begin_transition(3);
 
+        assert!(!trust.permits_capture_progress());
         assert!(!trust.permits_exact_metadata());
+        assert!(!trust.permits_capture_progress());
         assert!(!trust.permits_exact_metadata());
+        assert!(!trust.permits_capture_progress());
+        assert!(!trust.permits_exact_metadata());
+        assert!(trust.permits_capture_progress());
         assert!(trust.permits_exact_metadata());
     }
 
@@ -1011,11 +1022,12 @@ mod tests {
     }
 
     #[test]
-    fn a_shortened_exposure_keeps_two_transition_frames_visible_but_untrusted() {
+    fn a_shortened_exposure_keeps_three_transition_frames_visible_but_untrusted() {
         let mut trust = SettingsFrameTrust::default();
 
-        trust.begin_transition(2);
+        trust.begin_transition(3);
 
+        assert!(!trust.permits_exact_metadata());
         assert!(!trust.permits_exact_metadata());
         assert!(!trust.permits_exact_metadata());
         assert!(trust.permits_exact_metadata());
@@ -1083,7 +1095,7 @@ mod tests {
         assert!(matches!(
             transition,
             SettingsTransition::Applied {
-                untrusted_frames: 2
+                untrusted_frames: 3
             }
         ));
 

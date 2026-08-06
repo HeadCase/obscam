@@ -185,6 +185,7 @@ impl CameraSource for DeterministicCamera {
                 operation: "apply live settings while stopped",
             });
         }
+        self.interrupted.store(false, Ordering::Release);
         self.settings = Some(settings);
         self.pending_delay_us = None;
         Ok(())

@@ -154,6 +154,8 @@ fn live_settings_abandon_the_active_exposure_without_stopping_capture() {
 
     assert_eq!(capture_one(&mut camera), Err(CaptureError::Timeout));
 
+    camera.interrupter().interrupt();
+
     camera
         .apply_live_settings(Settings::new(100_000, 200).expect("responsive exposure"))
         .expect("apply while capture remains active");

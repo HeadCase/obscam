@@ -263,7 +263,7 @@ async fn production_assets_expose_the_complete_unavailable_viewer_shell() {
     assert!(html.contains("data-viewer-video"));
     assert!(html.contains("data-viewer-retained-frame"));
     assert!(html.contains("data-service-status"));
-    assert!(html.contains("data-service-detail"));
+    assert!(!html.contains("data-service-detail"));
     assert!(html.contains("data-control=\"take-control\""));
     assert!(html.contains("data-control-status"));
     assert!(html.contains("data-control=\"snapshot\""));

@@ -52,7 +52,6 @@ async function boot(): Promise<void> {
   const detail = requiredElement("[data-viewer-detail]");
   const unavailable = requiredElement("[data-viewer-unavailable]");
   const serviceStatus = requiredElement("[data-service-status]");
-  const serviceDetail = requiredElement("[data-service-detail]");
   const exposureRail = requiredElement("[data-exposure-rail]");
   const exposureRailFill = requiredElement("[data-exposure-rail-fill]");
   const settingsPopover = requiredElement("[data-settings-popover]");
@@ -121,8 +120,6 @@ async function boot(): Promise<void> {
       status.textContent = projection.status;
       detail.textContent = operatorDetail;
       serviceStatus.textContent = projection.status;
-      serviceDetail.textContent = operatorDetail;
-      serviceDetail.hidden = operatorDetail.length === 0;
       unavailable.hidden = viewer.trustworthyFrame !== null || projection.status === "Live";
       viewerFrame.dataset.feedState = feedStateToken(projection.status);
       viewerRoot.dataset.chromeVisible = String(operatorUi.chromeVisible);
@@ -176,9 +173,8 @@ async function boot(): Promise<void> {
         );
         lastReducedMotionRailUpdateAtMs = nowMs;
       }
-      exposureRail.hidden = !applying && railState.progress === null;
-      exposureRail.classList.toggle("is-applying", applying);
-      exposureRailFill.style.width = applying ? "24%" : `${(railState.progress ?? 0) * 100}%`;
+      exposureRail.hidden = applying || railState.progress === null;
+      exposureRailFill.style.width = `${(railState.progress ?? 0) * 100}%`;
       exposureRail.classList.toggle(
         "is-arriving",
         !applying && operatorUi.frameArrivalUntilMs !== null &&

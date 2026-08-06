@@ -97,6 +97,31 @@ test("approved viewports preserve source geometry and avoid horizontal overflow"
     expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBe(viewport.width);
     await expect(page.locator("[data-service-status]")).toBeVisible();
     await expect(page.locator("[data-control=\"take-control\"]")).toBeVisible();
+    const chromeOverlaps = await page.evaluate(() => {
+      const selectors = [
+        ".command-bar__status",
+        "[data-settings-readout]",
+        "[data-control=\"settings\"]",
+        "[data-control=\"snapshot\"]",
+        "[data-control=\"take-control\"]"
+      ];
+      const rectangles = selectors.map((selector) =>
+        document.querySelector<HTMLElement>(selector)!.getBoundingClientRect()
+      );
+      const overlaps: Array<[number, number]> = [];
+      for (let left = 0; left < rectangles.length; left += 1) {
+        for (let right = left + 1; right < rectangles.length; right += 1) {
+          const a = rectangles[left]!;
+          const b = rectangles[right]!;
+          if (a.left < b.right && a.right > b.left && a.top < b.bottom && a.bottom > b.top) {
+            overlaps.push([left, right]);
+          }
+        }
+      }
+      return overlaps;
+    });
+    expect(chromeOverlaps, `overlapping chrome at ${viewport.width}×${viewport.height}`)
+      .toEqual([]);
     expect(await page.locator("[data-viewer-video]").boundingBox()).toEqual({
       x: 0,
       y: 0,

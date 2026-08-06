@@ -20,13 +20,26 @@ Screenshots were visually assessed at 1512 x 982 desktop, 430 x 932 phone
 portrait, and 932 x 430 phone landscape. The full 1920 x 1080 source retained
 `object-fit: contain`; opening settings did not resize or crop it.
 
+The deployed follow-up assessment removed the transient command-bar subtext,
+reserved a stable 152 px desktop status slot, and measured 0 px settings-readout
+movement between `Live` and `Waiting for first image`. At 430 x 932 the command
+bar uses two explicit rows. Status, requested settings, Settings, Snapshot, and
+Take control had no pairwise overlap at 430 x 932, 932 x 430, 756 x 490, or
+1512 x 982, and every viewport retained exact document-width containment.
+
 ## Exposure rail
 
-At a real 1 s exposure, a 2.6 s animation trace sampled 376 browser frames and
-363 distinct rail widths without a mid-capture regression. A post-review trace
-also observed the indeterminate Applying phase, followed by 182 distinct
-determinate widths over 1.3 s with no rewind. Exact capture boundaries remain
-the only permitted reset.
+The deployed 5 s to 1 s reproduction originally caught deterministic rewinds,
+including 76.8% to the artificial 24% Applying width and a later 23% to 3%
+sensor-transition reset. The artificial Applying animation was removed. The
+camera owner now consumes the interruption associated with an applied target,
+and the runtime withholds capture progress while the three hardware-observed
+transitional frames remain ineligible for exact settings metadata.
+
+The final release-mode trace passed repeated 5 s to 1 s transitions with no
+mid-capture regression or Applying class. The rail remained hidden across the
+untrusted boundary, then advanced from the first stable authoritative capture.
+Exact completed-capture boundaries remain the only permitted reset.
 
 Reduced-motion browser coverage holds the current position and updates the
 determinate rail discretely rather than continuously interpolating it.
