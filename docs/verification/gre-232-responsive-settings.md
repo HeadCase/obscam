@@ -217,3 +217,40 @@ the exposure-shortening SLA.
 - Exact settings partitions contained zero unknown samples.
 - No encoder replacement or camera reopen occurred during the final continuous
   capture series.
+
+### Final closure qualification — 2026-08-06
+
+The committed release was requalified through the Mac Playwright MCP against
+the real camera and production relay before preparing a pull request.
+
+At 50 ms, ISO 0, one visible viewer sustained 19.9 fps with 510 exact and 0
+unknown samples over a 12-second measurement; p95 presentation latency was 186
+ms. ObsCam process CPU averaged 57.0%, RSS was 40.53 MiB, and aggregate host CPU
+idle averaged 78.1% with a 68.9% minimum.
+
+Four independent, genuinely visible browser contexts then ran for the same
+12-second window. Every video advanced for the complete interval, every viewer
+remained Live, cadence was 19.9-20.0 fps, and all reported samples were exact
+with zero unknown. The worst p95 was 192 ms, a 6 ms increase from the one-viewer
+baseline against the 50 ms gate. ObsCam CPU averaged 55.5%, RSS was 43.17 MiB
+(+2.64 MiB against the 32 MiB gate), and aggregate host idle averaged 79.5%
+with a 73.4% minimum. While all four remained visible, the operator applied
+50 ms -> 100 ms: the target became exact in 393 ms and all four videos kept
+advancing and remained Live. The operator restored 50 ms afterward.
+
+The binding shortening cases were repeated on the same release. The first
+5 s -> 200 ms transition became exact in 865 ms. The first 30 s -> 100 ms
+transition became exact in 546 ms; a deliberate repeat became exact in 647 ms
+and, after the report partition settled, showed Live, 10.1 fps, 42 exact, 0
+unknown, and 92 ms p95. Both remain within the accepted requested-exposure plus
+1,000 ms hard gate.
+
+Finally, the release held 50 ms and ISO 600 continuously for three minutes.
+The source generation advanced by 3,596 and browser video advanced by 180.088
+seconds. All thirteen 15-second checkpoints were Live, 19.7-20.0 fps, and
+entirely exact with zero unknown samples. The local RTP socket's kernel drop
+counter remained zero. RSS was unchanged at 43.65 MiB between early and final
+samples; final CPU averaged 51.3%, aggregate host idle averaged 77.9%, and no
+correlation invalidation, recovery, or process restart appeared in the log.
+The original 500 ms, ISO 100, monochrome tuple was restored and control was
+released after qualification.
