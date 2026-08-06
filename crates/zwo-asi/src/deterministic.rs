@@ -179,6 +179,17 @@ impl CameraSource for DeterministicCamera {
         Ok(())
     }
 
+    fn apply_live_settings(&mut self, settings: Settings) -> Result<(), CameraError> {
+        if !self.connected || !self.capturing {
+            return Err(CameraError::InvalidState {
+                operation: "apply live settings while stopped",
+            });
+        }
+        self.settings = Some(settings);
+        self.pending_delay_us = None;
+        Ok(())
+    }
+
     fn start(&mut self) -> Result<(), CameraError> {
         if !self.connected || self.settings.is_none() || self.capturing {
             return Err(CameraError::InvalidState { operation: "start" });

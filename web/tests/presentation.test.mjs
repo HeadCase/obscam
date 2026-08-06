@@ -56,6 +56,89 @@ test("an exact current-stream presentation survives qualified hardware pipeline 
   );
 });
 
+test("an exact RTP identity survives bounded browser and service clock skew", () => {
+  let state = initialPresentationState(runtimeEpoch, 2);
+  state = reducePresentation(state, { type: "mapping", mapping: parseFrameMapping(mapping) }).state;
+
+  assert.equal(
+    reducePresentation(state, {
+      type: "presented",
+      rtpTimestamp: mapping.rtpTimestamp,
+      nowUnixUs: mapping.submittedAtUnixUs - 250_000
+    }).presented?.sourceGeneration,
+    81
+  );
+  assert.equal(
+    reducePresentation(state, {
+      type: "presented",
+      rtpTimestamp: mapping.rtpTimestamp,
+      nowUnixUs: mapping.submittedAtUnixUs - 2_000_001
+    }).presented,
+    null
+  );
+});
+
+test("a mapping arriving after its video callback reconciles the pending presentation", () => {
+  let state = initialPresentationState(runtimeEpoch, 2);
+  const presentedAtUnixUs = mapping.submittedAtUnixUs + 50_000;
+
+  const pending = reducePresentation(state, {
+    type: "presented",
+    rtpTimestamp: mapping.rtpTimestamp,
+    nowUnixUs: presentedAtUnixUs
+  });
+  state = pending.state;
+  assert.equal(pending.presented, null);
+  assert.equal(state.pendingPresentations.length, 1);
+
+  const reconciled = reducePresentation(state, {
+    type: "mapping",
+    mapping: parseFrameMapping(mapping)
+  });
+  assert.equal(reconciled.presented?.sourceGeneration, 81);
+  assert.equal(reconciled.presentedAtUnixUs, presentedAtUnixUs);
+  assert.equal(reconciled.state.pendingPresentations.length, 0);
+});
+
+test("a late exact mapping remains evidence while a newer callback stays pending", () => {
+  let state = initialPresentationState(runtimeEpoch, 2);
+  state = reducePresentation(state, {
+    type: "presented",
+    rtpTimestamp: mapping.rtpTimestamp,
+    nowUnixUs: mapping.submittedAtUnixUs + 50_000
+  }).state;
+  state = reducePresentation(state, {
+    type: "presented",
+    rtpTimestamp: mapping.rtpTimestamp + 1,
+    nowUnixUs: mapping.submittedAtUnixUs + 60_000
+  }).state;
+
+  const historical = reducePresentation(state, {
+    type: "mapping",
+    mapping: parseFrameMapping(mapping)
+  });
+
+  assert.equal(historical.presented?.sourceGeneration, 81);
+  assert.equal(historical.presentedAtUnixUs, mapping.submittedAtUnixUs + 50_000);
+  assert.equal(historical.state.pendingPresentations.length, 1);
+});
+
+test("late mappings cannot turn an expired browser observation into exact evidence", () => {
+  let state = initialPresentationState(runtimeEpoch, 2);
+  state = reducePresentation(state, {
+    type: "presented",
+    rtpTimestamp: mapping.rtpTimestamp,
+    nowUnixUs: mapping.submittedAtUnixUs + 2_000_001
+  }).state;
+
+  const late = reducePresentation(state, {
+    type: "mapping",
+    mapping: parseFrameMapping(mapping)
+  });
+  assert.equal(late.presented, null);
+  assert.equal(late.presentedAtUnixUs, null);
+});
+
 test("epoch changes, conflicts, and stale mappings fail closed", () => {
   let state = initialPresentationState(runtimeEpoch, 2);
   state = reducePresentation(state, { type: "mapping", mapping: parseFrameMapping(mapping) }).state;

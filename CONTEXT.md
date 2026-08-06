@@ -11,14 +11,15 @@ within the current runtime, stream, and browser connection.
 _Avoid_: Best-effort frame, assumed-current frame
 
 **Live feed**:
-A browser presentation whose latest trustworthy frame remains current within the
-expected exposure and delivery contract. The sensor may simultaneously be exposing
-the next frame.
+A browser presentation whose decoded media is advancing within the expected
+delivery contract. Exact source identity and capture facts are independent
+diagnostic evidence and must remain explicitly unknown until proven. The sensor
+may simultaneously be exposing the next frame.
 _Avoid_: Capturing, real-time feed
 
 **Waiting for first image**:
 The initial condition in which an authoritative exposure is progressing normally
-but no trustworthy completed frame exists yet.
+but no decoded browser presentation exists yet.
 _Avoid_: Capturing, unavailable
 
 **Stale feed**:

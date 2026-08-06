@@ -6,7 +6,7 @@ use std::{
     process::{Child, ChildStderr, ChildStdin, Command, Stdio},
     sync::{
         Arc,
-        atomic::{AtomicBool, AtomicU32, Ordering},
+        atomic::{AtomicBool, Ordering},
         mpsc::{self, Receiver, RecvTimeoutError, SyncSender},
     },
     thread,
@@ -24,6 +24,8 @@ const RTP_URL: &str = "rtp://127.0.0.1:5002?rtcpport=5003&pkt_size=1200";
 const RTP_CLOCK_STEP: u64 = 4_500;
 const RTP_PAYLOAD_TYPE: u8 = 96;
 const RTP_SSRC: u32 = 1_868_722_033;
+const RTP_INITIAL_SEQUENCE: u16 = 1_000;
+const RTP_RECEIVE_BUFFER_BYTES: usize = 4 * 1_048_576;
 
 /// One long-lived `FFmpeg` hardware-H.264 publication child.
 #[derive(Debug)]
@@ -34,6 +36,8 @@ pub struct FfmpegEncoder {
     stderr: Option<thread::JoinHandle<()>>,
     observer: Option<RtpObserver>,
     correlation: Option<(CorrelationState, u64)>,
+    evidence_valid: Arc<AtomicBool>,
+    evidence_degradation_reported: bool,
 }
 
 impl FfmpegEncoder {
@@ -100,7 +104,11 @@ impl FfmpegEncoder {
                 .stderr
                 .take()
                 .ok_or_else(|| io::Error::other("FFmpeg stderr pipe was not created"))?;
-            Some(spawn_timestamp_reader(stderr, pts_sender, evidence_valid)?)
+            Some(spawn_timestamp_reader(
+                stderr,
+                pts_sender,
+                Arc::clone(&evidence_valid),
+            )?)
         } else {
             None
         };
@@ -111,10 +119,12 @@ impl FfmpegEncoder {
             stderr,
             observer,
             correlation,
+            evidence_valid,
+            evidence_degradation_reported: false,
         })
     }
 
-    fn arguments() -> [&'static str; 37] {
+    fn arguments() -> [&'static str; 39] {
         [
             "-hide_banner",
             "-loglevel",
@@ -148,6 +158,8 @@ impl FfmpegEncoder {
             "96",
             "-ssrc",
             "1868722033",
+            "-seq",
+            "1000",
             "-flush_packets",
             "1",
             "-f",
@@ -174,16 +186,8 @@ impl FfmpegEncoder {
         if let Err(error) = self.verify_running() {
             return Err(OwnedPublicationError::new(frame, error));
         }
-        if let (Some((correlation, stream_epoch)), Some(metadata)) =
-            (&self.correlation, frame.metadata())
-        {
-            let _ = correlation.submit(
-                *stream_epoch,
-                metadata,
-                frame.generation(),
-                crate::pipeline::unix_time_us(),
-                repeat,
-            );
+        if let Some((correlation, stream_epoch)) = &self.correlation {
+            record_submission(correlation, *stream_epoch, &frame, repeat);
         }
         let request = WriterRequest { frame };
         if let Err(error) = self
@@ -226,6 +230,10 @@ impl FfmpegEncoder {
     }
 
     pub(crate) fn verify_running(&mut self) -> io::Result<()> {
+        if !self.evidence_valid.load(Ordering::Acquire) && !self.evidence_degradation_reported {
+            tracing::warn!("FFmpeg correlation evidence became incomplete; media continues");
+            self.evidence_degradation_reported = true;
+        }
         match self
             .child
             .as_mut()
@@ -258,16 +266,8 @@ impl FfmpegEncoder {
     }
 
     fn publish_step(&mut self, frame: &PublishedFrame, repeat: bool) -> io::Result<()> {
-        if let (Some((correlation, stream_epoch)), Some(metadata)) =
-            (&self.correlation, frame.metadata())
-        {
-            let _ = correlation.submit(
-                *stream_epoch,
-                metadata,
-                frame.generation(),
-                crate::pipeline::unix_time_us(),
-                repeat,
-            );
+        if let Some((correlation, stream_epoch)) = &self.correlation {
+            record_submission(correlation, *stream_epoch, frame, repeat);
         }
         self.stdin
             .as_mut()
@@ -303,6 +303,25 @@ impl FfmpegEncoder {
         if let Some(stderr) = self.stderr.take() {
             let _ = stderr.join();
         }
+    }
+}
+
+fn record_submission(
+    correlation: &CorrelationState,
+    stream_epoch: u64,
+    frame: &PublishedFrame,
+    repeat: bool,
+) {
+    if let Some(metadata) = frame.metadata() {
+        let _ = correlation.submit(
+            stream_epoch,
+            metadata,
+            frame.generation(),
+            crate::pipeline::unix_time_us(),
+            repeat,
+        );
+    } else {
+        let _ = correlation.skip_submission(stream_epoch);
     }
 }
 
@@ -404,19 +423,16 @@ impl RtpObserver {
         pts_receiver: Receiver<u64>,
         evidence_valid: &Arc<AtomicBool>,
     ) -> io::Result<Self> {
-        let media_socket = bound_socket(RTP_INPUT_ADDRESS)?;
+        let media_socket = bound_rtp_socket(RTP_INPUT_ADDRESS)?;
         let control_socket = bound_socket(RTCP_INPUT_ADDRESS)?;
         let media_relay_socket = relay_socket()?;
         let control_relay_socket = relay_socket()?;
         let media_relay = parse_address(RTP_RELAY_ADDRESS)?;
         let control_relay = parse_address(RTCP_RELAY_ADDRESS)?;
         let stop = Arc::new(AtomicBool::new(false));
-        let observed_packets = Arc::new(AtomicU32::new(0));
         let (rtp_sender, rtp_receiver) = mpsc::sync_channel(128);
-        let (report_sender, report_receiver) = mpsc::sync_channel(4);
         let media_stop = Arc::clone(&stop);
         let media_evidence = Arc::clone(evidence_valid);
-        let media_packet_count = Arc::clone(&observed_packets);
         let media_thread = thread::Builder::new()
             .name("obscam-rtp-observer".into())
             .spawn(move || {
@@ -427,12 +443,10 @@ impl RtpObserver {
                     &rtp_sender,
                     &media_stop,
                     &media_evidence,
-                    &media_packet_count,
                 );
             })?;
         let control_stop = Arc::clone(&stop);
         let control_evidence = Arc::clone(evidence_valid);
-        let control_packet_count = Arc::clone(&observed_packets);
         let control_thread = thread::Builder::new()
             .name("obscam-rtcp-relay".into())
             .spawn(move || {
@@ -440,10 +454,8 @@ impl RtpObserver {
                     &control_socket,
                     &control_relay_socket,
                     control_relay,
-                    &report_sender,
                     &control_stop,
                     &control_evidence,
-                    &control_packet_count,
                 );
             })?;
         let correlate_stop = Arc::clone(&stop);
@@ -456,7 +468,6 @@ impl RtpObserver {
                     stream_epoch,
                     &pts_receiver,
                     &rtp_receiver,
-                    &report_receiver,
                     &correlate_stop,
                     &correlate_evidence,
                 );
@@ -488,14 +499,19 @@ fn spawn_timestamp_reader(
 }
 
 fn read_timestamps(stderr: impl Read, sender: &SyncSender<u64>, evidence_valid: &AtomicBool) {
+    let mut last_pts = None;
     for line in BufReader::new(stderr).lines().map_while(Result::ok) {
         if let Some(pts) = parse_muxer_pts(&line) {
+            if last_pts == Some(pts) {
+                continue;
+            }
+            last_pts = Some(pts);
             if sender.try_send(pts).is_err() {
-                evidence_valid.store(false, Ordering::Release);
+                invalidate_evidence(evidence_valid, "FFmpeg PTS queue unavailable");
                 return;
             }
-        } else if line.starts_with("muxer <- type:video ") {
-            evidence_valid.store(false, Ordering::Release);
+        } else if is_video_muxer_line(&line) {
+            invalidate_evidence(evidence_valid, "unparseable FFmpeg video muxer timestamp");
             return;
         } else if line.to_ascii_lowercase().contains("error") {
             tracing::warn!(message = line, "FFmpeg diagnostic");
@@ -504,9 +520,19 @@ fn read_timestamps(stderr: impl Read, sender: &SyncSender<u64>, evidence_valid: 
 }
 
 fn parse_muxer_pts(line: &str) -> Option<u64> {
-    let fields = line.strip_prefix("muxer <- type:video ")?;
-    let value = fields.strip_prefix("pkt_pts:")?.split_whitespace().next()?;
+    let value = if let Some(fields) = line.strip_prefix("muxer <- type:video ") {
+        fields.strip_prefix("pkt_pts:")?.split_whitespace().next()?
+    } else {
+        let _ = line.strip_prefix("[vost#")?;
+        let (_, fields) = line.split_once("] muxer <- ")?;
+        fields.strip_prefix("pts:")?.split_whitespace().next()?
+    };
     value.parse().ok()
+}
+
+fn is_video_muxer_line(line: &str) -> bool {
+    line.starts_with("muxer <- type:video ")
+        || (line.starts_with("[vost#") && line.contains("] muxer <- "))
 }
 
 fn pair_timestamps(
@@ -514,28 +540,13 @@ fn pair_timestamps(
     stream_epoch: u64,
     pts_receiver: &Receiver<u64>,
     rtp_receiver: &Receiver<u32>,
-    report_receiver: &Receiver<(u32, u32)>,
     stop: &AtomicBool,
     evidence_valid: &AtomicBool,
 ) {
-    let mut timeline_proven = false;
     while !stop.load(Ordering::Acquire) {
         if !evidence_valid.load(Ordering::Acquire) {
             tracing::warn!("incomplete RTP evidence; correlation stopped for stream epoch");
             return;
-        }
-        if timeline_proven {
-            while report_receiver.try_recv().is_ok() {}
-        } else {
-            match report_receiver.recv_timeout(Duration::from_millis(100)) {
-                Ok((sender_packets, observed_packets))
-                    if sender_packets > 0 && sender_packets == observed_packets =>
-                {
-                    timeline_proven = true;
-                }
-                Ok(_) | Err(mpsc::RecvTimeoutError::Timeout) => continue,
-                Err(mpsc::RecvTimeoutError::Disconnected) => return,
-            }
         }
         let pts = match pts_receiver.recv_timeout(Duration::from_millis(100)) {
             Ok(pts) => pts,
@@ -555,7 +566,17 @@ fn pair_timestamps(
         }
         let input_index = pts / RTP_CLOCK_STEP;
         if let Err(error) = correlation.observe(stream_epoch, input_index, rtp_timestamp) {
-            tracing::warn!(%error, input_index, rtp_timestamp, "RTP frame correlation is unknown");
+            if error == crate::CorrelationError::Evicted {
+                tracing::debug!(
+                    input_index,
+                    rtp_timestamp,
+                    "RTP frame has no retained exact input metadata"
+                );
+            } else {
+                tracing::warn!(%error, input_index, rtp_timestamp, "RTP frame correlation is unknown");
+                invalidate_evidence(evidence_valid, "correlation timeline rejected RTP marker");
+                return;
+            }
         }
     }
 }
@@ -567,24 +588,27 @@ fn relay_rtp(
     timestamps: &SyncSender<u32>,
     stop: &AtomicBool,
     evidence_valid: &AtomicBool,
-    observed_packets: &AtomicU32,
 ) {
     let mut packet = [0_u8; 2_048];
-    let mut previous_sequence = None;
+    let mut previous_sequence = Some(RTP_INITIAL_SEQUENCE.wrapping_sub(1));
     let mut relay_available = true;
     while !stop.load(Ordering::Acquire) {
         let Ok(length) = socket.recv(&mut packet) else {
             continue;
         };
         let Some((sequence, timestamp)) = rtp_packet(&packet[..length]) else {
-            evidence_valid.store(false, Ordering::Release);
+            invalidate_evidence(evidence_valid, "invalid RTP packet");
             continue;
         };
-        if previous_sequence.is_some_and(|previous: u16| sequence != previous.wrapping_add(1)) {
-            evidence_valid.store(false, Ordering::Release);
+        let expected_sequence = previous_sequence
+            .expect("RTP sequence is initialized")
+            .wrapping_add(1);
+        if sequence != expected_sequence
+            && invalidate_evidence(evidence_valid, "RTP sequence discontinuity")
+        {
+            tracing::warn!(expected_sequence, sequence, "RTP packet sequence skipped");
         }
         previous_sequence = Some(sequence);
-        observed_packets.fetch_add(1, Ordering::AcqRel);
         if !forward_packet(
             relay_socket,
             &packet[..length],
@@ -605,10 +629,8 @@ fn relay_rtcp(
     socket: &UdpSocket,
     relay_socket: &UdpSocket,
     relay: SocketAddr,
-    reports: &SyncSender<(u32, u32)>,
     stop: &AtomicBool,
     evidence_valid: &AtomicBool,
-    observed_packets: &AtomicU32,
 ) {
     let mut packet = [0_u8; 2_048];
     let mut relay_available = true;
@@ -616,29 +638,33 @@ fn relay_rtcp(
         let Ok(length) = socket.recv(&mut packet) else {
             continue;
         };
-        let Some(sender_packets) = sender_report_packet_count(&packet[..length]) else {
-            evidence_valid.store(false, Ordering::Release);
+        let Some(_sender_packets) = sender_report_packet_count(&packet[..length]) else {
+            invalidate_evidence(evidence_valid, "invalid RTCP sender report");
             continue;
         };
-        if !forward_packet(
+        let _ = forward_packet(
             relay_socket,
             &packet[..length],
             relay,
             "RTCP",
             &mut relay_available,
             evidence_valid,
-        ) {
-            continue;
-        }
-        let observed = observed_packets.load(Ordering::Acquire);
-        submit_evidence(reports, (sender_packets, observed), evidence_valid);
+        );
     }
 }
 
 fn submit_evidence<T>(sender: &SyncSender<T>, value: T, evidence_valid: &AtomicBool) {
     if evidence_valid.load(Ordering::Acquire) && sender.try_send(value).is_err() {
-        evidence_valid.store(false, Ordering::Release);
+        invalidate_evidence(evidence_valid, "RTP marker queue unavailable");
     }
+}
+
+fn invalidate_evidence(evidence_valid: &AtomicBool, reason: &'static str) -> bool {
+    let was_valid = evidence_valid.swap(false, Ordering::AcqRel);
+    if was_valid {
+        tracing::warn!(reason, "exact correlation evidence invalidated");
+    }
+    was_valid
 }
 
 fn forward_packet(
@@ -657,7 +683,7 @@ fn forward_packet(
             true
         }
         Err(error) => {
-            evidence_valid.store(false, Ordering::Release);
+            invalidate_evidence(evidence_valid, "media relay send failed");
             if relay_transition(available, false) == RelayTransition::Lost {
                 tracing::warn!(protocol, %error, %relay, "media relay unavailable; retrying");
             }
@@ -720,6 +746,12 @@ fn bound_socket(address: &str) -> io::Result<UdpSocket> {
     Ok(socket)
 }
 
+fn bound_rtp_socket(address: &str) -> io::Result<UdpSocket> {
+    let socket = bound_socket(address)?;
+    socket2::SockRef::from(&socket).set_recv_buffer_size(RTP_RECEIVE_BUFFER_BYTES)?;
+    Ok(socket)
+}
+
 fn relay_socket() -> io::Result<UdpSocket> {
     UdpSocket::bind(RELAY_BIND_ADDRESS)
 }
@@ -751,7 +783,7 @@ mod tests {
         let mut camera =
             DeterministicCamera::connect(DeterministicScenario::new([])).expect("camera present");
         camera
-            .configure(Settings::new(10_000, 0).expect("settings"))
+            .configure(Settings::new(50_000, 0).expect("settings"))
             .expect("configure");
         camera.start().expect("start");
         let source = camera.capture_next(100).expect("source generation");
@@ -795,6 +827,28 @@ mod tests {
         fs::remove_dir_all(directory).expect("remove test directory");
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn incomplete_correlation_evidence_does_not_stop_healthy_media() {
+        use std::{fs, os::unix::fs::PermissionsExt};
+
+        use uuid::Uuid;
+
+        let directory =
+            std::env::temp_dir().join(format!("obscam-ffmpeg-evidence-{}", Uuid::new_v4()));
+        fs::create_dir(&directory).expect("create test directory");
+        let program = directory.join("fake-ffmpeg");
+        fs::write(&program, "#!/bin/sh\nexec sleep 10\n").expect("write fake FFmpeg");
+        fs::set_permissions(&program, fs::Permissions::from_mode(0o700)).expect("make executable");
+        let mut encoder = FfmpegEncoder::start_owned(&program).expect("start fake FFmpeg");
+        encoder.evidence_valid.store(false, Ordering::Release);
+
+        encoder
+            .verify_running()
+            .expect("correlation may degrade without stopping a healthy encoder");
+        fs::remove_dir_all(directory).expect("remove test directory");
+    }
+
     #[test]
     fn parses_only_direct_muxer_video_pts_evidence() {
         assert_eq!(
@@ -802,9 +856,80 @@ mod tests {
             Some(9_000)
         );
         assert_eq!(
+            parse_muxer_pts(
+                "[vost#0:0/h264_v4l2m2m @ 0x1234] muxer <- pts:4500 pts_time:0.05 dts:4500"
+            ),
+            Some(4_500)
+        );
+        assert_eq!(
             parse_muxer_pts("encoder -> type:video pkt_pts:2 pkt_pts_time:0.1"),
             None
         );
+        assert_eq!(
+            parse_muxer_pts("[aost#0:0/aac @ 0x1234] muxer <- pts:4500 pts_time:0.05"),
+            None
+        );
+    }
+
+    #[test]
+    fn timestamp_reader_deduplicates_multiple_muxer_packets_for_one_frame() {
+        let diagnostics = concat!(
+            "[vost#0:0/h264_v4l2m2m @ 0x1] muxer <- pts:4500 pts_time:0.05\n",
+            "[vost#0:0/h264_v4l2m2m @ 0x1] muxer <- pts:4500 pts_time:0.05\n",
+            "[vost#0:0/h264_v4l2m2m @ 0x1] muxer <- pts:9000 pts_time:0.1\n"
+        );
+        let (sender, receiver) = mpsc::sync_channel(4);
+        let evidence_valid = AtomicBool::new(true);
+
+        read_timestamps(diagnostics.as_bytes(), &sender, &evidence_valid);
+        drop(sender);
+
+        assert_eq!(receiver.iter().collect::<Vec<_>>(), [4_500, 9_000]);
+        assert!(evidence_valid.load(Ordering::Acquire));
+    }
+
+    #[test]
+    fn fixed_initial_sequence_and_direct_markers_establish_correlation() {
+        use crate::{Treatment, correlation::CapturedFrameMetadata};
+        use uuid::Uuid;
+
+        let correlation = CorrelationState::new(Uuid::from_u128(1));
+        let stream_epoch = correlation.begin_stream();
+        correlation
+            .submit(
+                stream_epoch,
+                CapturedFrameMetadata {
+                    settings_generation: 3,
+                    treatment: Treatment::Monochrome,
+                    exposure_completed_at_unix_us: 1,
+                },
+                7,
+                2,
+                false,
+            )
+            .expect("current stream accepts input metadata");
+        let mut updates = correlation.subscribe();
+        let (pts_sender, pts_receiver) = mpsc::sync_channel(1);
+        let (rtp_sender, rtp_receiver) = mpsc::sync_channel(1);
+        pts_sender.send(0).expect("PTS evidence");
+        rtp_sender.send(90_000).expect("RTP marker evidence");
+        drop(pts_sender);
+        drop(rtp_sender);
+
+        pair_timestamps(
+            &correlation,
+            stream_epoch,
+            &pts_receiver,
+            &rtp_receiver,
+            &AtomicBool::new(false),
+            &AtomicBool::new(true),
+        );
+
+        let mapping = updates
+            .try_recv()
+            .expect("fixed-sequence evidence publishes a mapping");
+        assert_eq!(mapping.source_generation(), 7);
+        assert_eq!(mapping.rtp_timestamp(), 90_000);
     }
 
     #[test]
@@ -843,6 +968,18 @@ mod tests {
 
         assert!(address.ip().is_unspecified());
         assert_eq!(address.port(), 0);
+    }
+
+    #[test]
+    fn rtp_input_socket_has_capacity_for_bursty_full_resolution_frames() {
+        let socket = bound_rtp_socket("127.0.0.1:0").expect("bind RTP input socket");
+
+        assert!(
+            socket2::SockRef::from(&socket)
+                .recv_buffer_size()
+                .expect("read RTP receive buffer")
+                >= RTP_RECEIVE_BUFFER_BYTES
+        );
     }
 
     #[test]

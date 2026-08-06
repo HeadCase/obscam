@@ -62,7 +62,7 @@ fn failures_outside_the_validation_window_do_not_accumulate() {
 }
 
 #[test]
-fn exposure_watchdog_cancels_after_exposure_plus_two_seconds_then_terminates() {
+fn exposure_watchdog_allows_three_seconds_for_teardown_after_cancellation() {
     let watchdog = ExposureWatchdog::new(Duration::from_millis(500));
 
     assert_eq!(
@@ -74,11 +74,11 @@ fn exposure_watchdog_cancels_after_exposure_plus_two_seconds_then_terminates() {
         WatchdogAction::Cancel
     );
     assert_eq!(
-        watchdog.action_at(Duration::from_millis(3_499)),
+        watchdog.action_at(Duration::from_millis(5_499)),
         WatchdogAction::Cancel
     );
     assert_eq!(
-        watchdog.action_at(Duration::from_millis(3_500)),
+        watchdog.action_at(Duration::from_millis(5_500)),
         WatchdogAction::Terminate
     );
 }
@@ -101,7 +101,7 @@ fn camera_recovery_revokes_authority_and_discards_unapplied_intent() {
         .accept(&grant.credentials(), now, || {
             runtime
                 .settings()
-                .accept(CameraSettings::new(20, 200, Treatment::Colour).expect("settings"))
+                .accept(CameraSettings::new(50, 200, Treatment::Colour).expect("settings"))
         })
         .expect("current authority")
         .expect("camera ready");

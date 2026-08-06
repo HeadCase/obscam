@@ -28,7 +28,7 @@ use crate::{
     },
     service_quality::{
         ConnectionRequest, ConnectionResponse, PresentationBatch, ServiceQualityError,
-        ServiceQualityResponse,
+        ServiceQualityResponse, ServiceQualitySummaryResponse,
     },
     settings::SettingsEvent,
 };
@@ -46,13 +46,6 @@ fn router(state: RuntimeState) -> Router {
     Router::new()
         .route("/", get(assets::index))
         .route("/assets/app.js", get(assets::app))
-        .route("/assets/control.js", get(assets::control))
-        .route("/assets/model.js", get(assets::model))
-        .route("/assets/presentation.js", get(assets::presentation))
-        .route("/assets/reconnect.js", get(assets::reconnect))
-        .route("/assets/service-quality.js", get(assets::service_quality))
-        .route("/assets/whep.js", get(assets::whep))
-        .route("/assets/viewer.js", get(assets::viewer))
         .route("/assets/styles.css", get(assets::styles))
         .route("/api/v1/runtime", get(runtime))
         .route("/api/v1/health", get(health))
@@ -60,6 +53,10 @@ fn router(state: RuntimeState) -> Router {
         .route(
             "/api/v1/service-quality",
             get(service_quality).post(report_presentation),
+        )
+        .route(
+            "/api/v1/service-quality/summary",
+            get(service_quality_summary),
         )
         .route(
             "/api/v1/service-quality/connections",
@@ -576,6 +573,13 @@ async fn service_quality(
     Query(query): Query<ServiceQualityQuery>,
 ) -> Json<ServiceQualityResponse> {
     Json(state.service_quality().response(query.client_id))
+}
+
+async fn service_quality_summary(
+    State(state): State<RuntimeState>,
+    Query(query): Query<ServiceQualityQuery>,
+) -> Json<ServiceQualitySummaryResponse> {
+    Json(state.service_quality().summary(query.client_id))
 }
 
 fn unix_time_us() -> u64 {

@@ -32,7 +32,7 @@ webrtcEncryption: no
 webrtcLocalUDPAddress: 169.254.218.2:8189
 webrtcIPsFromInterfaces: no
 webrtcAdditionalHosts:
-  - 10.164.190.1
+  - 10.44.0.1
   - 192.168.1.200
 
 paths:

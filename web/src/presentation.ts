@@ -23,6 +23,14 @@ export interface PresentationState {
   streamEpoch: number;
   mappings: readonly FrameMapping[];
   poisonedTimestamps: readonly number[];
+  pendingPresentations: readonly PendingPresentation[];
+  latestPresentationSequence: number;
+}
+
+export interface PendingPresentation {
+  rtpTimestamp: number;
+  presentedAtUnixUs: number;
+  sequence: number;
 }
 
 export type PresentationEvent =
@@ -33,13 +41,21 @@ export type PresentationEvent =
 export interface PresentationTransition {
   state: PresentationState;
   presented: FrameMapping | null;
+  presentedAtUnixUs: number | null;
 }
 
 export function initialPresentationState(
   runtimeEpoch: string,
   streamEpoch = 0
 ): PresentationState {
-  return { runtimeEpoch, streamEpoch, mappings: [], poisonedTimestamps: [] };
+  return {
+    runtimeEpoch,
+    streamEpoch,
+    mappings: [],
+    poisonedTimestamps: [],
+    pendingPresentations: [],
+    latestPresentationSequence: 0
+  };
 }
 
 export function reducePresentation(
@@ -49,24 +65,29 @@ export function reducePresentation(
   if (event.type === "reconnected") {
     return {
       state: initialPresentationState(state.runtimeEpoch, event.streamEpoch),
-      presented: null
+      presented: null,
+      presentedAtUnixUs: null
     };
   }
   if (event.type === "mapping") {
     const mapping = event.mapping;
     if (mapping.runtimeEpoch !== state.runtimeEpoch || mapping.streamEpoch < state.streamEpoch) {
-      return { state, presented: null };
+      return { state, presented: null, presentedAtUnixUs: null };
     }
     const current =
       mapping.streamEpoch === state.streamEpoch
         ? state
-        : initialPresentationState(state.runtimeEpoch, mapping.streamEpoch);
+        : {
+            ...initialPresentationState(state.runtimeEpoch, mapping.streamEpoch),
+            pendingPresentations: state.pendingPresentations,
+            latestPresentationSequence: state.latestPresentationSequence
+          };
     const conflicting = current.mappings.find(
       (candidate) => candidate.rtpTimestamp === mapping.rtpTimestamp
     );
     if (conflicting !== undefined) {
       if (sameMapping(conflicting, mapping)) {
-        return { state: current, presented: null };
+        return reconcilePending(current, mapping);
       }
       const poisoned = [...current.poisonedTimestamps, mapping.rtpTimestamp].slice(-MAX_MAPPINGS);
       return {
@@ -77,32 +98,74 @@ export function reducePresentation(
           ),
           poisonedTimestamps: poisoned
         },
-        presented: null
+        presented: null,
+        presentedAtUnixUs: null
       };
     }
     if (current.poisonedTimestamps.includes(mapping.rtpTimestamp)) {
-      return { state: current, presented: null };
+      return { state: current, presented: null, presentedAtUnixUs: null };
     }
-    return {
-      state: {
-        ...current,
-        mappings: [...current.mappings, mapping].slice(-MAX_MAPPINGS)
-      },
-      presented: null
-    };
+    return reconcilePending({
+      ...current,
+      mappings: [...current.mappings, mapping].slice(-MAX_MAPPINGS)
+    }, mapping);
   }
 
+  const sequence = state.latestPresentationSequence + 1;
+  const presentedState = { ...state, latestPresentationSequence: sequence };
   if (event.rtpTimestamp === undefined || state.poisonedTimestamps.includes(event.rtpTimestamp)) {
-    return { state, presented: null };
+    return { state: presentedState, presented: null, presentedAtUnixUs: null };
   }
-  const mapping = state.mappings.find(
+  const mapping = presentedState.mappings.find(
     (candidate) => candidate.rtpTimestamp === event.rtpTimestamp
   );
-  const exact =
-    mapping !== undefined &&
-    event.nowUnixUs >= mapping.submittedAtUnixUs &&
-    event.nowUnixUs - mapping.submittedAtUnixUs <= MAX_MAPPING_AGE_US;
-  return { state, presented: exact ? mapping : null };
+  if (mapping !== undefined) {
+    const exact = exactAt(mapping, event.nowUnixUs);
+    return {
+      state: presentedState,
+      presented: exact ? mapping : null,
+      presentedAtUnixUs: exact ? event.nowUnixUs : null
+    };
+  }
+  return {
+    state: {
+      ...presentedState,
+      pendingPresentations: [
+        ...presentedState.pendingPresentations,
+        { rtpTimestamp: event.rtpTimestamp, presentedAtUnixUs: event.nowUnixUs, sequence }
+      ].slice(-MAX_MAPPINGS)
+    },
+    presented: null,
+    presentedAtUnixUs: null
+  };
+}
+
+function reconcilePending(
+  state: PresentationState,
+  mapping: FrameMapping
+): PresentationTransition {
+  const pending = [...state.pendingPresentations]
+    .reverse()
+    .find((candidate) => candidate.rtpTimestamp === mapping.rtpTimestamp);
+  if (pending === undefined) {
+    return { state, presented: null, presentedAtUnixUs: null };
+  }
+  const next = {
+    ...state,
+    pendingPresentations: state.pendingPresentations.filter(
+      (candidate) => candidate.rtpTimestamp !== mapping.rtpTimestamp
+    )
+  };
+  const exact = exactAt(mapping, pending.presentedAtUnixUs);
+  return {
+    state: next,
+    presented: exact ? mapping : null,
+    presentedAtUnixUs: exact ? pending.presentedAtUnixUs : null
+  };
+}
+
+function exactAt(mapping: FrameMapping, presentedAtUnixUs: number): boolean {
+  return Math.abs(presentedAtUnixUs - mapping.submittedAtUnixUs) <= MAX_MAPPING_AGE_US;
 }
 
 export function parseFrameMapping(value: unknown): FrameMapping {

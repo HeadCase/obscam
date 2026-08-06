@@ -32,7 +32,7 @@ fn scripted_faults_fail_closed_and_recovery_resumes_with_the_next_generation() {
         },
     ]);
     let mut camera = DeterministicCamera::connect(scenario).expect("camera present");
-    let settings = Settings::new(10_000, 0).expect("valid settings");
+    let settings = Settings::new(50_000, 0).expect("valid settings");
     camera.configure(settings).expect("configure");
     camera.start().expect("start");
 
@@ -63,7 +63,7 @@ fn generated_pattern_identifies_orientation_bayer_gain_and_generation() {
     let mut camera =
         DeterministicCamera::connect(DeterministicScenario::new([])).expect("camera present");
     camera
-        .configure(Settings::new(10_000, 0).expect("valid settings"))
+        .configure(Settings::new(50_000, 0).expect("valid settings"))
         .expect("configure");
     camera.start().expect("start");
 
@@ -80,7 +80,7 @@ fn generated_pattern_identifies_orientation_bayer_gain_and_generation() {
 
     camera.stop().expect("stop");
     camera
-        .configure(Settings::new(10_000, 600).expect("valid settings"))
+        .configure(Settings::new(50_000, 600).expect("valid settings"))
         .expect("reconfigure");
     camera.start().expect("restart");
     let second = camera.capture_next(100).expect("second frame");
@@ -98,7 +98,7 @@ fn every_pixel_marks_adjacent_generation_boundaries() {
     let mut camera =
         DeterministicCamera::connect(DeterministicScenario::new([])).expect("camera present");
     camera
-        .configure(Settings::new(10_000, 0).expect("valid settings"))
+        .configure(Settings::new(50_000, 0).expect("valid settings"))
         .expect("configure");
     camera.start().expect("start");
 
@@ -125,7 +125,7 @@ fn virtual_exposure_interruption_and_timeouts_never_publish_stale_generations() 
     }]);
     let mut camera = DeterministicCamera::connect(scenario).expect("camera present");
     camera
-        .configure(Settings::new(10_000, 100).expect("complete settings"))
+        .configure(Settings::new(50_000, 100).expect("complete settings"))
         .expect("configure");
     camera.start().expect("start");
 
@@ -136,11 +136,33 @@ fn virtual_exposure_interruption_and_timeouts_never_publish_stale_generations() 
     assert_eq!(capture_one(&mut camera).map(|frame| frame.0), Ok(1));
 
     assert_eq!(
-        camera.configure(Settings::new(20_000, 200).expect("complete settings")),
+        camera.configure(Settings::new(50_000, 200).expect("complete settings")),
         Err(CameraError::InvalidState {
             operation: "configure while capturing",
         })
     );
+}
+
+#[test]
+fn live_settings_abandon_the_active_exposure_without_stopping_capture() {
+    let mut camera =
+        DeterministicCamera::connect(DeterministicScenario::new([])).expect("camera present");
+    camera
+        .configure(Settings::new(30_000_000, 100).expect("long exposure"))
+        .expect("configure");
+    camera.start().expect("start");
+
+    assert_eq!(capture_one(&mut camera), Err(CaptureError::Timeout));
+
+    camera
+        .apply_live_settings(Settings::new(100_000, 200).expect("responsive exposure"))
+        .expect("apply while capture remains active");
+
+    let frame = camera
+        .capture_next(100)
+        .expect("new exposure completes without restart");
+    assert_eq!(frame.generation(), 1);
+    assert_eq!(frame.data()[258 * 1920 + 258], 171, "new gain applied");
 }
 
 #[test]
@@ -155,7 +177,7 @@ fn deterministic_source_uses_the_production_capture_contract() {
     ]);
     let mut camera = DeterministicCamera::connect(scenario).expect("camera present");
     camera
-        .configure(Settings::new(10_000, 0).expect("valid settings"))
+        .configure(Settings::new(50_000, 0).expect("valid settings"))
         .expect("configure");
     camera.start().expect("start");
 

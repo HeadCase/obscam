@@ -9,7 +9,7 @@ fn deterministic_rggb_becomes_full_resolution_neutral_colour_i420() {
     let mut camera =
         DeterministicCamera::connect(DeterministicScenario::new([])).expect("camera present");
     camera
-        .configure(Settings::new(10_000, 0).expect("settings"))
+        .configure(Settings::new(50_000, 0).expect("settings"))
         .expect("configure");
     camera.start().expect("start");
     let source = camera.capture_next(100).expect("generation");
@@ -34,7 +34,7 @@ fn colour_processing_reuses_one_bounded_output_buffer() {
     let mut camera =
         DeterministicCamera::connect(DeterministicScenario::new([])).expect("camera present");
     camera
-        .configure(Settings::new(10_000, 0).expect("settings"))
+        .configure(Settings::new(50_000, 0).expect("settings"))
         .expect("configure");
     camera.start().expect("start");
     let mut processor = ColourProcessor::new();

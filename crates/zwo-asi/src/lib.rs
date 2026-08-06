@@ -32,6 +32,8 @@ const ASI_TIMEOUT: i32 = 11;
 const MAX_CAPTURE_WAIT_MS: i32 = 100;
 const CONTROL_EXPOSURE: i32 = 1;
 const CONTROL_GAIN: i32 = 0;
+const MIN_EXPOSURE_US: i64 = 50_000;
+const MAX_EXPOSURE_US: i64 = 30_000_000;
 
 /// A validated complete camera settings tuple.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -47,7 +49,7 @@ impl Settings {
     ///
     /// Returns [`SettingsError`] when either value is outside its accepted range.
     pub fn new(exposure_us: i64, gain: i64) -> Result<Self, SettingsError> {
-        if !(10_000..=30_000_000).contains(&exposure_us) {
+        if !(MIN_EXPOSURE_US..=MAX_EXPOSURE_US).contains(&exposure_us) {
             return Err(SettingsError::Exposure);
         }
         if !(0..=600).contains(&gain) {
@@ -72,8 +74,8 @@ impl Settings {
 /// Rejected camera setting.
 #[derive(Clone, Copy, Debug, Error, Eq, PartialEq)]
 pub enum SettingsError {
-    /// Exposure is outside 10 ms through 30 s.
-    #[error("exposure must be between 10000 and 30000000 microseconds")]
+    /// Exposure is outside 50 ms through 30 s.
+    #[error("exposure must be between 50000 and 30000000 microseconds")]
     Exposure,
     /// Gain is outside 0 through 600.
     #[error("gain must be between 0 and 600")]
@@ -233,6 +235,19 @@ pub trait CameraSource {
     ///
     /// Returns [`CameraError`] when the lifecycle state rejects configuration.
     fn configure(&mut self, settings: Settings) -> Result<(), CameraError>;
+
+    /// Applies one validated complete settings tuple while acquisition remains active.
+    ///
+    /// The SDK controls change while acquisition remains warm. The camera may
+    /// complete an already-integrating exposure and may emit a bounded number
+    /// of visually transitional frames before the new tuple is trustworthy;
+    /// callers must not infer exact settings identity for them.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`CameraError`] when the source is not capturing or the live
+    /// control mutation fails.
+    fn apply_live_settings(&mut self, settings: Settings) -> Result<(), CameraError>;
 
     /// Starts continuously warm acquisition.
     ///
@@ -427,6 +442,29 @@ impl CameraOwner {
         Ok(())
     }
 
+    /// Applies exposure and gain without stopping continuously warm acquisition.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`CameraError`] when capture is stopped or either SDK control
+    /// mutation fails. A partial SDK mutation is recovered by the pipeline's
+    /// existing fail-closed camera recovery path.
+    pub fn apply_live_settings(&mut self, settings: Settings) -> Result<(), CameraError> {
+        if !self.capturing {
+            return Err(CameraError::InvalidState {
+                operation: "apply live settings while stopped",
+            });
+        }
+        check(
+            "set live exposure",
+            ffi::set_control(self.id, CONTROL_EXPOSURE, settings.exposure_us),
+        )?;
+        check(
+            "set live gain",
+            ffi::set_control(self.id, CONTROL_GAIN, settings.gain),
+        )
+    }
+
     /// Starts continuously warm SDK video acquisition.
     ///
     /// # Errors
@@ -548,6 +586,10 @@ impl CameraSource for CameraOwner {
 
     fn configure(&mut self, settings: Settings) -> Result<(), CameraError> {
         Self::configure(self, settings)
+    }
+
+    fn apply_live_settings(&mut self, settings: Settings) -> Result<(), CameraError> {
+        Self::apply_live_settings(self, settings)
     }
 
     fn start(&mut self) -> Result<(), CameraError> {
@@ -898,7 +940,7 @@ mod tests {
         let mut owner = CameraOwner::connect().unwrap();
         stub::result(9, 8);
         assert_eq!(
-            owner.configure(Settings::new(10_000, 0).unwrap()),
+            owner.configure(Settings::new(50_000, 0).unwrap()),
             Err(CameraError::Sdk {
                 operation: "set full-frame RAW8",
                 code: 8
@@ -908,7 +950,7 @@ mod tests {
         stub::reset();
         target();
         let mut owner = CameraOwner::connect().unwrap();
-        owner.configure(Settings::new(10_000, 0).unwrap()).unwrap();
+        owner.configure(Settings::new(50_000, 0).unwrap()).unwrap();
         stub::result(4, 16);
         assert_eq!(
             owner.start(),
@@ -921,7 +963,7 @@ mod tests {
         stub::reset();
         target();
         let mut owner = CameraOwner::connect().unwrap();
-        owner.configure(Settings::new(10_000, 0).unwrap()).unwrap();
+        owner.configure(Settings::new(50_000, 0).unwrap()).unwrap();
         owner.start().unwrap();
         stub::result(5, 5);
         assert_eq!(
@@ -952,7 +994,7 @@ mod tests {
         stub::reset();
         target();
         let mut owner = CameraOwner::connect().unwrap();
-        owner.configure(Settings::new(10_000, 0).unwrap()).unwrap();
+        owner.configure(Settings::new(50_000, 0).unwrap()).unwrap();
         stub::result(10, 16);
         assert_eq!(
             owner.start(),
@@ -969,7 +1011,7 @@ mod tests {
         stub::reset();
         target();
         let mut owner = CameraOwner::connect().unwrap();
-        owner.configure(Settings::new(10_000, 0).unwrap()).unwrap();
+        owner.configure(Settings::new(50_000, 0).unwrap()).unwrap();
         stub::result(10, 16);
         stub::result(5, 5);
         assert_eq!(
@@ -985,10 +1027,11 @@ mod tests {
 
     #[test]
     fn settings_enforce_the_complete_operating_envelope() {
-        assert!(Settings::new(10_000, 0).is_ok());
+        assert_eq!(Settings::new(20_000, 0), Err(SettingsError::Exposure));
+        assert!(Settings::new(50_000, 0).is_ok());
         assert!(Settings::new(30_000_000, 600).is_ok());
-        assert_eq!(Settings::new(9_999, 0), Err(SettingsError::Exposure));
-        assert_eq!(Settings::new(10_000, 601), Err(SettingsError::Gain));
+        assert_eq!(Settings::new(49_999, 0), Err(SettingsError::Exposure));
+        assert_eq!(Settings::new(50_000, 601), Err(SettingsError::Gain));
     }
 
     #[test]
@@ -998,7 +1041,7 @@ mod tests {
         target();
         let mut owner = CameraOwner::connect().unwrap();
         owner
-            .configure(Settings::new(10_000, 600).unwrap())
+            .configure(Settings::new(50_000, 600).unwrap())
             .unwrap();
         owner.start().unwrap();
         let mut pointers = Vec::new();

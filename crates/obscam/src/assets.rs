@@ -13,34 +13,6 @@ const APP: &str = include_str!(concat!(
     env!("CARGO_MANIFEST_DIR"),
     "/../../web/dist/app.js"
 ));
-const CONTROL: &str = include_str!(concat!(
-    env!("CARGO_MANIFEST_DIR"),
-    "/../../web/dist/control.js"
-));
-const MODEL: &str = include_str!(concat!(
-    env!("CARGO_MANIFEST_DIR"),
-    "/../../web/dist/model.js"
-));
-const PRESENTATION: &str = include_str!(concat!(
-    env!("CARGO_MANIFEST_DIR"),
-    "/../../web/dist/presentation.js"
-));
-const RECONNECT: &str = include_str!(concat!(
-    env!("CARGO_MANIFEST_DIR"),
-    "/../../web/dist/reconnect.js"
-));
-const SERVICE_QUALITY: &str = include_str!(concat!(
-    env!("CARGO_MANIFEST_DIR"),
-    "/../../web/dist/service-quality.js"
-));
-const WHEP: &str = include_str!(concat!(
-    env!("CARGO_MANIFEST_DIR"),
-    "/../../web/dist/whep.js"
-));
-const VIEWER: &str = include_str!(concat!(
-    env!("CARGO_MANIFEST_DIR"),
-    "/../../web/dist/viewer.js"
-));
 const STYLES: &str = include_str!(concat!(
     env!("CARGO_MANIFEST_DIR"),
     "/../../web/dist/styles.css"
@@ -52,34 +24,6 @@ pub(crate) async fn index() -> Response<Body> {
 
 pub(crate) async fn app() -> Response<Body> {
     response("text/javascript; charset=utf-8", APP)
-}
-
-pub(crate) async fn control() -> Response<Body> {
-    response("text/javascript; charset=utf-8", CONTROL)
-}
-
-pub(crate) async fn model() -> Response<Body> {
-    response("text/javascript; charset=utf-8", MODEL)
-}
-
-pub(crate) async fn presentation() -> Response<Body> {
-    response("text/javascript; charset=utf-8", PRESENTATION)
-}
-
-pub(crate) async fn reconnect() -> Response<Body> {
-    response("text/javascript; charset=utf-8", RECONNECT)
-}
-
-pub(crate) async fn service_quality() -> Response<Body> {
-    response("text/javascript; charset=utf-8", SERVICE_QUALITY)
-}
-
-pub(crate) async fn whep() -> Response<Body> {
-    response("text/javascript; charset=utf-8", WHEP)
-}
-
-pub(crate) async fn viewer() -> Response<Body> {
-    response("text/javascript; charset=utf-8", VIEWER)
 }
 
 pub(crate) async fn styles() -> Response<Body> {

@@ -31,6 +31,7 @@ export async function visibleSettings(page: Page): Promise<VisibleSettings> {
 export async function setGain(page: Page, gain: number): Promise<void> {
   await page.locator("[data-gain]").fill(String(gain));
   await expect(page.locator("[data-gain-output]")).toHaveText(String(gain));
+  await page.getByRole("button", { name: "Apply" }).click();
   await waitUntilVisible(page);
 }
 
@@ -38,6 +39,7 @@ export async function setExposure(page: Page, exposureMs: number): Promise<void>
   const button = page.locator(`[data-exposure-ms="${exposureMs}"]`);
   await button.click();
   await expect(button).toHaveAttribute("aria-pressed", "true");
+  await page.getByRole("button", { name: "Apply" }).click();
   await waitUntilVisible(page);
 }
 
@@ -48,6 +50,7 @@ export async function setTreatment(
   const button = page.locator(`[data-control="treatment-${treatment}"]`);
   await button.click();
   await expect(button).toHaveAttribute("aria-pressed", "true");
+  await page.getByRole("button", { name: "Apply" }).click();
   await waitUntilVisible(page);
 }
 

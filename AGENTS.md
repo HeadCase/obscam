@@ -126,7 +126,7 @@ Prohibited unless a later approved Linear decision changes the map:
 - For graphical browser verification, follow
   `docs/agents/browser-testing.md`. A Playwright MCP runs on the operator's Mac
   and is available to agents through an SSH tunnel; the Mac browser reaches the
-  Pi service over WireGuard at `10.164.190.1` or, as a LAN fallback only, at
+  Pi service over WireGuard at `10.44.0.1` or, as a LAN fallback only, at
   `192.168.1.200`. Never infer that browser testing is unavailable from the
   absence of a browser executable on the headless Pi.
 - Never use or probe `wg1` (`192.168.4.9`) for browser testing. It is unrelated
@@ -176,7 +176,9 @@ When relevant, explicitly consider:
 
 - obscam is a CCTV-style monitoring system for a remote astrophotography observatory.
 - Monitoring telescope slews is operationally important.
-- Low-latency monitoring mode should aim to support roughly 10ms exposures and near-honest client-visible framerates when hardware, sensor mode, and lighting permit.
+- Low-latency monitoring mode supports a 50 ms exposure floor and should retain
+  a near-honest 20 fps client-visible ceiling when hardware, sensor mode, and
+  lighting permit.
 - Long exposures may still be needed in very dark conditions or when the roof is closed.
 
 ## Build and Code Conventions

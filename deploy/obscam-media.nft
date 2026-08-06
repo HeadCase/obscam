@@ -1,13 +1,13 @@
 table inet obscam_media {
     set browser_addresses {
         type ipv4_addr
-        elements = { 10.164.190.1, 192.168.1.200 }
+        elements = { 10.44.0.1, 192.168.1.200 }
     }
 
     set browser_networks {
         type ipv4_addr
         flags interval
-        elements = { 10.164.190.0/24, 192.168.1.0/24 }
+        elements = { 10.44.0.0/24, 192.168.1.0/24 }
     }
 
     chain prerouting {

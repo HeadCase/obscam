@@ -421,6 +421,7 @@ dependencies = [
  "getrandom 0.4.3",
  "serde",
  "serde_json",
+ "socket2",
  "thiserror",
  "tokio",
  "tokio-tungstenite",

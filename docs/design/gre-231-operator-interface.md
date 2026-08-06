@@ -22,13 +22,13 @@ The operator approved these changes to earlier issue wording:
 2. `Capturing` is no longer a primary feed state. Acquisition activity is
    independent of feed currency; `Waiting for first image` names the initial
    no-frame condition.
-3. The raw Quality JSON download is removed from the operator interface. The same
-   authoritative evidence remains available to read-only agent diagnostics, and
-   human-readable values remain available in the expandable status panel.
+3. The raw Quality JSON download remains a visually subordinate, read-only agent
+   diagnostic. Human-readable values remain available in the status panel; the
+   download is not presented as an operator control or primary feed state.
 4. Optional PWA work is deferred. Any future PWA must retain the dark launch surface
    and must never imply that camera monitoring works offline.
-5. GRE-184's persistent fourteen-button exposure grid and gain slider are replaced
-   by a compact settings popover. Exposure uses a fourteen-position detented slider;
+5. GRE-184's persistent exposure grid and gain slider are replaced by a compact
+   settings popover. Exposure uses a twelve-position detented slider;
    the user-facing sensitivity label is `ISO`. The WebSocket and camera boundary
    continue to use the existing gain field unchanged.
 
@@ -89,8 +89,8 @@ Take control, and immediately opens a temporary settings popover. The command ba
 standalone Settings button remains the one control for reopening that popover.
 
 The popover contains matching discrete sliders for Exposure and ISO, plus a direct
-B&W/Colour segmented choice. Exposure has fourteen evenly spaced positional locks
-ordered from 10 ms to 30 s. ISO has thirteen evenly spaced locks for 0, 50, 100, …,
+B&W/Colour segmented choice. Exposure has twelve evenly spaced positional locks
+ordered from 50 ms to 30 s. ISO has thirteen evenly spaced locks for 0, 50, 100, …,
 600. Both feel continuous during drag and always land on a valid camera value.
 Moving a control changes a browser-local draft only; it never submits on release.
 Arrow keys move one detent.
@@ -121,15 +121,16 @@ Feed state and exposure activity are independent.
 
 | Primary state | Meaning | Image treatment | Resting cue |
 | --- | --- | --- | --- |
-| Live | The latest trustworthy presentation remains current within the expected exposure and delivery contract | Retain exact pixels | None or exposure rail |
-| Waiting for first image | The first authoritative exposure is within deadline and no trustworthy completed frame exists | Black feed surface | Exposure rail |
+| Live | Decoded browser media is advancing within the expected delivery contract; exact identity may still be pending | Retain exact pixels | None or exposure rail |
+| Waiting for first image | The first authoritative exposure is within deadline and no decoded presentation exists | Black feed surface | Exposure rail |
 | Reconnecting | Browser media transport is restoring | Retain the last trustworthy frame when available | Dashed amber perimeter |
 | Stale | A newer presentation is overdue or freshness cannot be proven | Retain the last trustworthy frame indefinitely | Dashed amber perimeter |
 | Unavailable | Capture or delivery is confirmed unusable and no working exposure can produce a trustworthy presentation | Retain a prior trustworthy frame if one exists; otherwise black | Muted-red double perimeter |
 
 The status strip supplies the exact reason on interaction. A normal 30-second
-exposure remains Live while the previous frame is still the latest completed
-trustworthy image; the exposure rail explains why it is not changing. The state
+exposure remains Live while the retained media keeps advancing; the exposure rail
+explains why its source image is not changing. Exact identity remains a separate
+diagnostic fact. The state
 becomes Stale only after exposure duration plus the authoritative delivery allowance
 passes without the expected presentation.
 

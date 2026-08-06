@@ -8,7 +8,7 @@ const INITIAL_RECONNECT_DELAY_MS = 250;
 const MAXIMUM_RECONNECT_DELAY_MS = 5_000;
 const STABLE_CONNECTION_MS = 5_000;
 const EXPOSURE_CHOICES_MS = new Set([
-  10, 20, 50, 100, 200, 300, 500, 1_000, 2_000, 5_000, 10_000, 15_000, 20_000, 30_000
+  50, 100, 200, 300, 500, 1_000, 2_000, 5_000, 10_000, 15_000, 20_000, 30_000
 ]);
 
 export interface CameraSettings {
@@ -44,6 +44,10 @@ export interface ControlState {
   credentials: StoredCredentials | null;
   credentialsValidated: boolean;
   pendingIntent: boolean;
+  draft: CameraSettings | null;
+  submitted: CameraSettings | null;
+  rejected: CameraSettings | null;
+  notice: string | null;
   settings: SettingsState;
   mayMutate: boolean;
 }
@@ -64,7 +68,9 @@ export type ControlEvent =
   | { type: "visible"; settingsGeneration: number }
   | { type: "failed"; targetGeneration: number; reason: "superseded" | "recovery" }
   | { type: "rejected"; reason?: RejectionReason }
-  | { type: "intent_queued" };
+  | { type: "intent_queued"; settings?: CameraSettings }
+  | { type: "draft_changed"; settings: CameraSettings }
+  | { type: "draft_discarded" };
 
 export interface ControlTransition {
   state: ControlState;
@@ -116,6 +122,10 @@ export function initialControlState(
     credentials,
     credentialsValidated: false,
     pendingIntent: false,
+    draft: null,
+    submitted: null,
+    rejected: null,
+    notice: null,
     settings: {
       applied: {
         generation: 0,
@@ -142,7 +152,13 @@ export function reduceControl(state: ControlState, event: ControlEvent): Control
         retryDelayMs: null,
         ownership: "no_one",
         credentialsValidated: false,
-        pendingIntent: false
+        pendingIntent: false,
+        draft: null,
+        submitted: null,
+        notice:
+          state.draft !== null || state.submitted !== null
+            ? "Draft discarded: control reconnecting"
+            : state.notice
       };
       break;
     case "connected": {
@@ -158,7 +174,13 @@ export function reduceControl(state: ControlState, event: ControlEvent): Control
         retryDelayMs: null,
         ownership: "no_one",
         credentialsValidated: false,
-        pendingIntent: false
+        pendingIntent: false,
+        draft: null,
+        submitted: null,
+        notice:
+          state.draft !== null || state.submitted !== null
+            ? "Draft discarded: control disconnected"
+            : state.notice
       };
       break;
     }
@@ -173,7 +195,8 @@ export function reduceControl(state: ControlState, event: ControlEvent): Control
         generation: event.credentials.generation,
         credentials: event.credentials,
         credentialsValidated: true,
-        pendingIntent: false
+        pendingIntent: false,
+        notice: null
       };
       storage = "save";
       break;
@@ -191,7 +214,13 @@ export function reduceControl(state: ControlState, event: ControlEvent): Control
         generation: event.generation,
         credentials: retainCredentials ? state.credentials : null,
         credentialsValidated: ours,
-        pendingIntent: false
+        pendingIntent: false,
+        draft: retainCredentials ? state.draft : null,
+        submitted: retainCredentials ? state.submitted : null,
+        notice:
+          !retainCredentials && (state.draft !== null || state.submitted !== null)
+            ? "Draft discarded: control lost"
+            : state.notice
       };
       storage = displaced ? "remove" : "none";
       break;
@@ -215,7 +244,13 @@ export function reduceControl(state: ControlState, event: ControlEvent): Control
           generation: event.generation,
           credentials: null,
           credentialsValidated: false,
-          pendingIntent: false
+          pendingIntent: false,
+          draft: null,
+          submitted: null,
+          notice:
+            state.draft !== null || state.submitted !== null
+              ? "Draft discarded: control released"
+              : state.notice
         };
         storage = state.credentials === null ? "none" : "remove";
       }
@@ -237,6 +272,9 @@ export function reduceControl(state: ControlState, event: ControlEvent): Control
       next = {
         ...state,
         pendingIntent: false,
+        submitted: null,
+        rejected: null,
+        notice: null,
         settings: {
           ...state.settings,
           pending: { generation: event.targetGeneration, settings: event.settings },
@@ -248,6 +286,7 @@ export function reduceControl(state: ControlState, event: ControlEvent): Control
       next = {
         ...state,
         pendingIntent: false,
+        submitted: null,
         settings: {
           applied: { generation: event.settingsGeneration, settings: event.settings },
           pending:
@@ -266,21 +305,25 @@ export function reduceControl(state: ControlState, event: ControlEvent): Control
       };
       break;
     case "visible":
-      if (state.settings.pending?.generation === event.settingsGeneration) {
+      if (
+        state.settings.pending?.generation === event.settingsGeneration ||
+        state.settings.applied.generation === event.settingsGeneration
+      ) {
+        const appliedIsVisible = state.settings.applied.generation === event.settingsGeneration;
         next = {
           ...state,
           settings: {
             ...state.settings,
             pending:
-              state.settings.applied.generation === event.settingsGeneration
+              appliedIsVisible
                 ? null
                 : state.settings.pending,
             visible:
-              state.settings.applied.generation === event.settingsGeneration
+              appliedIsVisible
                 ? state.settings.applied
                 : state.settings.visible,
             presentedGeneration:
-              state.settings.applied.generation === event.settingsGeneration
+              appliedIsVisible
                 ? null
                 : event.settingsGeneration
           }
@@ -288,9 +331,17 @@ export function reduceControl(state: ControlState, event: ControlEvent): Control
       }
       break;
     case "failed":
+      {
+      const failedSettings =
+        state.settings.pending?.generation === event.targetGeneration
+          ? state.settings.pending.settings
+          : null;
       next = {
         ...state,
         pendingIntent: false,
+        submitted: null,
+        rejected: failedSettings,
+        notice: failedSettings === null ? state.notice : "Settings rejected: camera recovery",
         settings: {
           ...state.settings,
           pending:
@@ -304,6 +355,7 @@ export function reduceControl(state: ControlState, event: ControlEvent): Control
         }
       };
       break;
+      }
     case "rejected": {
       const authorityLost = event.reason === undefined || ["not_holder", "expired"].includes(event.reason);
       next = authorityLost
@@ -312,14 +364,56 @@ export function reduceControl(state: ControlState, event: ControlEvent): Control
             ownership: state.ownership === "another_viewer" ? "another_viewer" : "no_one",
             credentials: null,
             credentialsValidated: false,
-            pendingIntent: false
+            pendingIntent: false,
+            draft: null,
+            submitted: null,
+            notice:
+              state.draft !== null || state.submitted !== null
+                ? "Draft discarded: control lost"
+                : state.notice
           }
-        : { ...state, pendingIntent: false };
+        : {
+            ...state,
+            pendingIntent: false,
+            draft: null,
+            submitted: null,
+            rejected: state.submitted ?? state.draft,
+            notice: `Settings rejected: ${rejectionDescription(event.reason)}`
+          };
       storage = authorityLost && state.credentials !== null ? "remove" : "none";
       break;
     }
     case "intent_queued":
-      next = { ...state, pendingIntent: state.mayMutate };
+      next = {
+        ...state,
+        pendingIntent: state.mayMutate,
+        ...(event.settings === undefined
+          ? {}
+          : {
+              draft: null,
+              submitted: event.settings,
+              rejected: null,
+              notice: "Settings submitted"
+            })
+      };
+      break;
+    case "draft_changed":
+      if (state.mayMutate) {
+        next = {
+          ...state,
+          rejected: null,
+          notice: null,
+          draft: sameCameraSettings(
+            event.settings,
+            state.submitted ?? state.settings.pending?.settings ?? state.settings.applied.settings
+          )
+            ? null
+            : event.settings
+        };
+      }
+      break;
+    case "draft_discarded":
+      next = { ...state, draft: null, notice: "Draft discarded" };
       break;
   }
 
@@ -461,7 +555,7 @@ export class ControlClient {
     if (!state.mayMutate || state.pendingIntent || state.credentials === null) {
       return;
     }
-    this.transition({ type: "intent_queued" });
+    this.transition({ type: "intent_queued", settings });
     this.send({
       schemaVersion: 1,
       type: "set_settings",
@@ -637,6 +731,16 @@ function withDerivedMutationPermission(
     ...state,
     mayMutate: state.connection === "connected" && state.ownership === "you"
   };
+}
+
+function sameCameraSettings(left: CameraSettings, right: CameraSettings): boolean {
+  return left.exposureMs === right.exposureMs &&
+    left.gain === right.gain &&
+    left.treatment === right.treatment;
+}
+
+function rejectionDescription(reason: RejectionReason | undefined): string {
+  return reason?.replaceAll("_", " ") ?? "control lost";
 }
 
 /** Reads and validates this tab's resumable same-runtime control credential. */

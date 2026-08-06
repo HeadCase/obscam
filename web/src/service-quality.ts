@@ -3,6 +3,7 @@ const CLIENT_STORAGE_KEY = "obscam.service-quality.client.v1";
 const EVIDENCE_REFRESH_MS = 500;
 const REPORT_INTERVAL_MS = 250;
 const MAX_REPORT_BATCH = 32;
+const CLOCK_CALIBRATION_SAMPLES = 3;
 
 export interface QualityObservation {
   correlation: "exact" | "unknown";
@@ -51,17 +52,24 @@ export interface QualityAggregate {
   partitions: QualityPartition[];
 }
 
-export interface QualityClientReport extends QualityAggregate {
+export interface QualityClientSummary extends QualityAggregate {
   clientId: string;
   connectionGeneration: number;
+}
+
+export interface QualityClientReport extends QualityClientSummary {
   samples: unknown[];
 }
 
-export interface ServiceQualityResponse {
+export interface ServiceQualitySummary {
   schemaVersion: typeof SCHEMA_VERSION;
   limits: { clients: 16; samplesPerClient: 512 };
-  clients: QualityClientReport[];
+  clients: QualityClientSummary[];
   combined: QualityAggregate;
+}
+
+export interface ServiceQualityResponse extends Omit<ServiceQualitySummary, "clients"> {
+  clients: QualityClientReport[];
 }
 
 interface ClockCalibration {
@@ -73,21 +81,24 @@ export class ServiceQualityClient {
   readonly clientId: string;
   private connectionGeneration = 0;
   private pending: TimedQualityObservation[] = [];
+  private acceptingReports = true;
   private reporting = false;
+  private reportsIdle: Promise<void> = Promise.resolve();
+  private finishReporting: (() => void) | null = null;
   private reportTimer: number | null = null;
   private lastEvidenceAtMs = 0;
 
   private constructor(
     private readonly runtimeEpoch: string,
     private readonly clock: ClockCalibration,
-    private readonly evidence: (response: ServiceQualityResponse) => void
+    private readonly evidence: (response: ServiceQualitySummary) => void
   ) {
     this.clientId = clientId();
   }
 
   static async connect(
     runtimeEpoch: string,
-    evidence: (response: ServiceQualityResponse) => void
+    evidence: (response: ServiceQualitySummary) => void
   ): Promise<ServiceQualityClient> {
     const clock = await calibrateClock();
     const client = new ServiceQualityClient(runtimeEpoch, clock, evidence);
@@ -95,20 +106,32 @@ export class ServiceQualityClient {
     return client;
   }
 
-  report(observation: QualityObservation): void {
+  report(
+    observation: QualityObservation,
+    presentedAtUnixUs = this.nowUnixUs()
+  ): void {
+    if (!this.acceptingReports) return;
     if (this.pending.length === MAX_REPORT_BATCH) {
       this.pending.shift();
     }
     this.pending.push({
       ...observation,
-      presentedAtUnixUs: Date.now() * 1_000 + this.clock.offsetUs
+      presentedAtUnixUs
     });
     this.scheduleReport();
   }
 
   /** Begins a new server-fenced media connection generation for this tab. */
   async reconnect(): Promise<void> {
+    this.acceptingReports = false;
+    this.pending = [];
+    if (this.reportTimer !== null) {
+      window.clearTimeout(this.reportTimer);
+      this.reportTimer = null;
+    }
+    await this.reportsIdle;
     await this.beginConnection();
+    this.acceptingReports = true;
   }
 
   /** Returns Unix microseconds calibrated to the Rust service clock. */
@@ -157,6 +180,9 @@ export class ServiceQualityClient {
       return;
     }
     this.reporting = true;
+    this.reportsIdle = new Promise((resolve) => {
+      this.finishReporting = resolve;
+    });
     const observations = this.pending.splice(0, MAX_REPORT_BATCH);
     try {
       await this.send(observations);
@@ -169,6 +195,8 @@ export class ServiceQualityClient {
       console.error("ObsCam service-quality reporting failed", error);
     } finally {
       this.reporting = false;
+      this.finishReporting?.();
+      this.finishReporting = null;
       this.scheduleReport();
     }
   }
@@ -201,35 +229,36 @@ export class ServiceQualityClient {
     }
   }
 
-  private async fetchEvidence(): Promise<ServiceQualityResponse> {
+  private async fetchEvidence(): Promise<ServiceQualitySummary> {
     const response = await fetch(
-      `/api/v1/service-quality?clientId=${encodeURIComponent(this.clientId)}`,
+      `/api/v1/service-quality/summary?clientId=${encodeURIComponent(this.clientId)}`,
       { cache: "no-store", headers: { Accept: "application/json" } }
     );
     if (!response.ok) {
       throw new Error(`quality evidence request failed with ${response.status}`);
     }
-    return parseServiceQualityResponse(await response.json(), this.clientId);
+    return parseServiceQualitySummary(await response.json(), this.clientId);
   }
 }
 
-export function serviceQualityText(response: ServiceQualityResponse): string {
+export function serviceQualityText(response: ServiceQualitySummary): string {
   const client = response.clients[0];
   if (client === undefined || client.sampleCount === 0) {
     return "No quality samples";
   }
-  const latestExact = [...client.partitions]
+  const current = [...client.partitions]
     .reverse()
     .find(
       (partition) =>
         partition.connectionGeneration === client.connectionGeneration &&
-        partition.visibility === "visible" &&
-        partition.exactCorrelation > 0
+        partition.visibility === "visible"
     );
-  const measured = latestExact === undefined
+  const measured = current === undefined || current.exactCorrelation === 0
     ? ""
-    : ` · ${formatCadence(latestExact.uniquePresentedCadenceHz)} · p95 ${formatLatency(latestExact.latencyUs?.p95 ?? null)}`;
-  return `${client.sampleCount} samples · ${client.exactCorrelation} exact · ${client.unknownCorrelation} unknown${measured}`;
+    : ` · ${formatCadence(current.uniquePresentedCadenceHz)} · p95 ${formatLatency(current.latencyUs?.p95 ?? null)}`;
+  return current === undefined
+    ? "No quality samples"
+    : `${current.sampleCount} samples · ${current.exactCorrelation} exact · ${current.unknownCorrelation} unknown${measured}`;
 }
 
 export function downloadServiceQuality(
@@ -246,10 +275,52 @@ export function downloadServiceQuality(
   URL.revokeObjectURL(url);
 }
 
+export async function fetchServiceQualityReport(
+  clientId: string
+): Promise<ServiceQualityResponse> {
+  const response = await fetch(
+    `/api/v1/service-quality?clientId=${encodeURIComponent(clientId)}`,
+    { cache: "no-store", headers: { Accept: "application/json" } }
+  );
+  if (!response.ok) {
+    throw new Error(`quality evidence request failed with ${response.status}`);
+  }
+  return parseServiceQualityResponse(await response.json(), clientId);
+}
+
+export function parseServiceQualitySummary(
+  value: unknown,
+  expectedClientId: string
+): ServiceQualitySummary {
+  validateServiceQualityEnvelope(value);
+  for (const client of value.clients) {
+    if (!validClientSummary(client, expectedClientId) || "samples" in client) {
+      throw new Error("invalid service-quality client summary");
+    }
+  }
+  return value as unknown as ServiceQualitySummary;
+}
+
 export function parseServiceQualityResponse(
   value: unknown,
   expectedClientId: string
 ): ServiceQualityResponse {
+  validateServiceQualityEnvelope(value);
+  for (const client of value.clients) {
+    if (
+      !validClientSummary(client, expectedClientId) ||
+      !Array.isArray(client.samples) ||
+      client.samples.length > 512
+    ) {
+      throw new Error("invalid service-quality client response");
+    }
+  }
+  return value as unknown as ServiceQualityResponse;
+}
+
+function validateServiceQualityEnvelope(
+  value: unknown
+): asserts value is Record<string, unknown> & { clients: unknown[] } {
   if (
     !isRecord(value) ||
     value.schemaVersion !== SCHEMA_VERSION ||
@@ -262,22 +333,30 @@ export function parseServiceQualityResponse(
   ) {
     throw new Error("invalid service-quality response");
   }
-  for (const client of value.clients) {
-    if (
-      !isRecord(client) ||
-      client.clientId !== expectedClientId ||
-      !positiveInteger(client.connectionGeneration) ||
-      !Array.isArray(client.samples) ||
-      client.samples.length > 512 ||
-      !validAggregate(client)
-    ) {
-      throw new Error("invalid service-quality client response");
-    }
-  }
-  return value as unknown as ServiceQualityResponse;
+}
+
+function validClientSummary(value: unknown, expectedClientId: string): value is Record<string, unknown> {
+  return (
+    isRecord(value) &&
+    value.clientId === expectedClientId &&
+    positiveInteger(value.connectionGeneration) &&
+    validAggregate(value)
+  );
 }
 
 async function calibrateClock(): Promise<ClockCalibration> {
+  let best: ClockCalibration | null = null;
+  for (let sample = 0; sample < CLOCK_CALIBRATION_SAMPLES; sample += 1) {
+    const calibration = await sampleClock();
+    if (best === null || calibration.uncertaintyUs < best.uncertaintyUs) {
+      best = calibration;
+    }
+  }
+  if (best === null) throw new Error("clock calibration produced no samples");
+  return best;
+}
+
+async function sampleClock(): Promise<ClockCalibration> {
   const startedAtUs = Date.now() * 1_000;
   const response = await fetch("/api/v1/clock", {
     cache: "no-store",
