@@ -1068,7 +1068,7 @@ mod tests {
         let controller = ready_controller();
         controller.install_interrupter(camera.interrupter());
         let target = controller
-            .accept(CameraSettings::new(20, 200, Treatment::Colour).expect("target"))
+            .accept(CameraSettings::new(50, 200, Treatment::Colour).expect("target"))
             .expect("camera ready");
         assert_eq!(
             camera.capture_next(100).err(),
@@ -1112,7 +1112,7 @@ mod tests {
         let controller = ready_controller();
         controller.install_interrupter(camera.interrupter());
         let target = controller
-            .accept(CameraSettings::new(20, 600, Treatment::Colour).expect("target"))
+            .accept(CameraSettings::new(50, 600, Treatment::Colour).expect("target"))
             .expect("camera ready");
         let mut boundary_count = 0;
 

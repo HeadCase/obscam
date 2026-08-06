@@ -426,7 +426,7 @@ function validCapture(value) {
         value.settingsGeneration >= 0 &&
         Number.isInteger(value.exposureMs) &&
         typeof value.exposureMs === "number" &&
-        value.exposureMs >= 10 &&
+        value.exposureMs >= 50 &&
         value.exposureMs <= 30_000 &&
         Number.isSafeInteger(value.startedAtUnixUs) &&
         typeof value.startedAtUnixUs === "number" &&

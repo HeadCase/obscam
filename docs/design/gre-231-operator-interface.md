@@ -22,13 +22,13 @@ The operator approved these changes to earlier issue wording:
 2. `Capturing` is no longer a primary feed state. Acquisition activity is
    independent of feed currency; `Waiting for first image` names the initial
    no-frame condition.
-3. The raw Quality JSON download is removed from the operator interface. The same
-   authoritative evidence remains available to read-only agent diagnostics, and
-   human-readable values remain available in the expandable status panel.
+3. The raw Quality JSON download remains a visually subordinate, read-only agent
+   diagnostic. Human-readable values remain available in the status panel; the
+   download is not presented as an operator control or primary feed state.
 4. Optional PWA work is deferred. Any future PWA must retain the dark launch surface
    and must never imply that camera monitoring works offline.
-5. GRE-184's persistent fourteen-button exposure grid and gain slider are replaced
-   by a compact settings popover. Exposure uses a fourteen-position detented slider;
+5. GRE-184's persistent exposure grid and gain slider are replaced by a compact
+   settings popover. Exposure uses a twelve-position detented slider;
    the user-facing sensitivity label is `ISO`. The WebSocket and camera boundary
    continue to use the existing gain field unchanged.
 
@@ -89,8 +89,8 @@ Take control, and immediately opens a temporary settings popover. The command ba
 standalone Settings button remains the one control for reopening that popover.
 
 The popover contains matching discrete sliders for Exposure and ISO, plus a direct
-B&W/Colour segmented choice. Exposure has fourteen evenly spaced positional locks
-ordered from 10 ms to 30 s. ISO has thirteen evenly spaced locks for 0, 50, 100, …,
+B&W/Colour segmented choice. Exposure has twelve evenly spaced positional locks
+ordered from 50 ms to 30 s. ISO has thirteen evenly spaced locks for 0, 50, 100, …,
 600. Both feel continuous during drag and always land on a valid camera value.
 Moving a control changes a browser-local draft only; it never submits on release.
 Arrow keys move one detent.

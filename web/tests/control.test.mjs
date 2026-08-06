@@ -166,7 +166,7 @@ test("server messages validate schema, generations, and secrets", () => {
 });
 
 test("settings messages preserve complete accepted and applied tuples", () => {
-  const settings = { exposureMs: 20, gain: 350, treatment: "colour" };
+  const settings = { exposureMs: 50, gain: 350, treatment: "colour" };
   assert.deepEqual(
     parseControlMessage({
       schemaVersion: 1,
@@ -203,9 +203,21 @@ test("settings messages preserve complete accepted and applied tuples", () => {
   assert.deepEqual(state.settings.visible, { generation: 1, settings });
 });
 
+test("settings messages reject exposures below the 50 ms floor", () => {
+  assert.throws(
+    () => parseControlMessage({
+      schemaVersion: 1,
+      type: "accepted",
+      targetGeneration: 1,
+      settings: { exposureMs: 20, gain: 100, treatment: "monochrome" }
+    }),
+    /invalid control message/
+  );
+});
+
 test("camera edits remain a local draft until Apply is queued", () => {
   const applied = { exposureMs: 500, gain: 100, treatment: "monochrome" };
-  const draft = { exposureMs: 20, gain: 350, treatment: "colour" };
+  const draft = { exposureMs: 50, gain: 350, treatment: "colour" };
   let state = reduceControl(initialControlState(null), {
     type: "connected",
     connectionGeneration: 0
@@ -241,7 +253,7 @@ test("camera edits remain a local draft until Apply is queued", () => {
 });
 
 test("Discard restores the authoritative tuple and authority loss removes a draft", () => {
-  const draft = { exposureMs: 20, gain: 350, treatment: "colour" };
+  const draft = { exposureMs: 50, gain: 350, treatment: "colour" };
   let state = reduceControl(initialControlState(null), {
     type: "connected",
     connectionGeneration: 0
@@ -261,7 +273,7 @@ test("Discard restores the authoritative tuple and authority loss removes a draf
 });
 
 test("presentation before applied still advances the exact target to visible", () => {
-  const settings = { exposureMs: 20, gain: 350, treatment: "colour" };
+  const settings = { exposureMs: 50, gain: 350, treatment: "colour" };
   let state = reduceControl(initialControlState(null), {
     type: "accepted",
     targetGeneration: 1,
@@ -293,7 +305,7 @@ test("the initially applied generation becomes independently visible", () => {
 test("invalid settings rejection keeps a healthy lease", () => {
   let state = reduceControl(initialControlState(null), { type: "connected", connectionGeneration: 0 }).state;
   state = reduceControl(state, { type: "granted", credentials }).state;
-  const rejectedSettings = { exposureMs: 20, gain: 350, treatment: "colour" };
+  const rejectedSettings = { exposureMs: 50, gain: 350, treatment: "colour" };
   state = reduceControl(state, { type: "intent_queued", settings: rejectedSettings }).state;
 
   const rejected = reduceControl(state, { type: "rejected", reason: "invalid_settings" });
@@ -306,7 +318,7 @@ test("invalid settings rejection keeps a healthy lease", () => {
 });
 
 test("reconnect discards unsafe unsent intent and announces the restoration", () => {
-  const draft = { exposureMs: 20, gain: 350, treatment: "colour" };
+  const draft = { exposureMs: 50, gain: 350, treatment: "colour" };
   let state = reduceControl(initialControlState(null), { type: "connected", connectionGeneration: 0 }).state;
   state = reduceControl(state, { type: "granted", credentials }).state;
   state = reduceControl(state, { type: "draft_changed", settings: draft }).state;

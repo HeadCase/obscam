@@ -242,11 +242,12 @@ async fn production_assets_expose_the_complete_unavailable_viewer_shell() {
     assert!(html.contains("data-control=\"treatment-colour\""));
     for exposure in [
         "30 s", "20 s", "15 s", "10 s", "5 s", "2 s", "1 s", "500 ms", "300 ms", "200 ms",
-        "100 ms", "50 ms", "20 ms", "10 ms",
+        "100 ms", "50 ms",
     ] {
         assert!(html.contains(exposure), "missing exposure {exposure}");
     }
-    assert_eq!(html.matches("data-exposure-ms=").count(), 14);
+    assert!(!html.contains("data-exposure-ms=\"20\""));
+    assert_eq!(html.matches("data-exposure-ms=").count(), 12);
     assert!(html.contains("data-gain"));
 
     let (script_head, script) = get(address, "/assets/app.js").await;

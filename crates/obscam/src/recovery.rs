@@ -10,7 +10,7 @@ use zwo_asi::CaptureInterrupter;
 const CAMERA_RETRY_SECONDS: [u64; 8] = [0, 1, 2, 4, 8, 15, 30, 30];
 const MAX_CAMERA_RETRY_DELAY: Duration = Duration::from_secs(30);
 const WATCHDOG_CANCEL_MARGIN: Duration = Duration::from_secs(2);
-const WATCHDOG_TERMINATE_MARGIN: Duration = Duration::from_secs(1);
+const WATCHDOG_TERMINATE_MARGIN: Duration = Duration::from_secs(3);
 
 /// Validates that processed bytes represent the claimed native I420 source generation.
 #[must_use]

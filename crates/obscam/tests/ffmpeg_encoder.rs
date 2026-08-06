@@ -27,7 +27,7 @@ fn one_ffmpeg_child_receives_native_i420_with_the_qualified_hardware_profile() {
     let mut camera =
         DeterministicCamera::connect(DeterministicScenario::new([])).expect("camera present");
     camera
-        .configure(Settings::new(10_000, 0).expect("settings"))
+        .configure(Settings::new(50_000, 0).expect("settings"))
         .expect("configure");
     camera.start().expect("start");
     let source = camera.capture_next(100).expect("source generation");
@@ -90,7 +90,7 @@ fn completed_frame_remains_repeatable_across_a_settings_epoch() {
     let mut camera =
         DeterministicCamera::connect(DeterministicScenario::new([])).expect("camera present");
     camera
-        .configure(Settings::new(10_000, 0).expect("settings"))
+        .configure(Settings::new(50_000, 0).expect("settings"))
         .expect("configure");
     camera.start().expect("start");
     let source = camera.capture_next(100).expect("source generation");

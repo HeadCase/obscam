@@ -181,6 +181,15 @@ test("lifecycle facts fail closed at the browser boundary", () => {
     /invalid lifecycle facts/
   );
   assert.throws(
+    () => parseLifecycleFacts({
+      schemaVersion: 1,
+      type: "lifecycle",
+      ...ready,
+      capture: { ...ready.capture, exposureMs: 20 }
+    }),
+    /invalid lifecycle facts/
+  );
+  assert.throws(
     () => parseLifecycleFacts({ schemaVersion: 1, type: "lifecycle", ...ready, runtimeEpoch: "old" }),
     /invalid lifecycle facts/
   );
@@ -481,7 +490,7 @@ test("backgrounding suspends liveness and foreground requests immediate reconnec
 
 test("pending settings stay separately visible while decoded video remains Live", () => {
   let state = presentedState();
-  const settings = { exposureMs: 20, gain: 350, treatment: "colour" };
+  const settings = { exposureMs: 50, gain: 350, treatment: "colour" };
   state = dispatch(state, {
     type: "control",
     event: { type: "accepted", targetGeneration: 1, settings }

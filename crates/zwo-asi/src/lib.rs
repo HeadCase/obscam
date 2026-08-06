@@ -32,6 +32,8 @@ const ASI_TIMEOUT: i32 = 11;
 const MAX_CAPTURE_WAIT_MS: i32 = 100;
 const CONTROL_EXPOSURE: i32 = 1;
 const CONTROL_GAIN: i32 = 0;
+const MIN_EXPOSURE_US: i64 = 50_000;
+const MAX_EXPOSURE_US: i64 = 30_000_000;
 
 /// A validated complete camera settings tuple.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -47,7 +49,7 @@ impl Settings {
     ///
     /// Returns [`SettingsError`] when either value is outside its accepted range.
     pub fn new(exposure_us: i64, gain: i64) -> Result<Self, SettingsError> {
-        if !(10_000..=30_000_000).contains(&exposure_us) {
+        if !(MIN_EXPOSURE_US..=MAX_EXPOSURE_US).contains(&exposure_us) {
             return Err(SettingsError::Exposure);
         }
         if !(0..=600).contains(&gain) {
@@ -72,8 +74,8 @@ impl Settings {
 /// Rejected camera setting.
 #[derive(Clone, Copy, Debug, Error, Eq, PartialEq)]
 pub enum SettingsError {
-    /// Exposure is outside 10 ms through 30 s.
-    #[error("exposure must be between 10000 and 30000000 microseconds")]
+    /// Exposure is outside 50 ms through 30 s.
+    #[error("exposure must be between 50000 and 30000000 microseconds")]
     Exposure,
     /// Gain is outside 0 through 600.
     #[error("gain must be between 0 and 600")]
@@ -938,7 +940,7 @@ mod tests {
         let mut owner = CameraOwner::connect().unwrap();
         stub::result(9, 8);
         assert_eq!(
-            owner.configure(Settings::new(10_000, 0).unwrap()),
+            owner.configure(Settings::new(50_000, 0).unwrap()),
             Err(CameraError::Sdk {
                 operation: "set full-frame RAW8",
                 code: 8
@@ -948,7 +950,7 @@ mod tests {
         stub::reset();
         target();
         let mut owner = CameraOwner::connect().unwrap();
-        owner.configure(Settings::new(10_000, 0).unwrap()).unwrap();
+        owner.configure(Settings::new(50_000, 0).unwrap()).unwrap();
         stub::result(4, 16);
         assert_eq!(
             owner.start(),
@@ -961,7 +963,7 @@ mod tests {
         stub::reset();
         target();
         let mut owner = CameraOwner::connect().unwrap();
-        owner.configure(Settings::new(10_000, 0).unwrap()).unwrap();
+        owner.configure(Settings::new(50_000, 0).unwrap()).unwrap();
         owner.start().unwrap();
         stub::result(5, 5);
         assert_eq!(
@@ -992,7 +994,7 @@ mod tests {
         stub::reset();
         target();
         let mut owner = CameraOwner::connect().unwrap();
-        owner.configure(Settings::new(10_000, 0).unwrap()).unwrap();
+        owner.configure(Settings::new(50_000, 0).unwrap()).unwrap();
         stub::result(10, 16);
         assert_eq!(
             owner.start(),
@@ -1009,7 +1011,7 @@ mod tests {
         stub::reset();
         target();
         let mut owner = CameraOwner::connect().unwrap();
-        owner.configure(Settings::new(10_000, 0).unwrap()).unwrap();
+        owner.configure(Settings::new(50_000, 0).unwrap()).unwrap();
         stub::result(10, 16);
         stub::result(5, 5);
         assert_eq!(
@@ -1025,10 +1027,11 @@ mod tests {
 
     #[test]
     fn settings_enforce_the_complete_operating_envelope() {
-        assert!(Settings::new(10_000, 0).is_ok());
+        assert_eq!(Settings::new(20_000, 0), Err(SettingsError::Exposure));
+        assert!(Settings::new(50_000, 0).is_ok());
         assert!(Settings::new(30_000_000, 600).is_ok());
-        assert_eq!(Settings::new(9_999, 0), Err(SettingsError::Exposure));
-        assert_eq!(Settings::new(10_000, 601), Err(SettingsError::Gain));
+        assert_eq!(Settings::new(49_999, 0), Err(SettingsError::Exposure));
+        assert_eq!(Settings::new(50_000, 601), Err(SettingsError::Gain));
     }
 
     #[test]
@@ -1038,7 +1041,7 @@ mod tests {
         target();
         let mut owner = CameraOwner::connect().unwrap();
         owner
-            .configure(Settings::new(10_000, 600).unwrap())
+            .configure(Settings::new(50_000, 600).unwrap())
             .unwrap();
         owner.start().unwrap();
         let mut pointers = Vec::new();

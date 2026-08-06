@@ -8,9 +8,9 @@ use thiserror::Error;
 use tokio::sync::broadcast;
 use zwo_asi::CaptureInterrupter;
 
-/// The fourteen operator-facing exposure choices, in milliseconds.
-pub const EXPOSURE_CHOICES_MS: [u32; 14] = [
-    10, 20, 50, 100, 200, 300, 500, 1_000, 2_000, 5_000, 10_000, 15_000, 20_000, 30_000,
+/// The twelve operator-facing exposure choices, in milliseconds.
+pub const EXPOSURE_CHOICES_MS: [u32; 12] = [
+    50, 100, 200, 300, 500, 1_000, 2_000, 5_000, 10_000, 15_000, 20_000, 30_000,
 ];
 
 /// One of the two deliberately neutral production image treatments.

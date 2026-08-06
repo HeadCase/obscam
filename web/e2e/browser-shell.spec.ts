@@ -30,7 +30,8 @@ test("operator controls remain reachable without horizontal overflow", async ({ 
   await page.setViewportSize({ width: 390, height: 844 });
   await openLiveViewer(page);
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBe(390);
-  await expect(page.locator("[data-exposure-ms]")).toHaveCount(14);
+  await expect(page.locator("[data-exposure-ms]")).toHaveCount(12);
+  await expect(page.locator('[data-exposure-ms="20"]')).toHaveCount(0);
   await page.locator("[data-control=\"take-control\"]").scrollIntoViewIfNeeded();
   await expect(page.locator("[data-control=\"take-control\"]")).toBeVisible();
 

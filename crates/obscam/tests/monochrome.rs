@@ -115,7 +115,7 @@ fn deterministic_camera() -> DeterministicCamera {
     let mut camera =
         DeterministicCamera::connect(DeterministicScenario::new([])).expect("camera present");
     camera
-        .configure(Settings::new(10_000, 0).expect("valid settings"))
+        .configure(Settings::new(50_000, 0).expect("valid settings"))
         .expect("configure");
     camera.start().expect("start");
     camera

@@ -176,7 +176,9 @@ When relevant, explicitly consider:
 
 - obscam is a CCTV-style monitoring system for a remote astrophotography observatory.
 - Monitoring telescope slews is operationally important.
-- Low-latency monitoring mode should aim to support roughly 10ms exposures and near-honest client-visible framerates when hardware, sensor mode, and lighting permit.
+- Low-latency monitoring mode supports a 50 ms exposure floor and should retain
+  a near-honest 20 fps client-visible ceiling when hardware, sensor mode, and
+  lighting permit.
 - Long exposures may still be needed in very dark conditions or when the roof is closed.
 
 ## Build and Code Conventions

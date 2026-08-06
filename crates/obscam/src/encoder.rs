@@ -25,6 +25,7 @@ const RTP_CLOCK_STEP: u64 = 4_500;
 const RTP_PAYLOAD_TYPE: u8 = 96;
 const RTP_SSRC: u32 = 1_868_722_033;
 const RTP_INITIAL_SEQUENCE: u16 = 1_000;
+const RTP_RECEIVE_BUFFER_BYTES: usize = 4 * 1_048_576;
 
 /// One long-lived `FFmpeg` hardware-H.264 publication child.
 #[derive(Debug)]
@@ -422,7 +423,7 @@ impl RtpObserver {
         pts_receiver: Receiver<u64>,
         evidence_valid: &Arc<AtomicBool>,
     ) -> io::Result<Self> {
-        let media_socket = bound_socket(RTP_INPUT_ADDRESS)?;
+        let media_socket = bound_rtp_socket(RTP_INPUT_ADDRESS)?;
         let control_socket = bound_socket(RTCP_INPUT_ADDRESS)?;
         let media_relay_socket = relay_socket()?;
         let control_relay_socket = relay_socket()?;
@@ -506,11 +507,11 @@ fn read_timestamps(stderr: impl Read, sender: &SyncSender<u64>, evidence_valid: 
             }
             last_pts = Some(pts);
             if sender.try_send(pts).is_err() {
-                evidence_valid.store(false, Ordering::Release);
+                invalidate_evidence(evidence_valid, "FFmpeg PTS queue unavailable");
                 return;
             }
         } else if is_video_muxer_line(&line) {
-            evidence_valid.store(false, Ordering::Release);
+            invalidate_evidence(evidence_valid, "unparseable FFmpeg video muxer timestamp");
             return;
         } else if line.to_ascii_lowercase().contains("error") {
             tracing::warn!(message = line, "FFmpeg diagnostic");
@@ -573,7 +574,7 @@ fn pair_timestamps(
                 );
             } else {
                 tracing::warn!(%error, input_index, rtp_timestamp, "RTP frame correlation is unknown");
-                evidence_valid.store(false, Ordering::Release);
+                invalidate_evidence(evidence_valid, "correlation timeline rejected RTP marker");
                 return;
             }
         }
@@ -596,15 +597,16 @@ fn relay_rtp(
             continue;
         };
         let Some((sequence, timestamp)) = rtp_packet(&packet[..length]) else {
-            evidence_valid.store(false, Ordering::Release);
+            invalidate_evidence(evidence_valid, "invalid RTP packet");
             continue;
         };
-        if sequence
-            != previous_sequence
-                .expect("RTP sequence is initialized")
-                .wrapping_add(1)
+        let expected_sequence = previous_sequence
+            .expect("RTP sequence is initialized")
+            .wrapping_add(1);
+        if sequence != expected_sequence
+            && invalidate_evidence(evidence_valid, "RTP sequence discontinuity")
         {
-            evidence_valid.store(false, Ordering::Release);
+            tracing::warn!(expected_sequence, sequence, "RTP packet sequence skipped");
         }
         previous_sequence = Some(sequence);
         if !forward_packet(
@@ -637,7 +639,7 @@ fn relay_rtcp(
             continue;
         };
         let Some(_sender_packets) = sender_report_packet_count(&packet[..length]) else {
-            evidence_valid.store(false, Ordering::Release);
+            invalidate_evidence(evidence_valid, "invalid RTCP sender report");
             continue;
         };
         let _ = forward_packet(
@@ -653,8 +655,16 @@ fn relay_rtcp(
 
 fn submit_evidence<T>(sender: &SyncSender<T>, value: T, evidence_valid: &AtomicBool) {
     if evidence_valid.load(Ordering::Acquire) && sender.try_send(value).is_err() {
-        evidence_valid.store(false, Ordering::Release);
+        invalidate_evidence(evidence_valid, "RTP marker queue unavailable");
     }
+}
+
+fn invalidate_evidence(evidence_valid: &AtomicBool, reason: &'static str) -> bool {
+    let was_valid = evidence_valid.swap(false, Ordering::AcqRel);
+    if was_valid {
+        tracing::warn!(reason, "exact correlation evidence invalidated");
+    }
+    was_valid
 }
 
 fn forward_packet(
@@ -673,7 +683,7 @@ fn forward_packet(
             true
         }
         Err(error) => {
-            evidence_valid.store(false, Ordering::Release);
+            invalidate_evidence(evidence_valid, "media relay send failed");
             if relay_transition(available, false) == RelayTransition::Lost {
                 tracing::warn!(protocol, %error, %relay, "media relay unavailable; retrying");
             }
@@ -736,6 +746,12 @@ fn bound_socket(address: &str) -> io::Result<UdpSocket> {
     Ok(socket)
 }
 
+fn bound_rtp_socket(address: &str) -> io::Result<UdpSocket> {
+    let socket = bound_socket(address)?;
+    socket2::SockRef::from(&socket).set_recv_buffer_size(RTP_RECEIVE_BUFFER_BYTES)?;
+    Ok(socket)
+}
+
 fn relay_socket() -> io::Result<UdpSocket> {
     UdpSocket::bind(RELAY_BIND_ADDRESS)
 }
@@ -767,7 +783,7 @@ mod tests {
         let mut camera =
             DeterministicCamera::connect(DeterministicScenario::new([])).expect("camera present");
         camera
-            .configure(Settings::new(10_000, 0).expect("settings"))
+            .configure(Settings::new(50_000, 0).expect("settings"))
             .expect("configure");
         camera.start().expect("start");
         let source = camera.capture_next(100).expect("source generation");
@@ -952,6 +968,18 @@ mod tests {
 
         assert!(address.ip().is_unspecified());
         assert_eq!(address.port(), 0);
+    }
+
+    #[test]
+    fn rtp_input_socket_has_capacity_for_bursty_full_resolution_frames() {
+        let socket = bound_rtp_socket("127.0.0.1:0").expect("bind RTP input socket");
+
+        assert!(
+            socket2::SockRef::from(&socket)
+                .recv_buffer_size()
+                .expect("read RTP receive buffer")
+                >= RTP_RECEIVE_BUFFER_BYTES
+        );
     }
 
     #[test]
