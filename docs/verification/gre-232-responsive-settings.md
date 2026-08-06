@@ -233,8 +233,11 @@ Four independent, genuinely visible browser contexts then ran for the same
 remained Live, cadence was 19.9-20.0 fps, and all reported samples were exact
 with zero unknown. The worst p95 was 192 ms, a 6 ms increase from the one-viewer
 baseline against the 50 ms gate. ObsCam CPU averaged 55.5%, RSS was 43.17 MiB
-(+2.64 MiB against the 32 MiB gate), and aggregate host idle averaged 79.5%
-with a 73.4% minimum. While all four remained visible, the operator applied
+(+2.64 MiB from the one-viewer ObsCam process), and aggregate host idle averaged
+79.5% with a 73.4% minimum. A focused rerun measured the complete Pi media stack
+(ObsCam, FFmpeg, and MediaMTX): RSS averaged 149.44 MiB with one viewer and
+153.80 MiB with four, a 4.35 MiB increase against the 32 MiB gate. While all
+four remained visible, the operator applied
 50 ms -> 100 ms: the target became exact in 393 ms and all four videos kept
 advancing and remained Live. The operator restored 50 ms afterward.
 
