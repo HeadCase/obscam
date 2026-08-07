@@ -1,0 +1,57 @@
+#!/bin/sh
+set -eu
+
+expected_version=v1.19.3
+
+if [ "$#" -ne 4 ]; then
+    echo "usage: $0 BINARY CONFIG BINARY_CHECKSUM CONFIG_CHECKSUM" >&2
+    exit 2
+fi
+
+binary=$1
+config=$2
+binary_checksum=$3
+config_checksum=$4
+
+expected_hash() {
+    /usr/bin/awk 'length($1) == 64 && $1 !~ /[^0-9a-f]/ { print $1; exit }' "$1"
+}
+
+verify_hash() {
+    path=$1
+    checksum=$2
+    expected=$(expected_hash "$checksum")
+    if [ -z "$expected" ]; then
+        echo "no valid SHA-256 in $checksum" >&2
+        return 1
+    fi
+    actual=$(/usr/bin/sha256sum "$path" | /usr/bin/awk '{ print $1 }')
+    if [ "$actual" != "$expected" ]; then
+        echo "SHA-256 mismatch for $path" >&2
+        return 1
+    fi
+}
+
+[ -x "$binary" ] || {
+    echo "MediaMTX binary is not executable: $binary" >&2
+    exit 1
+}
+[ -f "$config" ] || {
+    echo "MediaMTX configuration is missing: $config" >&2
+    exit 1
+}
+
+verify_hash "$binary" "$binary_checksum"
+verify_hash "$config" "$config_checksum"
+
+version=$("$binary" --version)
+if [ "$version" != "$expected_version" ]; then
+    echo "MediaMTX version was $version, expected $expected_version" >&2
+    exit 1
+fi
+
+moq_lines=$(/usr/bin/grep -Ec '^[[:space:]]*moq:' "$config" || true)
+if [ "$moq_lines" -ne 1 ] || ! /usr/bin/grep -Eq '^moq:[[:space:]]+no[[:space:]]*$' "$config"; then
+    echo "MediaMTX configuration must disable MoQ exactly once" >&2
+    exit 1
+fi

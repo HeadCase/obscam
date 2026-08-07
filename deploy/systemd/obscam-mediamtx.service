@@ -7,20 +7,33 @@ After=obscam-media-network.service
 [Service]
 Type=exec
 DynamicUser=yes
-ExecStart=/usr/local/bin/mediamtx /etc/obscam/mediamtx.yml
+ExecStartPre=/usr/local/libexec/obscam/verify-mediamtx /usr/local/libexec/obscam/mediamtx /etc/obscam/mediamtx.yml /usr/local/share/obscam/mediamtx-linux-arm64.sha256 /usr/local/share/obscam/mediamtx-config.sha256
+ExecStart=/usr/local/libexec/obscam/mediamtx /etc/obscam/mediamtx.yml
 NetworkNamespacePath=/run/netns/obscam-media
 Restart=on-failure
 RestartSec=5s
+TimeoutStopSec=10s
+UMask=0077
 
 # Pion requires netlink for ICE setup. Inside this namespace it can discover
 # only the private media veth and loopback; browser endpoints are exact-address
 # translations owned by obscam-media-network.service.
 RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK
 NoNewPrivileges=yes
+PrivateDevices=yes
 PrivateTmp=yes
+ProtectClock=yes
+ProtectControlGroups=yes
 ProtectHome=yes
+ProtectHostname=yes
+ProtectKernelLogs=yes
+ProtectKernelModules=yes
+ProtectKernelTunables=yes
 ProtectSystem=strict
 CapabilityBoundingSet=
+LockPersonality=yes
+RestrictSUIDSGID=yes
+SystemCallArchitectures=native
 
 StandardOutput=journal
 StandardError=journal

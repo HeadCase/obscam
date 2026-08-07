@@ -1,0 +1,49 @@
+[Unit]
+Description=ObsCam camera owner and browser service
+StartLimitIntervalSec=0
+
+[Service]
+Type=exec
+User=obscam
+Group=obscam
+SupplementaryGroups=obscam-camera
+ExecStart=/usr/local/libexec/obscam/obscam
+Restart=on-failure
+RestartSec=5s
+TimeoutStopSec=10s
+UMask=0077
+
+Environment=RUST_LOG=info
+
+# The SDK needs the exact ASI662MC USB node and FFmpeg needs the hardware H.264
+# encoder. Device cgroups admit those classes while udev ownership restricts
+# filesystem access to the two exact devices assigned to the ObsCam identity.
+DevicePolicy=closed
+DeviceAllow=char-usb_device rw
+DeviceAllow=char-video4linux rw
+# libusb initialization requires netlink even though camera ownership remains
+# restricted by the device cgroup and exact udev identity.
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK
+
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectClock=yes
+ProtectControlGroups=yes
+ProtectHome=yes
+ProtectHostname=yes
+ProtectKernelLogs=yes
+ProtectKernelModules=yes
+ProtectKernelTunables=yes
+ProtectSystem=strict
+CapabilityBoundingSet=
+LockPersonality=yes
+RestrictSUIDSGID=yes
+SystemCallArchitectures=native
+
+StandardOutput=journal
+StandardError=journal
+LogRateLimitIntervalSec=30s
+LogRateLimitBurst=200
+
+[Install]
+WantedBy=multi-user.target

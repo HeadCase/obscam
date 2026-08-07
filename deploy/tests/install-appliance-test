@@ -1,0 +1,94 @@
+#!/bin/sh
+set -eu
+
+repo=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)
+tmp=$(mktemp -d)
+trap 'rm -rf "$tmp"' EXIT HUP INT TERM
+
+fixture=$tmp/fixture
+fixture_deploy=$fixture/deploy
+root=$tmp/root
+mkdir -p "$fixture_deploy/systemd" "$fixture_deploy/sysusers.d" "$fixture_deploy/udev" "$root"
+
+cp "$repo/deploy/install-appliance" "$fixture_deploy/install-appliance"
+cp "$repo/deploy/verify-mediamtx" "$fixture_deploy/verify-mediamtx"
+cp "$repo/deploy/mediamtx.yml" "$fixture_deploy/mediamtx.yml"
+cp "$repo/deploy/obscam-media.nft" "$fixture_deploy/obscam-media.nft"
+cp "$repo/deploy/setup-media-network" "$fixture_deploy/setup-media-network"
+cp "$repo/deploy/systemd/obscam.service" "$fixture_deploy/systemd/obscam.service"
+cp "$repo/deploy/systemd/obscam-media-network.service" "$fixture_deploy/systemd/obscam-media-network.service"
+cp "$repo/deploy/systemd/obscam-mediamtx.service" "$fixture_deploy/systemd/obscam-mediamtx.service"
+cp "$repo/deploy/sysusers.d/obscam.conf" "$fixture_deploy/sysusers.d/obscam.conf"
+cp "$repo/deploy/udev/99-z-obscam.rules" "$fixture_deploy/udev/99-z-obscam.rules"
+
+obscam_binary=$tmp/obscam
+mediamtx_binary=$tmp/mediamtx
+cat >"$obscam_binary" <<'EOF'
+#!/bin/sh
+exit 0
+EOF
+cat >"$mediamtx_binary" <<'EOF'
+#!/bin/sh
+if [ "${1:-}" = --version ]; then
+    echo v1.19.3
+    exit 0
+fi
+exit 0
+EOF
+chmod +x "$obscam_binary" "$mediamtx_binary"
+
+binary_hash=$(sha256sum "$mediamtx_binary" | awk '{ print $1 }')
+config_hash=$(sha256sum "$fixture_deploy/mediamtx.yml" | awk '{ print $1 }')
+printf '%s  mediamtx\n' "$binary_hash" >"$fixture_deploy/mediamtx-linux-arm64.sha256"
+printf '%s  mediamtx.yml\n' "$config_hash" >"$fixture_deploy/mediamtx-config.sha256"
+
+fail() {
+    echo "FAIL: $*" >&2
+    exit 1
+}
+
+install_fixture() {
+    "$fixture_deploy/install-appliance" install \
+        --root "$root" \
+        --obscam-binary "$obscam_binary" \
+        --mediamtx-binary "$mediamtx_binary"
+}
+
+install_fixture
+"$fixture_deploy/install-appliance" verify --root "$root"
+
+cmp -s "$obscam_binary" "$root/usr/local/libexec/obscam/obscam" ||
+    fail "ObsCam binary was not installed"
+cmp -s "$mediamtx_binary" "$root/usr/local/libexec/obscam/mediamtx" ||
+    fail "MediaMTX binary was not installed"
+grep -Eq '^obscam:[^:]*:[^:]+:[^:]+:ObsCam camera owner:/nonexistent:/usr/sbin/nologin$' \
+    "$root/etc/passwd" || fail "non-login ObsCam identity was not created"
+find "$root/etc/systemd/system/multi-user.target.wants" -type l \
+    -name 'obscam.service' | grep -q . || fail "ObsCam service was not enabled"
+find "$root/etc/systemd/system/multi-user.target.wants" -type l \
+    -name 'obscam-mediamtx.service' | grep -q . || fail "MediaMTX service was not enabled"
+
+# Exact reinstallation is intentionally idempotent.
+install_fixture
+
+# A changed destination is never silently adopted.
+printf '\n# local drift\n' >>"$root/etc/obscam/mediamtx.yml"
+if install_fixture >/dev/null 2>&1; then
+    fail "installer adopted a conflicting destination"
+fi
+
+# A binary that no longer matches the supplied compatibility pin is rejected
+# before another root can be changed.
+other_root=$tmp/other-root
+mkdir "$other_root"
+printf '\n# drift\n' >>"$mediamtx_binary"
+if "$fixture_deploy/install-appliance" install \
+    --root "$other_root" \
+    --obscam-binary "$obscam_binary" \
+    --mediamtx-binary "$mediamtx_binary" >/dev/null 2>&1; then
+    fail "installer accepted a MediaMTX checksum mismatch"
+fi
+[ -z "$(find "$other_root" -mindepth 1 -print -quit)" ] ||
+    fail "pin rejection modified the target root"
+
+echo "install-appliance tests passed"
