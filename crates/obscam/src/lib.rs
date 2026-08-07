@@ -7,6 +7,7 @@ mod config;
 mod correlation;
 mod encoder;
 mod latest;
+mod media_cleanup;
 mod monochrome;
 mod pipeline;
 mod recovery;

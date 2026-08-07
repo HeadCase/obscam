@@ -224,6 +224,35 @@ async fn clock_contract_uses_the_runtime_schema() {
 }
 
 #[tokio::test]
+async fn browser_can_relay_validated_whep_session_cleanup() {
+    let address = spawn_service().await;
+    let session_id = Uuid::from_u128(42);
+    let request = serde_json::json!({
+        "schemaVersion": 1,
+        "sessionId": session_id,
+    });
+
+    let (head, body) =
+        request_json(address, "POST", "/api/v1/media/session-cleanups", &request).await;
+
+    assert!(head.starts_with("HTTP/1.1 202 Accepted"), "{head}");
+    assert!(body.is_empty());
+}
+
+#[tokio::test]
+async fn whep_session_cleanup_rejects_untrusted_identifiers() {
+    let address = spawn_service().await;
+    for request in [
+        serde_json::json!({ "schemaVersion": 2, "sessionId": Uuid::from_u128(42) }),
+        serde_json::json!({ "schemaVersion": 1, "sessionId": "../../metrics" }),
+    ] {
+        let (head, _) =
+            request_json(address, "POST", "/api/v1/media/session-cleanups", &request).await;
+        assert!(head.starts_with("HTTP/1.1 400 Bad Request"), "{head}");
+    }
+}
+
+#[tokio::test]
 async fn production_assets_expose_the_complete_unavailable_viewer_shell() {
     let address = spawn_service().await;
 
@@ -261,6 +290,7 @@ async fn production_assets_expose_the_complete_unavailable_viewer_shell() {
     );
     assert!(script.contains("/api/v1/runtime"));
     assert!(script.contains("/api/v1/service-quality/summary"));
+    assert!(script.contains("/api/v1/media/session-cleanups"));
     assert!(script.contains("RTCPeerConnection"));
     assert!(!script.contains(" from \"./"));
 

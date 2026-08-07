@@ -186,12 +186,13 @@ async function boot(): Promise<void> {
         session.attach(video);
         mediaAttemptCancellation = null;
         mediaSession = session;
-        if (previous !== null) void previous.close();
+        const previousCleanup = previous?.close();
         mediaReconnect.connected(connectionGeneration);
         dispatch({ type: "media_connected", connectionGeneration });
         stopPresentedFrames = watchPresentedFrames(video, (metadata) => {
           presentedFrame(connectionGeneration, metadata);
         });
+        await previousCleanup;
       } catch (error: unknown) {
         if (
           connectionGeneration === mediaReconnect.connectionGeneration &&
@@ -368,10 +369,20 @@ async function boot(): Promise<void> {
     });
 
     document.addEventListener("visibilitychange", () => {
-      const foreground = document.visibilityState === "visible" && viewer.visibility === "hidden";
+      const visible = document.visibilityState === "visible";
+      const foreground = visible && viewer.visibility === "hidden";
+      if (!visible) {
+        mediaAttemptCancellation?.abort();
+        mediaAttemptCancellation = null;
+        stopPresentedFrames?.();
+        stopPresentedFrames = null;
+        const hiddenSession = mediaSession;
+        mediaSession = null;
+        void hiddenSession?.close();
+      }
       dispatch({
         type: "visibility",
-        visibility: document.visibilityState === "visible" ? "visible" : "hidden"
+        visibility: visible ? "visible" : "hidden"
       });
       if (foreground && viewer.control.connection === "disconnected") control.retryNow();
     });

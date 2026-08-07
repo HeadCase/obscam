@@ -53,17 +53,16 @@ test("hung WHEP negotiation is bounded and retries", async ({ page }) => {
 
 test("hung cleanup after a partial WHEP session cannot block retry", async ({ page }) => {
   let attempts = 0;
+  await page.route("**/api/v1/media/session-cleanups", async (route) => {
+    await page.waitForTimeout(12_000);
+    try {
+      await route.abort("timedout");
+    } catch {
+      // The caller stops waiting after two seconds while cleanup remains best-effort.
+    }
+  });
   await page.route("**/obscam/whep**", async (route) => {
     const request = route.request();
-    if (request.method() === "DELETE" && request.url().includes("failed-session")) {
-      await page.waitForTimeout(12_000);
-      try {
-        await route.abort("timedout");
-      } catch {
-        // Best-effort cleanup is independently cancelled after two seconds.
-      }
-      return;
-    }
     if (request.method() === "POST") {
       attempts += 1;
       if (attempts === 1) {
@@ -82,6 +81,34 @@ test("hung cleanup after a partial WHEP session cannot block retry", async ({ pa
   await openLiveViewer(page);
 
   expect(attempts).toBeGreaterThanOrEqual(2);
+});
+
+test("navigation relays cleanup for the active WHEP session", async ({ page }) => {
+  const established = page.waitForResponse((response) =>
+    response.request().method() === "POST" && response.url().endsWith("/obscam/whep")
+  );
+  await openLiveViewer(page);
+  const response = await established;
+  const location = response.headers().location;
+  expect(location).toBeDefined();
+  const sessionUrl = new URL(location ?? "", response.url());
+  const sessionId = sessionUrl.pathname.split("/").at(-1);
+  expect(sessionId).toBeDefined();
+  await page.evaluate(() => {
+    localStorage.removeItem("obscam.test.sessionCleanup");
+    const originalFetch = window.fetch.bind(window);
+    window.fetch = (input, init) => {
+      if (String(input).endsWith("/api/v1/media/session-cleanups")) {
+        localStorage.setItem("obscam.test.sessionCleanup", String(init?.body));
+      }
+      return originalFetch(input, init);
+    };
+  });
+
+  await page.goto("/assets/styles.css");
+
+  expect(await page.evaluate(() => localStorage.getItem("obscam.test.sessionCleanup")))
+    .toBe(JSON.stringify({ schemaVersion: 1, sessionId }));
 });
 
 test("repeated media failures preserve control authority until video recovers", async ({ page }) => {
