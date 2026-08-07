@@ -264,11 +264,20 @@ async fn production_assets_expose_the_complete_unavailable_viewer_shell() {
     assert!(html.contains("data-viewer-retained-frame"));
     assert!(html.contains("data-service-status"));
     assert!(!html.contains("data-service-detail"));
+    assert!(html.contains("data-viewer-unavailable aria-hidden=\"true\""));
+    assert!(
+        html.contains("command-bar__status\" tabindex=\"0\" role=\"status\" aria-live=\"polite\"")
+    );
     assert!(html.contains("data-control=\"take-control\""));
     assert!(html.contains("data-control-status"));
     assert!(html.contains("data-control=\"snapshot\""));
     assert!(html.contains("data-control=\"treatment-monochrome\""));
     assert!(html.contains("data-control=\"treatment-colour\""));
+    assert_eq!(
+        html.matches("aria-describedby=\"setting-semantics-treatment\"")
+            .count(),
+        2
+    );
     for exposure in [
         "30 s", "20 s", "15 s", "10 s", "5 s", "2 s", "1 s", "500 ms", "300 ms", "200 ms",
         "100 ms", "50 ms",

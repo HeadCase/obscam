@@ -1,6 +1,7 @@
 import { deriveWhepUrl, parseRuntimeContract } from "./model.js";
 import {
   ControlClient,
+  EXPOSURE_CHOICES_MS,
   readStoredCredentials,
   type CameraSettings,
   type ControlEvent,
@@ -40,9 +41,6 @@ const INITIAL_RETRY_MS = 250;
 const MAXIMUM_RETRY_MS = 5_000;
 const STABLE_CONNECTION_MS = 5_000;
 const QUALITY_SETTLING_MS = 1_100;
-const EXPOSURE_CHOICES_MS = [
-  50, 100, 200, 300, 500, 1_000, 2_000, 5_000, 10_000, 15_000, 20_000, 30_000
-] as const;
 const ISO_CHOICES = [0, 50, 100, 150, 200, 250, 300, 350, 400, 450, 500, 550, 600] as const;
 
 async function boot(): Promise<void> {

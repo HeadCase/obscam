@@ -1,9 +1,17 @@
 import { expect, type Page } from "@playwright/test";
 
+import { EXPOSURE_CHOICES_MS } from "../../src/control.js";
+
 export interface VisibleSettings {
   exposureMs: number;
   gain: number;
   treatment: "monochrome" | "colour";
+}
+
+export function exposureIndex(exposureMs: number): number {
+  const index = EXPOSURE_CHOICES_MS.findIndex((choice) => choice === exposureMs);
+  if (index < 0) throw new Error(`unsupported exposure ${exposureMs}`);
+  return index;
 }
 
 export async function openLiveViewer(page: Page): Promise<void> {
@@ -40,11 +48,8 @@ export async function setGain(page: Page, gain: number): Promise<void> {
 
 export async function setExposure(page: Page, exposureMs: number): Promise<void> {
   await ensureSettingsOpen(page);
-  const choices = [50, 100, 200, 300, 500, 1_000, 2_000, 5_000, 10_000, 15_000, 20_000, 30_000];
-  const index = choices.indexOf(exposureMs);
-  if (index < 0) throw new Error(`unsupported exposure ${exposureMs}`);
   const slider = page.locator("[data-exposure]");
-  await slider.fill(String(index));
+  await slider.fill(String(exposureIndex(exposureMs)));
   await expect(slider).toHaveAttribute("data-exposure-ms", String(exposureMs));
   await page.getByRole("button", { name: "Apply" }).click();
   await waitUntilVisible(page);

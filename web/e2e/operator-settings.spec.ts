@@ -1,6 +1,7 @@
 import { expect, test } from "@playwright/test";
 
 import {
+  exposureIndex,
   openLiveViewer,
   restoreAndRelease,
   setExposure,
@@ -19,9 +20,8 @@ async function setExposureWithinExactDeadline(
     performance.getEntriesByName("obscam.settings.camera-applied").length
   );
   const startedAt = await page.evaluate(() => performance.now());
-  const choices = [50, 100, 200, 300, 500, 1_000, 2_000, 5_000, 10_000, 15_000, 20_000, 30_000];
   const slider = page.locator("[data-exposure]");
-  await slider.fill(String(choices.indexOf(exposureMs)));
+  await slider.fill(String(exposureIndex(exposureMs)));
   await expect(slider).toHaveAttribute("data-exposure-ms", String(exposureMs));
   await page.getByRole("button", { name: "Apply" }).click();
   const targetGeneration = await page.waitForFunction((priorCount) => {
@@ -96,8 +96,7 @@ test("operator can discard a multi-setting draft without sending it", async ({ p
   const targetExposure = original.exposureMs === 300 ? 500 : 300;
   const targetTreatment = original.treatment === "monochrome" ? "colour" : "monochrome";
 
-  const exposureChoices = [50, 100, 200, 300, 500, 1_000, 2_000, 5_000, 10_000, 15_000, 20_000, 30_000];
-  await page.locator("[data-exposure]").fill(String(exposureChoices.indexOf(targetExposure)));
+  await page.locator("[data-exposure]").fill(String(exposureIndex(targetExposure)));
   await expect(page.locator('[data-setting-semantics="exposure"]')).toContainText(
     targetExposure >= 1_000 ? `Draft ${targetExposure / 1_000} s` : `Draft ${targetExposure} ms`
   );
@@ -122,11 +121,10 @@ test("Enter on a native settings button never submits a pre-existing draft", asy
   await openLiveViewer(page);
   await takeControl(page);
   const original = await visibleSettings(page);
-  const choices = [50, 100, 200, 300, 500, 1_000, 2_000, 5_000, 10_000, 15_000, 20_000, 30_000];
   const targetExposure = original.exposureMs === 300 ? 500 : 300;
   const targetTreatment = original.treatment === "monochrome" ? "colour" : "monochrome";
 
-  await page.locator("[data-exposure]").fill(String(choices.indexOf(targetExposure)));
+  await page.locator("[data-exposure]").fill(String(exposureIndex(targetExposure)));
   await page.locator(`[data-control="treatment-${targetTreatment}"]`).focus();
   await page.keyboard.press("Enter");
   expect(sentSettings).toEqual([]);
@@ -138,10 +136,9 @@ test("hiding and reopening settings preserves an unapplied draft", async ({ page
   await openLiveViewer(page);
   await takeControl(page);
   const original = await visibleSettings(page);
-  const choices = [50, 100, 200, 300, 500, 1_000, 2_000, 5_000, 10_000, 15_000, 20_000, 30_000];
   const target = original.exposureMs === 300 ? 500 : 300;
 
-  await page.locator("[data-exposure]").fill(String(choices.indexOf(target)));
+  await page.locator("[data-exposure]").fill(String(exposureIndex(target)));
   await page.getByRole("button", { name: "Settings" }).click();
   await expect(page.locator("[data-settings-popover]")).toBeHidden();
   await expect(page.getByRole("button", { name: "Settings" })).toHaveClass(/has-draft/u);

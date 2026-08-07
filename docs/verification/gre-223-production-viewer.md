@@ -27,6 +27,12 @@ bar uses two explicit rows. Status, requested settings, Settings, Snapshot, and
 Take control had no pairwise overlap at 430 x 932, 932 x 430, 756 x 490, or
 1512 x 982, and every viewport retained exact document-width containment.
 
+The removal of status subtext and synthetic `Applying` progress are approved
+operator corrections to the earlier GRE-231 prose. Setting phase descriptions
+remain associated with their controls for assistive technology, but are visually
+hidden and are not independent live regions. This prevents protocol narration
+from adding rows to the panel or generating three competing announcements.
+
 ## Exposure rail
 
 The deployed 5 s to 1 s reproduction originally caught deterministic rewinds,
@@ -73,3 +79,33 @@ The checked-in browser suite was typechecked, and the changed visual, pointer,
 keyboard, reduced-motion, rail, snapshot, authority, and viewport paths were
 exercised directly because the Mac MCP host does not expose a repository
 checkout from which to invoke the suite runner.
+
+## Integrated performance acceptance
+
+Verified on 2026-08-07 with the integrated GRE-223 viewer at the approved fixed
+1.5 Mbit/s encoder target and the 50 ms exposure floor:
+
+- one viewer delivered approximately 1.52 Mbit/s of ObsCam media;
+- two viewers delivered approximately 3.07 Mbit/s of ObsCam media in aggregate;
+- four colour viewers delivered approximately 6.18 Mbit/s of ObsCam media and
+  approximately 7.58 Mbit/s total on `wg0` (about 0.95 MiB/s, including
+  non-media traffic);
+- all four viewers reported `Live`, advanced decoded video time, and retained an
+  identical 736 px command-bar width;
+- monochrome and colour were both exercised at 50 ms / ISO 600;
+- ten rapid connect-and-navigate cycles created ten distinct WHEP sessions and
+  returned MediaMTX to zero readers after each normal browser departure.
+
+The media session used MediaMTX's approved `192.168.1.200:8189` candidate while
+the browser page used `10.44.0.1`; packet capture confirmed the remote browser as
+`10.44.0.2`, so this traffic still traversed the approved WireGuard route. Only
+`wg0` and the MediaMTX port were scoped. The protected `wg1` interface was not
+inspected.
+
+These measurements reproduce linear per-viewer bandwidth rather than the earlier
+approximately 4 MiB/s saturation with one or two clients. The principal multiplier
+was departed or replaced WHEP sessions remaining alive, not exposure-dependent
+bitrate selection. Normal navigation, reload, visibility replacement, and live
+reconnect now send a same-origin keepalive cleanup request; MediaMTX timeout remains
+the fallback for abrupt browser-process death, where page lifecycle handlers cannot
+run.

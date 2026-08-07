@@ -477,14 +477,15 @@ input:disabled {
 }
 
 .setting-semantics {
-  min-height: 0;
-  color: #a9b1d6;
-  font-size: 0.68rem;
-  text-align: right;
-}
-
-.setting-semantics:empty {
-  display: none;
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
 }
 
 .settings-footer {

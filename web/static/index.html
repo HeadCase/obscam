@@ -15,7 +15,7 @@
         <video class="viewer__video" data-viewer-video autoplay muted playsinline></video>
         <canvas class="viewer__retained-frame" data-viewer-retained-frame hidden></canvas>
         <div class="viewer__edge-cue" aria-hidden="true"></div>
-        <div class="viewer__message" data-viewer-unavailable role="status" aria-live="polite">
+        <div class="viewer__message" data-viewer-unavailable aria-hidden="true">
           <span data-viewer-status>Unavailable</span>
           <span data-viewer-detail>Camera unavailable</span>
         </div>
@@ -62,11 +62,11 @@
               </span>
               <i class="detented-slider__visible" data-setting-marker="visible" aria-hidden="true"></i>
               <i class="detented-slider__requested" data-setting-marker="requested" aria-hidden="true" hidden></i>
-              <input class="detent-slider" data-exposure type="range" min="0" max="11" step="1" value="4" disabled>
+              <input class="detent-slider" data-exposure type="range" min="0" max="11" step="1" value="4" aria-describedby="setting-semantics-exposure" disabled>
             </span>
             <output data-exposure-output>500 ms</output>
           </label>
-          <div class="setting-semantics" data-setting-semantics="exposure" aria-live="polite"></div>
+          <div class="setting-semantics" id="setting-semantics-exposure" data-setting-semantics="exposure"></div>
 
           <label class="setting-row">
             <span>ISO</span>
@@ -77,21 +77,21 @@
               </span>
               <i class="detented-slider__visible" data-setting-marker="visible" aria-hidden="true"></i>
               <i class="detented-slider__requested" data-setting-marker="requested" aria-hidden="true" hidden></i>
-              <input class="detent-slider" data-gain type="range" min="0" max="12" step="1" value="2" disabled>
+              <input class="detent-slider" data-gain type="range" min="0" max="12" step="1" value="2" aria-describedby="setting-semantics-gain" disabled>
             </span>
             <output data-gain-output>100</output>
           </label>
-          <div class="setting-semantics" data-setting-semantics="gain" aria-live="polite"></div>
+          <div class="setting-semantics" id="setting-semantics-gain" data-setting-semantics="gain"></div>
 
           <div class="settings-footer">
             <div class="treatment" data-setting-slider="treatment" aria-label="Treatment">
-              <button data-control="treatment-monochrome" type="button" disabled>B&amp;W</button>
-              <button data-control="treatment-colour" type="button" disabled>Colour</button>
+              <button data-control="treatment-monochrome" type="button" aria-describedby="setting-semantics-treatment" disabled>B&amp;W</button>
+              <button data-control="treatment-colour" type="button" aria-describedby="setting-semantics-treatment" disabled>Colour</button>
             </div>
             <button data-control="discard-settings" type="button" disabled>Discard</button>
             <button data-control="apply-settings" type="button" disabled>Apply</button>
           </div>
-          <div class="setting-semantics" data-setting-semantics="treatment" aria-live="polite"></div>
+          <div class="setting-semantics" id="setting-semantics-treatment" data-setting-semantics="treatment"></div>
         </section>
       </div>
 
