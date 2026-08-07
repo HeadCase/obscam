@@ -5,7 +5,7 @@
   "scripts": {
     "build": "tsc && node web/scripts/build-assets.mjs",
     "prototype:gre-231": "python3 -m http.server 4173 -d web/prototypes/gre-231",
-    "test": "npm run build && node --test web/tests/*.test.mjs",
+    "test": "npm run build && node --test --test-concurrency=1 web/tests/*.test.mjs",
     "test:browser": "npm run typecheck:browser && playwright test",
     "typecheck": "tsc --noEmit",
     "typecheck:browser": "tsc -p tsconfig.playwright.json --noEmit"

@@ -63,7 +63,7 @@ async fn viewers_take_preempt_reject_stale_credentials_and_resume_same_tab() {
             "type": "set_settings",
             "generation": first_generation,
             "secret": first_secret,
-            "settings": { "exposureMs": 20, "gain": 100, "treatment": "monochrome" }
+            "settings": { "exposureMs": 50, "gain": 100, "treatment": "monochrome" }
         }),
     )
     .await;
@@ -112,7 +112,7 @@ async fn complete_tuple_is_accepted_then_applied_and_invalid_detents_are_rejecte
             "type": "set_settings",
             "generation": grant["generation"],
             "secret": grant["secret"],
-            "settings": { "exposureMs": 20, "gain": 350, "treatment": "colour" }
+            "settings": { "exposureMs": 50, "gain": 350, "treatment": "colour" }
         }),
     )
     .await;

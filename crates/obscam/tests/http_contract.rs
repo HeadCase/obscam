@@ -224,6 +224,35 @@ async fn clock_contract_uses_the_runtime_schema() {
 }
 
 #[tokio::test]
+async fn browser_can_relay_validated_whep_session_cleanup() {
+    let address = spawn_service().await;
+    let session_id = Uuid::from_u128(42);
+    let request = serde_json::json!({
+        "schemaVersion": 1,
+        "sessionId": session_id,
+    });
+
+    let (head, body) =
+        request_json(address, "POST", "/api/v1/media/session-cleanups", &request).await;
+
+    assert!(head.starts_with("HTTP/1.1 202 Accepted"), "{head}");
+    assert!(body.is_empty());
+}
+
+#[tokio::test]
+async fn whep_session_cleanup_rejects_untrusted_identifiers() {
+    let address = spawn_service().await;
+    for request in [
+        serde_json::json!({ "schemaVersion": 2, "sessionId": Uuid::from_u128(42) }),
+        serde_json::json!({ "schemaVersion": 1, "sessionId": "../../metrics" }),
+    ] {
+        let (head, _) =
+            request_json(address, "POST", "/api/v1/media/session-cleanups", &request).await;
+        assert!(head.starts_with("HTTP/1.1 400 Bad Request"), "{head}");
+    }
+}
+
+#[tokio::test]
 async fn production_assets_expose_the_complete_unavailable_viewer_shell() {
     let address = spawn_service().await;
 
@@ -234,12 +263,21 @@ async fn production_assets_expose_the_complete_unavailable_viewer_shell() {
     assert!(html.contains("data-viewer-video"));
     assert!(html.contains("data-viewer-retained-frame"));
     assert!(html.contains("data-service-status"));
-    assert!(html.contains("data-service-detail"));
+    assert!(!html.contains("data-service-detail"));
+    assert!(html.contains("data-viewer-unavailable aria-hidden=\"true\""));
+    assert!(
+        html.contains("command-bar__status\" tabindex=\"0\" role=\"status\" aria-live=\"polite\"")
+    );
     assert!(html.contains("data-control=\"take-control\""));
     assert!(html.contains("data-control-status"));
     assert!(html.contains("data-control=\"snapshot\""));
     assert!(html.contains("data-control=\"treatment-monochrome\""));
     assert!(html.contains("data-control=\"treatment-colour\""));
+    assert_eq!(
+        html.matches("aria-describedby=\"setting-semantics-treatment\"")
+            .count(),
+        2
+    );
     for exposure in [
         "30 s", "20 s", "15 s", "10 s", "5 s", "2 s", "1 s", "500 ms", "300 ms", "200 ms",
         "100 ms", "50 ms",
@@ -261,6 +299,7 @@ async fn production_assets_expose_the_complete_unavailable_viewer_shell() {
     );
     assert!(script.contains("/api/v1/runtime"));
     assert!(script.contains("/api/v1/service-quality/summary"));
+    assert!(script.contains("/api/v1/media/session-cleanups"));
     assert!(script.contains("RTCPeerConnection"));
     assert!(!script.contains(" from \"./"));
 

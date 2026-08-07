@@ -140,6 +140,16 @@ impl RuntimeState {
             .clone()
     }
 
+    pub(crate) fn whep_path(&self) -> String {
+        self.snapshot
+            .read()
+            .expect("runtime state lock poisoned")
+            .media
+            .whep_path
+            .as_str()
+            .to_owned()
+    }
+
     pub(crate) fn set_capture_readiness(&self, readiness: ComponentReadiness) {
         if readiness == ComponentReadiness::Unavailable {
             self.authority.revoke();

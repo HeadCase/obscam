@@ -971,14 +971,21 @@ mod tests {
     }
 
     #[test]
-    fn rtp_input_socket_has_capacity_for_bursty_full_resolution_frames() {
+    fn rtp_input_socket_requests_capacity_for_bursty_full_resolution_frames() {
+        let default_socket = UdpSocket::bind("127.0.0.1:0").expect("bind default UDP socket");
+        let default_capacity = socket2::SockRef::from(&default_socket)
+            .recv_buffer_size()
+            .expect("read default UDP receive buffer");
         let socket = bound_rtp_socket("127.0.0.1:0").expect("bind RTP input socket");
+        let configured_capacity = socket2::SockRef::from(&socket)
+            .recv_buffer_size()
+            .expect("read RTP receive buffer");
 
         assert!(
-            socket2::SockRef::from(&socket)
-                .recv_buffer_size()
-                .expect("read RTP receive buffer")
-                >= RTP_RECEIVE_BUFFER_BYTES
+            configured_capacity >= RTP_RECEIVE_BUFFER_BYTES
+                || configured_capacity > default_capacity,
+            "kernel neither granted the {RTP_RECEIVE_BUFFER_BYTES}-byte RTP target nor increased \
+             the default receive buffer ({default_capacity} -> {configured_capacity})"
         );
     }
 

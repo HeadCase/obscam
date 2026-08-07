@@ -22,6 +22,7 @@ use crate::{
     AuthorityCredentials, AuthorityGate, AuthorityRejection, AuthoritySnapshot, CameraSettings,
     CorrelationMapping, SettingsController, SettingsFailure, SettingsSnapshot, Treatment, assets,
     authority::LEASE_DURATION_MS,
+    media_cleanup,
     runtime::{
         CaptureProgress, Components, LifecycleSnapshot, RecoveryComponent, RuntimeState,
         SCHEMA_VERSION,
@@ -62,8 +63,33 @@ fn router(state: RuntimeState) -> Router {
             "/api/v1/service-quality/connections",
             post(begin_media_connection),
         )
+        .route(
+            "/api/v1/media/session-cleanups",
+            post(cleanup_media_session),
+        )
         .route("/api/v1/control", get(control))
         .with_state(state)
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct MediaSessionCleanupRequest {
+    schema_version: u8,
+    session_id: String,
+}
+
+async fn cleanup_media_session(
+    State(state): State<RuntimeState>,
+    Json(request): Json<MediaSessionCleanupRequest>,
+) -> StatusCode {
+    if request.schema_version != SCHEMA_VERSION {
+        return StatusCode::BAD_REQUEST;
+    }
+    let Ok(session_id) = Uuid::parse_str(&request.session_id) else {
+        return StatusCode::BAD_REQUEST;
+    };
+    media_cleanup::spawn(state.whep_path(), session_id);
+    StatusCode::ACCEPTED
 }
 
 async fn control(ws: WebSocketUpgrade, State(state): State<RuntimeState>) -> Response {

@@ -68,6 +68,7 @@ export async function startWhep(
     };
     peer.addEventListener("connectionstatechange", connectionFailed);
     connectionFailed();
+    let cleanup: Promise<void> | null = null;
 
     return {
       attach(video: HTMLVideoElement): void {
@@ -75,17 +76,19 @@ export async function startWhep(
         video.srcObject = negotiatedStream;
       },
       close(): Promise<void> {
-        closed = true;
-        peer.close();
-        cleanupSession(createdSessionUrl);
-        return Promise.resolve();
+        if (!closed) {
+          closed = true;
+          peer.close();
+          cleanup = cleanupSession(createdSessionUrl);
+        }
+        return cleanup ?? Promise.resolve();
       }
     };
   } catch (error: unknown) {
     negotiation.abort(error);
     peer.close();
     if (sessionUrl !== null) {
-      cleanupSession(sessionUrl);
+      void cleanupSession(sessionUrl);
     }
     throw error;
   } finally {
@@ -113,14 +116,26 @@ function raceWithAbort<T>(operation: Promise<T>, signal: AbortSignal): Promise<T
   });
 }
 
-function cleanupSession(sessionUrl: string): void {
-  const cleanup = new AbortController();
-  const timer = window.setTimeout(() => cleanup.abort(), 2_000);
-  void fetch(sessionUrl, { method: "DELETE", signal: cleanup.signal })
-    .catch(() => {
-      // Remote cleanup is best-effort and never blocks local recovery.
+function cleanupSession(sessionUrl: string): Promise<void> {
+  const sessionId = new URL(sessionUrl).pathname.split("/").at(-1);
+  if (sessionId === undefined || sessionId.length === 0) return Promise.resolve();
+  const cleanupUrl = new URL("/api/v1/media/session-cleanups", window.location.href).toString();
+  return new Promise<void>((resolve) => {
+    const timer = window.setTimeout(resolve, 2_000);
+    void fetch(cleanupUrl, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ schemaVersion: 1, sessionId }),
+      keepalive: true
     })
-    .finally(() => window.clearTimeout(timer));
+      .catch(() => {
+        // Remote cleanup is best-effort and continues independently of recovery.
+      })
+      .finally(() => {
+        window.clearTimeout(timer);
+        resolve();
+      });
+  });
 }
 
 async function waitForIceGathering(

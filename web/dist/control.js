@@ -6,9 +6,10 @@ const RENEWAL_INTERVAL_MS = 2_000;
 const INITIAL_RECONNECT_DELAY_MS = 250;
 const MAXIMUM_RECONNECT_DELAY_MS = 5_000;
 const STABLE_CONNECTION_MS = 5_000;
-const EXPOSURE_CHOICES_MS = new Set([
+export const EXPOSURE_CHOICES_MS = [
     50, 100, 200, 300, 500, 1_000, 2_000, 5_000, 10_000, 15_000, 20_000, 30_000
-]);
+];
+const VALID_EXPOSURE_MS = new Set(EXPOSURE_CHOICES_MS);
 export function initialControlState(stored, runtimeEpoch = stored?.runtimeEpoch ?? "") {
     const credentials = stored !== null && stored.runtimeEpoch === runtimeEpoch && validCredentials(stored)
         ? stored
@@ -661,7 +662,7 @@ function parseVersionedSettings(value, zeroAllowed) {
 function parseCameraSettings(value) {
     if (!isRecord(value) ||
         typeof value.exposureMs !== "number" ||
-        !EXPOSURE_CHOICES_MS.has(value.exposureMs) ||
+        !VALID_EXPOSURE_MS.has(value.exposureMs) ||
         typeof value.gain !== "number" ||
         !Number.isInteger(value.gain) ||
         value.gain < 0 ||

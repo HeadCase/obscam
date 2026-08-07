@@ -455,6 +455,10 @@ impl CameraOwner {
                 operation: "apply live settings while stopped",
             });
         }
+        // The coordinator interrupted the exposure active when this target was
+        // accepted. Applying the target consumes that request; a newer target
+        // arriving concurrently sets the flag again for the next boundary.
+        self.interrupted.store(false, Ordering::Release);
         check(
             "set live exposure",
             ffi::set_control(self.id, CONTROL_EXPOSURE, settings.exposure_us),
@@ -1103,6 +1107,28 @@ mod tests {
         assert_eq!(
             owner.capture_next(20).err(),
             Some(CaptureError::InvalidDropCount { count: -1 })
+        );
+    }
+
+    #[test]
+    fn live_settings_consume_the_interrupt_for_the_abandoned_exposure() {
+        let _guard = SDK.lock().unwrap();
+        stub::reset();
+        target();
+        let mut owner = CameraOwner::connect().unwrap();
+        owner
+            .configure(Settings::new(500_000, 100).unwrap())
+            .unwrap();
+        owner.start().unwrap();
+
+        owner.interrupter().interrupt();
+        owner
+            .apply_live_settings(Settings::new(50_000, 200).unwrap())
+            .unwrap();
+
+        assert_eq!(
+            owner.capture_next(20).map(|frame| frame.generation()),
+            Ok(1)
         );
     }
 }

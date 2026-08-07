@@ -3,61 +3,99 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+    <meta name="theme-color" content="#15161e">
     <meta name="color-scheme" content="dark">
     <title>ObsCam</title>
-    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='14' fill='%23181b1f' stroke='%23aeb7c0'/%3E%3Ccircle cx='16' cy='16' r='5' fill='%23aeb7c0'/%3E%3C/svg%3E">
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='14' fill='%2315161e' stroke='%237aa2f7'/%3E%3Ccircle cx='16' cy='16' r='5' fill='%237aa2f7'/%3E%3C/svg%3E">
     <link rel="stylesheet" href="/assets/styles.css">
   </head>
   <body>
-    <main class="viewer" aria-label="ObsCam observatory viewer">
-      <section class="viewer__frame" data-viewer-frame aria-label="Camera frame">
+    <main class="viewer" data-viewer aria-label="ObsCam observatory viewer">
+      <section class="viewer__frame" data-viewer-frame data-feed-state="unavailable" aria-label="Camera feed">
         <video class="viewer__video" data-viewer-video autoplay muted playsinline></video>
         <canvas class="viewer__retained-frame" data-viewer-retained-frame hidden></canvas>
-        <div class="viewer__unavailable" data-viewer-unavailable role="status" aria-live="polite">
-          <span class="viewer__status" data-viewer-status>Unavailable</span>
-          <span class="viewer__detail" data-viewer-detail>Capture · Encoder · Relay unavailable</span>
+        <div class="viewer__edge-cue" aria-hidden="true"></div>
+        <div class="viewer__message" data-viewer-unavailable aria-hidden="true">
+          <span data-viewer-status>Unavailable</span>
+          <span data-viewer-detail>Camera unavailable</span>
+        </div>
+        <div class="exposure-rail" data-exposure-rail hidden aria-hidden="true">
+          <span data-exposure-rail-fill></span>
         </div>
       </section>
 
-      <section class="status-bar" aria-label="Service status">
-        <span class="status-bar__mark" aria-hidden="true"></span>
-        <span data-service-status>Unavailable</span>
-        <span class="status-bar__truth" data-service-detail>No trustworthy frame</span>
-        <span class="status-bar__quality" data-service-quality>No quality samples</span>
-        <button class="status-bar__download" data-service-quality-download type="button" disabled>Quality JSON</button>
-      </section>
+      <div class="command-wrap" data-chrome>
+        <section class="command-bar" data-command-bar aria-label="Camera status and controls">
+          <div class="command-bar__status" tabindex="0" role="status" aria-live="polite">
+            <span class="command-bar__mark" data-state-mark aria-hidden="true"></span>
+            <span data-service-status data-control-status>Unavailable</span>
+          </div>
 
-      <section class="control-tray" aria-label="Camera controls">
-        <div class="control-tray__heading">
-          <span>Exposure</span>
-          <span data-control-status aria-live="polite">Control reconnecting</span>
-          <button class="take-control" data-control="take-control" type="button" disabled>Take control</button>
-        </div>
-        <div class="exposure-grid" aria-label="Exposure choices">
-          <button data-exposure-ms="30000" type="button" disabled>30 s</button><button data-exposure-ms="20000" type="button" disabled>20 s</button>
-          <button data-exposure-ms="15000" type="button" disabled>15 s</button><button data-exposure-ms="10000" type="button" disabled>10 s</button>
-          <button data-exposure-ms="5000" type="button" disabled>5 s</button><button data-exposure-ms="2000" type="button" disabled>2 s</button>
-          <button data-exposure-ms="1000" type="button" disabled>1 s</button><button data-exposure-ms="500" type="button" disabled>500 ms</button>
-          <button data-exposure-ms="300" type="button" disabled>300 ms</button><button data-exposure-ms="200" type="button" disabled>200 ms</button>
-          <button data-exposure-ms="100" type="button" disabled>100 ms</button><button data-exposure-ms="50" type="button" disabled>50 ms</button>
-        </div>
-        <div class="setting-evidence" data-setting-evidence="exposure" aria-label="Exposure state"></div>
-        <label class="gain-control">
-          <span>ISO <output data-gain-output>100</output></span>
-          <input data-gain type="range" min="0" max="600" step="50" value="100" disabled>
-        </label>
-        <div class="setting-evidence" data-setting-evidence="gain" aria-label="ISO state"></div>
-        <div class="control-actions">
-          <button data-control="treatment-monochrome" type="button" disabled>B&amp;W</button>
-          <button data-control="treatment-colour" type="button" disabled>Colour</button>
-          <button data-control="snapshot" type="button" disabled>Snapshot</button>
-        </div>
-        <div class="setting-evidence" data-setting-evidence="treatment" aria-label="Treatment state"></div>
-        <div class="draft-actions" aria-label="Draft camera settings">
-          <button data-control="discard-settings" type="button" disabled>Discard</button>
-          <button data-control="apply-settings" type="button" disabled>Apply</button>
-        </div>
-      </section>
+          <div class="settings-readout" data-settings-readout tabindex="0" aria-label="Requested camera settings">
+            <span data-readout-exposure>500 ms</span>
+            <span data-readout-gain>ISO 100</span>
+            <span data-readout-treatment>B&amp;W</span>
+          </div>
+
+          <button class="command-button" data-control="settings" type="button" disabled>Settings</button>
+          <button class="command-button" data-control="snapshot" type="button" disabled>Snapshot</button>
+          <button class="command-button command-button--authority" data-control="take-control" type="button" disabled>Take control</button>
+        </section>
+
+        <section class="settings-popover" data-settings-popover aria-label="Camera settings" hidden>
+          <label class="setting-row">
+            <span>Exposure</span>
+            <span class="detented-slider" data-setting-slider="exposure">
+              <span class="slider-ticks" aria-hidden="true">
+                <i data-exposure-ms="50" data-label="50 ms"></i>
+                <i data-exposure-ms="100" data-label="100 ms"></i>
+                <i data-exposure-ms="200" data-label="200 ms"></i>
+                <i data-exposure-ms="300" data-label="300 ms"></i>
+                <i data-exposure-ms="500" data-label="500 ms"></i>
+                <i data-exposure-ms="1000" data-label="1 s"></i>
+                <i data-exposure-ms="2000" data-label="2 s"></i>
+                <i data-exposure-ms="5000" data-label="5 s"></i>
+                <i data-exposure-ms="10000" data-label="10 s"></i>
+                <i data-exposure-ms="15000" data-label="15 s"></i>
+                <i data-exposure-ms="20000" data-label="20 s"></i>
+                <i data-exposure-ms="30000" data-label="30 s"></i>
+              </span>
+              <i class="detented-slider__visible" data-setting-marker="visible" aria-hidden="true"></i>
+              <i class="detented-slider__requested" data-setting-marker="requested" aria-hidden="true" hidden></i>
+              <input class="detent-slider" data-exposure type="range" min="0" max="11" step="1" value="4" aria-describedby="setting-semantics-exposure" disabled>
+            </span>
+            <output data-exposure-output>500 ms</output>
+          </label>
+          <div class="setting-semantics" id="setting-semantics-exposure" data-setting-semantics="exposure"></div>
+
+          <label class="setting-row">
+            <span>ISO</span>
+            <span class="detented-slider" data-setting-slider="gain">
+              <span class="slider-ticks" aria-hidden="true">
+                <i></i><i></i><i></i><i></i><i></i><i></i><i></i>
+                <i></i><i></i><i></i><i></i><i></i><i></i>
+              </span>
+              <i class="detented-slider__visible" data-setting-marker="visible" aria-hidden="true"></i>
+              <i class="detented-slider__requested" data-setting-marker="requested" aria-hidden="true" hidden></i>
+              <input class="detent-slider" data-gain type="range" min="0" max="12" step="1" value="2" aria-describedby="setting-semantics-gain" disabled>
+            </span>
+            <output data-gain-output>100</output>
+          </label>
+          <div class="setting-semantics" id="setting-semantics-gain" data-setting-semantics="gain"></div>
+
+          <div class="settings-footer">
+            <div class="treatment" data-setting-slider="treatment" aria-label="Treatment">
+              <button data-control="treatment-monochrome" type="button" aria-describedby="setting-semantics-treatment" disabled>B&amp;W</button>
+              <button data-control="treatment-colour" type="button" aria-describedby="setting-semantics-treatment" disabled>Colour</button>
+            </div>
+            <button data-control="discard-settings" type="button" disabled>Discard</button>
+            <button data-control="apply-settings" type="button" disabled>Apply</button>
+          </div>
+          <div class="setting-semantics" id="setting-semantics-treatment" data-setting-semantics="treatment"></div>
+        </section>
+      </div>
+
+      <div class="viewer__announcement" data-announcement role="status" aria-live="polite" hidden></div>
     </main>
     <script type="module" src="/assets/app.js"></script>
   </body>

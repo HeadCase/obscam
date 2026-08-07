@@ -1,6 +1,7 @@
 import { expect, test } from "@playwright/test";
 
 import {
+  exposureIndex,
   openLiveViewer,
   restoreAndRelease,
   setExposure,
@@ -19,8 +20,9 @@ async function setExposureWithinExactDeadline(
     performance.getEntriesByName("obscam.settings.camera-applied").length
   );
   const startedAt = await page.evaluate(() => performance.now());
-  const button = page.locator(`[data-exposure-ms="${exposureMs}"]`);
-  await button.click();
+  const slider = page.locator("[data-exposure]");
+  await slider.fill(String(exposureIndex(exposureMs)));
+  await expect(slider).toHaveAttribute("data-exposure-ms", String(exposureMs));
   await page.getByRole("button", { name: "Apply" }).click();
   const targetGeneration = await page.waitForFunction((priorCount) => {
     const marks = performance.getEntriesByName("obscam.settings.camera-applied") as PerformanceMark[];
@@ -94,16 +96,60 @@ test("operator can discard a multi-setting draft without sending it", async ({ p
   const targetExposure = original.exposureMs === 300 ? 500 : 300;
   const targetTreatment = original.treatment === "monochrome" ? "colour" : "monochrome";
 
-  await page.locator(`[data-exposure-ms="${targetExposure}"]`).click();
+  await page.locator("[data-exposure]").fill(String(exposureIndex(targetExposure)));
+  await expect(page.locator('[data-setting-semantics="exposure"]')).toContainText(
+    targetExposure >= 1_000 ? `Draft ${targetExposure / 1_000} s` : `Draft ${targetExposure} ms`
+  );
   await page.locator(`[data-control="treatment-${targetTreatment}"]`).click();
-  await expect(page.locator("[data-control-status]")).toHaveText("Unsaved changes");
+  await expect(page.locator('[data-setting-state="draft"]')).toHaveCount(2);
   await expect(page.getByRole("button", { name: "Apply" })).toBeEnabled();
   await page.getByRole("button", { name: "Discard" }).click();
 
   expect(await visibleSettings(page)).toEqual(original);
-  await expect(page.locator("[data-control-status]")).toHaveText("You have control");
+  await expect(page.locator('[data-setting-state]:not([data-setting-state="visible"])')).toHaveCount(0);
   expect(sentSettings).toEqual([]);
-  await page.getByRole("button", { name: "Release control" }).click();
+  await page.getByRole("button", { name: "Release", exact: true }).click();
+});
+
+test("Enter on a native settings button never submits a pre-existing draft", async ({ page }) => {
+  const sentSettings: string[] = [];
+  page.on("websocket", (socket) => socket.on("framesent", ({ payload }) => {
+    if (typeof payload === "string" && payload.includes('\"type\":\"set_settings\"')) {
+      sentSettings.push(payload);
+    }
+  }));
+  await openLiveViewer(page);
+  await takeControl(page);
+  const original = await visibleSettings(page);
+  const targetExposure = original.exposureMs === 300 ? 500 : 300;
+  const targetTreatment = original.treatment === "monochrome" ? "colour" : "monochrome";
+
+  await page.locator("[data-exposure]").fill(String(exposureIndex(targetExposure)));
+  await page.locator(`[data-control="treatment-${targetTreatment}"]`).focus();
+  await page.keyboard.press("Enter");
+  expect(sentSettings).toEqual([]);
+  await page.getByRole("button", { name: "Discard" }).click();
+  await page.getByRole("button", { name: "Release", exact: true }).click();
+});
+
+test("hiding and reopening settings preserves an unapplied draft", async ({ page }) => {
+  await openLiveViewer(page);
+  await takeControl(page);
+  const original = await visibleSettings(page);
+  const target = original.exposureMs === 300 ? 500 : 300;
+
+  await page.locator("[data-exposure]").fill(String(exposureIndex(target)));
+  await page.getByRole("button", { name: "Settings" }).click();
+  await expect(page.locator("[data-settings-popover]")).toBeHidden();
+  await expect(page.getByRole("button", { name: "Settings" })).toHaveClass(/has-draft/u);
+  await expect(page.getByRole("button", { name: "Settings" })).toHaveAttribute(
+    "aria-description",
+    "Unapplied changes"
+  );
+  await page.getByRole("button", { name: "Settings" }).click();
+  await expect(page.locator("[data-exposure]")).toHaveAttribute("data-exposure-ms", String(target));
+  await page.getByRole("button", { name: "Discard" }).click();
+  await page.getByRole("button", { name: "Release", exact: true }).click();
 });
 
 test("operator changes exposure without changing gain or treatment", async ({ page }) => {
@@ -115,6 +161,117 @@ test("operator changes exposure without changing gain or treatment", async ({ pa
   try {
     await setExposure(page, targetExposure);
     expect(await visibleSettings(page)).toEqual({ ...original, exposureMs: targetExposure });
+  } finally {
+    await restoreAndRelease(page, original);
+  }
+});
+
+test("authoritative exposure rail advances smoothly without mid-capture rewinds", async ({ page }) => {
+  await openLiveViewer(page);
+  await takeControl(page);
+  const original = await visibleSettings(page);
+
+  try {
+    await page.evaluate(() => {
+      const rail = document.querySelector<HTMLElement>("[data-exposure-rail]")!;
+      const fill = document.querySelector<HTMLElement>("[data-exposure-rail-fill]")!;
+      const samples: Array<{ hidden: boolean; applying: boolean; progress: number }> = [];
+      const record = (): void => {
+        samples.push({
+          hidden: rail.hidden,
+          applying: rail.classList.contains("is-applying"),
+          progress: Number.parseFloat(fill.style.width || "0") / 100
+        });
+      };
+      new MutationObserver(record).observe(rail, {
+        attributes: true,
+        attributeFilter: ["class", "hidden"]
+      });
+      new MutationObserver(record).observe(fill, {
+        attributes: true,
+        attributeFilter: ["style"]
+      });
+      record();
+      (window as Window & {
+        __observedRailSamples?: Array<{ hidden: boolean; applying: boolean; progress: number }>;
+      }).__observedRailSamples = samples;
+    });
+    await setExposure(page, 1_000);
+    const transitionSamples = await page.evaluate(() =>
+      (window as Window & {
+        __observedRailSamples?: Array<{ hidden: boolean; applying: boolean; progress: number }>;
+      }).__observedRailSamples ?? []
+    );
+    expect(transitionSamples.some((sample) => sample.applying)).toBe(false);
+    let prior: number | null = null;
+    for (const sample of transitionSamples) {
+      if (sample.hidden) {
+        prior = null;
+        continue;
+      }
+      if (prior !== null && sample.progress < prior - 0.02) {
+        expect(
+          prior >= 0.9 && sample.progress <= 0.1,
+          `rail rewound from ${prior} to ${sample.progress}`
+        ).toBe(true);
+      }
+      prior = sample.progress;
+    }
+    const samples = await page.evaluate(async () => {
+      const fill = document.querySelector<HTMLElement>("[data-exposure-rail-fill]")!;
+      const rail = document.querySelector<HTMLElement>("[data-exposure-rail]")!;
+      const values: number[] = [];
+      const startedAt = performance.now();
+      await new Promise<void>((resolve) => {
+        const sample = (): void => {
+          values.push(rail.hidden ? -1 : Number.parseFloat(fill.style.width || "0") / 100);
+          if (performance.now() - startedAt >= 2_600) resolve();
+          else requestAnimationFrame(sample);
+        };
+        requestAnimationFrame(sample);
+      });
+      return values;
+    });
+    const visible = samples.filter((value) => value >= 0);
+    expect(visible.length).toBeGreaterThan(100);
+    expect(new Set(visible.map((value) => value.toFixed(4))).size).toBeGreaterThan(100);
+    for (let index = 1; index < visible.length; index += 1) {
+      const prior = visible[index - 1]!;
+      const current = visible[index]!;
+      if (prior < 0.9) {
+        expect(current, `rail rewound from ${prior} to ${current}`).toBeGreaterThanOrEqual(
+          prior - 0.02
+        );
+      }
+    }
+  } finally {
+    await restoreAndRelease(page, original);
+  }
+});
+
+test("reduced motion retains rail position without continuous interpolation", async ({ page }) => {
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await openLiveViewer(page);
+  await takeControl(page);
+  const original = await visibleSettings(page);
+
+  try {
+    await setExposure(page, 1_000);
+    const widths = await page.evaluate(async () => {
+      const fill = document.querySelector<HTMLElement>("[data-exposure-rail-fill]")!;
+      const values: string[] = [];
+      const startedAt = performance.now();
+      await new Promise<void>((resolve) => {
+        const sample = (): void => {
+          values.push(fill.style.width);
+          if (performance.now() - startedAt >= 600) resolve();
+          else requestAnimationFrame(sample);
+        };
+        requestAnimationFrame(sample);
+      });
+      return values;
+    });
+    expect(new Set(widths).size).toBeLessThanOrEqual(4);
   } finally {
     await restoreAndRelease(page, original);
   }
@@ -191,29 +348,30 @@ test("operator moves from short to long exposure and back without losing the ret
 
     const video = page.locator("[data-viewer-video]");
     const startedAt = await video.evaluate((element: HTMLVideoElement) => element.currentTime);
-    const longExposure = page.locator("[data-exposure-ms=\"30000\"]");
-    await longExposure.click();
-    await expect(longExposure).toHaveAttribute("aria-pressed", "true");
+    const longExposure = page.locator("[data-exposure]");
+    await longExposure.fill("11");
+    await expect(longExposure).toHaveAttribute("data-exposure-ms", "30000");
     await page.getByRole("button", { name: "Apply" }).click();
-    await expect(page.locator("[data-service-detail]")).toContainText("Applying generation");
+    await expect(page.locator("[data-service-detail]")).toHaveCount(0);
     await page.waitForTimeout(3_000);
     await expect(page.locator("[data-viewer-status]")).toHaveText("Live");
-    await expect(page.locator("[data-service-detail]")).toContainText("Applying generation");
+    await expect(page.locator("[data-service-detail]")).toHaveCount(0);
     const retainedAt = await video.evaluate((element: HTMLVideoElement) => element.currentTime);
     expect(retainedAt - startedAt, "retained video should keep playing during a long exposure")
       .toBeGreaterThan(2);
 
     await page.evaluate(() => {
-      const container = document.querySelector('[aria-label="Exposure state"]');
+      const container = document.querySelector<HTMLElement>('[data-setting-slider="exposure"]');
       const observed = new Set<string>();
       const record = (): void => {
-        for (const marker of Array.from(
-          container?.querySelectorAll<HTMLElement>("[data-setting-state]") ?? []
-        )) {
-          if (marker.dataset.settingState !== undefined) observed.add(marker.dataset.settingState);
+        if (container?.dataset.settingState !== undefined) {
+          observed.add(container.dataset.settingState);
         }
       };
-      new MutationObserver(record).observe(container!, { childList: true, subtree: true });
+      new MutationObserver(record).observe(container!, {
+        attributes: true,
+        attributeFilter: ["data-setting-state"]
+      });
       record();
       (window as Window & { __observedSettingStates?: Set<string> }).__observedSettingStates = observed;
     });
@@ -222,7 +380,10 @@ test("operator moves from short to long exposure and back without losing the ret
       ...((window as Window & { __observedSettingStates?: Set<string> }).__observedSettingStates ?? [])
     ]);
     expect(observedStates).toEqual(expect.arrayContaining(["requested", "applied", "visible"]));
-    await expect(page.locator("[data-setting-state=\"visible\"]").first()).toBeVisible();
+    await expect(page.locator('[data-setting-slider="exposure"]')).toHaveAttribute(
+      "data-setting-state",
+      "visible"
+    );
     expect(await visibleSettings(page)).toEqual(shortSettings);
   } finally {
     await restoreAndRelease(page, original);

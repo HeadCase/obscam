@@ -67,9 +67,9 @@ interpolation while retaining current rail position and static boundary geometry
 
 ### Revealed viewer
 
-Activity reveals one compact bottom command bar. It shows feed state, frame age only
-when it helps the operator, visible exposure, ISO, treatment, Snapshot, and Take
-control. The mini-viewer target keeps this bar to one line.
+Activity reveals one compact bottom command bar. It shows the stable primary feed
+state, visible exposure, ISO, treatment, Snapshot, and Take control. The mini-viewer
+target keeps this bar to one line.
 
 The state text has a semantic companion mark: filled blue for Live, hollow blue for
 Waiting for first image, amber for Stale or Reconnecting, and red for Unavailable.
@@ -77,10 +77,11 @@ The text always carries the precise meaning; the mark supports rapid scanning an
 never remains a constant decorative colour across different states.
 
 The operator interface contains no technical diagnostics panel. It translates
-authoritative evidence into actionable language such as `Live`, `Freshness unknown`,
-`Reconnecting`, `Frame overdue`, or `Camera unavailable`. Correlation ratios,
-cadence statistics, latency percentiles, uncertainty, epochs, generations, and raw
-Quality JSON remain read-only agent diagnostics rather than user-facing metrics.
+authoritative evidence into the stable primary states `Live`, `Waiting for first
+image`, `Reconnecting`, `Stale`, and `Unavailable`. Correlation ratios, cadence
+statistics, latency percentiles, uncertainty, epochs, generations, raw Quality JSON,
+and rapidly changing reason or frame-age text remain read-only agent diagnostics
+rather than user-facing metrics.
 
 ### Controller
 
@@ -127,12 +128,12 @@ Feed state and exposure activity are independent.
 | Stale | A newer presentation is overdue or freshness cannot be proven | Retain the last trustworthy frame indefinitely | Dashed amber perimeter |
 | Unavailable | Capture or delivery is confirmed unusable and no working exposure can produce a trustworthy presentation | Retain a prior trustworthy frame if one exists; otherwise black | Muted-red double perimeter |
 
-The status strip supplies the exact reason on interaction. A normal 30-second
-exposure remains Live while the retained media keeps advancing; the exposure rail
-explains why its source image is not changing. Exact identity remains a separate
-diagnostic fact. The state
-becomes Stale only after exposure duration plus the authoritative delivery allowance
-passes without the expected presentation.
+The status strip retains stable geometry and the exact primary state on interaction.
+A normal 30-second exposure remains Live while the retained media keeps advancing;
+the exposure rail explains why its source image is not changing. Exact identity and
+transient reason text remain separate diagnostic facts. The state becomes Stale only
+after exposure duration plus the authoritative delivery allowance passes without the
+expected presentation.
 
 ## Settings interaction
 
@@ -158,9 +159,12 @@ labels the gain detents as ISO without claiming calibrated photographic ISO.
    pair `ISO 300`, so its name and number change together. Other labels, unchanged
    values, and the enclosing border do not change. The interface does not narrate
    protocol phases such as Accepted, Applied, or Visible in normal operator text.
-7. `Applying` uses an indeterminate indicator until authoritative exposure start.
-   Exposure start then switches to determinate progress. Expected completion does
-   not imply browser visibility; the presentation event alone advances `Visible`.
+7. The rail is hidden while a submitted generation has no authoritative exposure
+   start. It resumes as determinate progress from the first hardware-observed
+   capture eligible for exact settings metadata. There is no synthetic `Applying`
+   animation: it rewound at the transition to real capture and falsely implied
+   sensor progress. Expected completion does not imply browser visibility; the
+   presentation event alone advances `Visible`.
 8. Exact frame presentation moves each changed setting's blue visible position to
    its requested detent; the old marker disappears and thumb and value return to
    blue. This is the only visual claim that the new tuple has reached the screen.
@@ -170,6 +174,11 @@ labels the gain detents as ISO without claiming calibrated photographic ISO.
    blue visible position. Displacement, expiry, or reconnect similarly discards
    unsent intent and restores authoritative values. Mutations are never silently
    queued for later delivery.
+11. The command bar exposes the stable primary feed state only. Transient reason and
+    frame-age subtext is omitted because changing copy moved adjacent readouts and
+    flickered during live/exposure transitions. Detailed setting state remains
+    available as focus-associated assistive descriptions, not visible protocol rows
+    or independent live regions.
 
 ## Authority interaction
 
@@ -292,11 +301,13 @@ auto-hide.
 
 - One `main` landmark contains a labelled camera region, status region, and controls.
 - Feed state uses a polite live region; takeover, displacement, setting rejection,
-  and save failure use concise announcements.
-- Accepted, Applied, and Visible announcements are coalesced per generation so fast
-  transitions do not create screen-reader chatter.
-- Native buttons and range inputs retain platform semantics. Exposure and treatment
-  selections use `aria-pressed`; visible and requested settings have distinct names.
+  and save failure use one concise announcement channel.
+- Setting draft and visibility state is exposed through focus-associated control
+  descriptions. Accepted, Applied, and Visible are not separate live announcements,
+  preventing protocol chatter during fast transitions.
+- Native buttons and range inputs retain platform semantics. Exposure and ISO ranges
+  expose formatted `aria-valuetext`; Treatment buttons expose `aria-pressed`.
+  Visible and requested settings have distinct descriptions.
 - Focus order is feed state, settings readout, Settings, Snapshot, and Take control
   or Release.
   Popover controls follow the settings trigger and DOM order matches visual order.
