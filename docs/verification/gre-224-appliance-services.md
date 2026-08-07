@@ -5,6 +5,9 @@
 ObsCam runs as the static non-login `obscam` identity. MediaMTX retains its
 separate stateless `DynamicUser` identity inside the dedicated media namespace.
 Neither service orders itself after the other or after remote readiness.
+The boot and operator lifecycle is grouped by `obscam.target`; `PartOf=` makes
+target-level stop and restart propagate to all three appliance units without
+coupling their independent failure recovery.
 
 The exact ASI662MC USB product `03c3:662b` is `root:obscam-camera 0660`; Rust
 continues to validate exactly one model and the factory serial before opening
@@ -27,8 +30,8 @@ The unit never executes the ambient `/usr/local/bin/mediamtx` path.
 ## Automated evidence
 
 - Rust deployment-contract tests cover independent ordering, identities,
-  restart policy, logging, namespace ownership, exact device rules, hardening,
-  pin verification, and MediaMTX exposure boundaries.
+  restart policy, target membership, logging, namespace ownership, exact device
+  rules, hardening, pin verification, and MediaMTX exposure boundaries.
 - `deploy/tests/install-appliance-test` exercises a clean staged installation,
   exact idempotent reinstall, non-login identity creation, unit enablement,
   conflicting-path refusal, and pin rejection before target mutation.
@@ -104,3 +107,16 @@ The checked-in service policy therefore favors both interactive workloads with
 relative CPU/I/O weights of 200, protects them from OOM selection ahead of the
 `asiair-sync` worker, and sets generous high/max memory thresholds of
 384/512 MiB for ObsCam and 256/384 MiB for MediaMTX.
+
+The operator facade was qualified on 2026-08-08. The installer disabled the
+three direct `multi-user.target` links, enabled only `obscam.target`, and passed
+its live verification. Target stop made all three members inactive; target
+start restored capture, encoder, and relay readiness. Target restart replaced
+both long-running process IDs and again restored full health. AllSky retained
+PID 1427 with zero restarts throughout.
+
+Independent recovery remained intact beneath the target. A clean MediaMTX exit
+incremented only its restart count while the ObsCam PID remained stable; a
+clean ObsCam exit then incremented only its restart count while the MediaMTX
+PID remained stable. The target stayed active, health returned fully ready,
+and AllSky remained unchanged.

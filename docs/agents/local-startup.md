@@ -36,12 +36,13 @@ The installer:
 - creates the non-login `obscam` identity and its exact camera-access group;
 - installs both binaries under `/usr/local/libexec/obscam`;
 - installs the pinned relay configuration, namespace/firewall boundary,
-  checksum manifests, udev rules, and systemd units;
+  checksum manifests, udev rules, systemd units, and the operator-facing
+  `obscam.target`;
 - restricts ASI662MC `03c3:662b` to `root:obscam-camera 0660` while Rust retains
   the factory-serial ownership check;
 - assigns only the named `bcm2835-codec-encode` node to the `obscam` owner while
   preserving the host `video` group;
-- enables all three local units without starting remote-resource dependencies;
+- enables `obscam.target` as the single boot and operator lifecycle unit;
 - refuses unknown differing files or symlink destinations.
 
 Repeat the read-only installed contract check at any time:
@@ -49,6 +50,7 @@ Repeat the read-only installed contract check at any time:
 ```sh
 sudo deploy/install-appliance verify
 systemd-analyze verify \
+  obscam.target \
   obscam.service \
   obscam-media-network.service \
   obscam-mediamtx.service
@@ -59,14 +61,19 @@ sets, a stable active-release link, and automatic rollback.
 
 ## Start and reboot
 
-The units are enabled for `multi-user.target`; no manual ordering is required:
+`obscam.target` is enabled for `multi-user.target`; no manual ordering is
+required:
 
 ```sh
-sudo systemctl start \
-  obscam-media-network.service \
-  obscam-mediamtx.service \
-  obscam.service
+sudo systemctl start obscam.target
+sudo systemctl stop obscam.target
+sudo systemctl restart obscam.target
 ```
+
+The target is the normal operator interface. Its three members remain separate
+services, so an unexpected ObsCam or MediaMTX exit still restarts only the
+failed process. Direct per-service commands remain available for isolated
+diagnostics and recovery.
 
 At reboot, all three start from local readiness. They do not order themselves
 after `network-online.target`, WireGuard, DNS, internet access, remote mounts,
@@ -81,6 +88,7 @@ start-limit lockout. No systemd watchdog is configured.
 
 ```sh
 systemctl is-active \
+  obscam.target \
   obscam.service \
   obscam-mediamtx.service \
   obscam-media-network.service

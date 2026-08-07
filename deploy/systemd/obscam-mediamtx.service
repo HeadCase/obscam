@@ -1,6 +1,7 @@
 [Unit]
 Description=ObsCam MediaMTX WebRTC relay
 StartLimitIntervalSec=0
+PartOf=obscam.target
 Requires=obscam-media-network.service
 After=obscam-media-network.service
 

@@ -26,6 +26,10 @@ stream directly to origin-aware browser sessions. The service
 still boots its HTTP contracts truthfully when camera or media components are
 unavailable.
 
+Operators manage the complete appliance through `obscam.target`; ObsCam,
+MediaMTX, and the isolated media network remain independently supervised
+members beneath that single lifecycle unit.
+
 The embedded browser application is compiled from vanilla TypeScript. It
 matches `requestVideoFrameCallback` RTP metadata only against bounded,
 runtime/stream-epoch-scoped mappings broadcast by Rust. Missing, stale,

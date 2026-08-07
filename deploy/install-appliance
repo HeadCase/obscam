@@ -78,7 +78,8 @@ install_owned_file() {
     source=$1
     destination=$(target "$2")
     mode=$3
-    predecessor_hash=${4:-}
+    predecessor_hashes=${4:-}
+    backup_suffix=${5:-pre-gre-224}
 
     [ -f "$source" ] || fail "source file is missing: $source"
     if [ -L "$destination" ]; then
@@ -89,10 +90,17 @@ install_owned_file() {
             chmod "$mode" "$destination"
             return
         fi
-        if [ -n "$predecessor_hash" ]; then
+        if [ -n "$predecessor_hashes" ]; then
             installed_hash=$(sha256sum "$destination" | awk '{ print $1 }')
-            if [ "$installed_hash" = "$predecessor_hash" ]; then
-                backup=$destination.pre-gre-224
+            predecessor_matches=no
+            for predecessor_hash in $predecessor_hashes; do
+                if [ "$installed_hash" = "$predecessor_hash" ]; then
+                    predecessor_matches=yes
+                    break
+                fi
+            done
+            if [ "$predecessor_matches" = yes ]; then
+                backup=$destination.$backup_suffix
                 [ ! -e "$backup" ] || fail "migration backup already exists: $backup"
                 cp -p "$destination" "$backup"
             else
@@ -117,10 +125,11 @@ appliance_files() {
     "$action" "$deploy_dir/mediamtx-config.sha256" /usr/local/share/obscam/mediamtx-config.sha256 0644
     "$action" "$deploy_dir/sysusers.d/obscam.conf" /etc/sysusers.d/obscam.conf 0644
     "$action" "$deploy_dir/udev/99-z-obscam.rules" /etc/udev/rules.d/99-z-obscam.rules 0644
-    "$action" "$deploy_dir/systemd/obscam.service" /etc/systemd/system/obscam.service 0644
-    # These hashes are the only accepted GRE-218 predecessor units.
-    "$action" "$deploy_dir/systemd/obscam-media-network.service" /etc/systemd/system/obscam-media-network.service 0644 b3242f896dd6c8f2f6c3fd859a7bb05f9b55c9c16b488ec3c783bc8646fb69f1
-    "$action" "$deploy_dir/systemd/obscam-mediamtx.service" /etc/systemd/system/obscam-mediamtx.service 0644 cf3d5b5a2db2ffc6a9851f18a569af07ef8723b76d2a63b5cbb18bc8699c461d
+    "$action" "$deploy_dir/systemd/obscam.target" /etc/systemd/system/obscam.target 0644
+    "$action" "$deploy_dir/systemd/obscam.service" /etc/systemd/system/obscam.service 0644 8e7fdb0c6732f00757459a32f26b5cc532572cd9b3693ba7866809f37ce5030c pre-obscam-target
+    # Accept only the checked GRE-218 and GRE-224 predecessor definitions.
+    "$action" "$deploy_dir/systemd/obscam-media-network.service" /etc/systemd/system/obscam-media-network.service 0644 "b3242f896dd6c8f2f6c3fd859a7bb05f9b55c9c16b488ec3c783bc8646fb69f1 57af723c96be3590e0b91325c1b9f64e0543f8599f4e593030ce85170248f999" pre-obscam-target
+    "$action" "$deploy_dir/systemd/obscam-mediamtx.service" /etc/systemd/system/obscam-mediamtx.service 0644 "cf3d5b5a2db2ffc6a9851f18a569af07ef8723b76d2a63b5cbb18bc8699c461d 8f7c2c8cd7a22f2fec33de9b21b3fcd6948d3bfe2ab277f43fdda0f79a6dad21" pre-obscam-target
 }
 
 compare_manifest_file() {
@@ -199,16 +208,22 @@ verify_installed() {
             fail "ObsCam identity lacks obscam-camera membership"
         asi662mc_devices verify_asi662mc_permissions
         encoder_devices verify_encoder_permissions
-        systemctl is-enabled --quiet obscam.service || fail "obscam.service is not enabled"
-        systemctl is-enabled --quiet obscam-mediamtx.service || fail "obscam-mediamtx.service is not enabled"
-        systemctl is-enabled --quiet obscam-media-network.service || fail "obscam-media-network.service is not enabled"
+        systemctl is-enabled --quiet obscam.target || fail "obscam.target is not enabled"
+        for component in obscam.service obscam-mediamtx.service obscam-media-network.service; do
+            if systemctl is-enabled --quiet "$component"; then
+                fail "$component must be enabled only through obscam.target"
+            fi
+        done
     else
         passwd=$(target /etc/passwd)
         awk -F: '$1 == "obscam" && $6 == "/nonexistent" && $7 == "/usr/sbin/nologin" { found=1 } END { exit !found }' "$passwd" ||
             fail "staged ObsCam non-login identity is missing"
-        systemctl --root="$root" is-enabled --quiet obscam.service || fail "staged obscam.service is not enabled"
-        systemctl --root="$root" is-enabled --quiet obscam-mediamtx.service || fail "staged obscam-mediamtx.service is not enabled"
-        systemctl --root="$root" is-enabled --quiet obscam-media-network.service || fail "staged obscam-media-network.service is not enabled"
+        systemctl --root="$root" is-enabled --quiet obscam.target || fail "staged obscam.target is not enabled"
+        for component in obscam.service obscam-mediamtx.service obscam-media-network.service; do
+            if systemctl --root="$root" is-enabled --quiet "$component"; then
+                fail "staged $component must be enabled only through obscam.target"
+            fi
+        done
     fi
 }
 
@@ -238,13 +253,15 @@ case "$operation" in
             asi662mc_devices set_asi662mc_permissions
             encoder_devices set_encoder_permissions
             systemctl daemon-reload
-            systemctl enable obscam-media-network.service obscam-mediamtx.service obscam.service
+            systemctl disable obscam-media-network.service obscam-mediamtx.service obscam.service
+            systemctl enable obscam.target
         else
             staged_passwd=$(target /etc/passwd)
             if [ ! -f "$staged_passwd" ] || ! grep -Eq '^obscam:' "$staged_passwd"; then
                 systemd-sysusers --root="$root" /etc/sysusers.d/obscam.conf
             fi
-            systemctl --root="$root" enable obscam-media-network.service obscam-mediamtx.service obscam.service
+            systemctl --root="$root" disable obscam-media-network.service obscam-mediamtx.service obscam.service
+            systemctl --root="$root" enable obscam.target
         fi
         verify_installed
         ;;

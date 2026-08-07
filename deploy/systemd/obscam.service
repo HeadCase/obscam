@@ -1,6 +1,7 @@
 [Unit]
 Description=ObsCam camera owner and browser service
 StartLimitIntervalSec=0
+PartOf=obscam.target
 
 [Service]
 Type=exec

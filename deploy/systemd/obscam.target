@@ -1,0 +1,6 @@
+[Unit]
+Description=ObsCam appliance
+Wants=obscam-media-network.service obscam-mediamtx.service obscam.service
+
+[Install]
+WantedBy=multi-user.target

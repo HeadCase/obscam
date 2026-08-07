@@ -94,8 +94,33 @@ fn obscam_and_mediamtx_are_independently_supervised() {
 }
 
 #[test]
+fn appliance_target_is_the_single_operator_lifecycle_unit() {
+    let target = repository_file("deploy/systemd/obscam.target");
+    let members = [
+        repository_file("deploy/systemd/obscam.service"),
+        repository_file("deploy/systemd/obscam-mediamtx.service"),
+        repository_file("deploy/systemd/obscam-media-network.service"),
+    ];
+
+    assert_eq!(
+        directive_values(&target, "Wants"),
+        ["obscam-media-network.service obscam-mediamtx.service obscam.service"]
+    );
+    assert_eq!(directive_values(&target, "WantedBy"), ["multi-user.target"]);
+    assert!(!target.contains("allsky.service"));
+
+    for member in members {
+        assert_eq!(directive_values(&member, "PartOf"), ["obscam.target"]);
+    }
+}
+
+#[test]
 fn operations_document_all_required_read_only_diagnostics() {
     let guide = repository_file("docs/agents/local-startup.md");
+
+    for operation in ["start", "stop", "restart"] {
+        assert!(guide.contains(&format!("sudo systemctl {operation} obscam.target")));
+    }
 
     for signal in [
         "systemctl status",

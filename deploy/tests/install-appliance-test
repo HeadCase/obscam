@@ -16,6 +16,7 @@ cp "$repo/deploy/mediamtx.yml" "$fixture_deploy/mediamtx.yml"
 cp "$repo/deploy/obscam-media.nft" "$fixture_deploy/obscam-media.nft"
 cp "$repo/deploy/setup-media-network" "$fixture_deploy/setup-media-network"
 cp "$repo/deploy/systemd/obscam.service" "$fixture_deploy/systemd/obscam.service"
+cp "$repo/deploy/systemd/obscam.target" "$fixture_deploy/systemd/obscam.target"
 cp "$repo/deploy/systemd/obscam-media-network.service" "$fixture_deploy/systemd/obscam-media-network.service"
 cp "$repo/deploy/systemd/obscam-mediamtx.service" "$fixture_deploy/systemd/obscam-mediamtx.service"
 cp "$repo/deploy/sysusers.d/obscam.conf" "$fixture_deploy/sysusers.d/obscam.conf"
@@ -64,9 +65,13 @@ cmp -s "$mediamtx_binary" "$root/usr/local/libexec/obscam/mediamtx" ||
 grep -Eq '^obscam:[^:]*:[^:]+:[^:]+:ObsCam camera owner:/nonexistent:/usr/sbin/nologin$' \
     "$root/etc/passwd" || fail "non-login ObsCam identity was not created"
 find "$root/etc/systemd/system/multi-user.target.wants" -type l \
-    -name 'obscam.service' | grep -q . || fail "ObsCam service was not enabled"
-find "$root/etc/systemd/system/multi-user.target.wants" -type l \
-    -name 'obscam-mediamtx.service' | grep -q . || fail "MediaMTX service was not enabled"
+    -name 'obscam.target' | grep -q . || fail "ObsCam appliance target was not enabled"
+for component in obscam.service obscam-mediamtx.service obscam-media-network.service; do
+    if find "$root/etc/systemd/system/multi-user.target.wants" -type l \
+        -name "$component" | grep -q .; then
+        fail "$component was enabled outside obscam.target"
+    fi
+done
 
 # Exact reinstallation is intentionally idempotent.
 install_fixture

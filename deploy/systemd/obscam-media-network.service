@@ -1,6 +1,7 @@
 [Unit]
 Description=ObsCam isolated media network
 StartLimitIntervalSec=0
+PartOf=obscam.target
 Before=obscam-mediamtx.service
 
 [Service]
