@@ -10,10 +10,18 @@ DynamicUser=yes
 ExecStartPre=/usr/local/libexec/obscam/verify-mediamtx /usr/local/libexec/obscam/mediamtx /etc/obscam/mediamtx.yml /usr/local/share/obscam/mediamtx-linux-arm64.sha256 /usr/local/share/obscam/mediamtx-config.sha256
 ExecStart=/usr/local/libexec/obscam/mediamtx /etc/obscam/mediamtx.yml
 NetworkNamespacePath=/run/netns/obscam-media
-Restart=on-failure
+Restart=always
 RestartSec=5s
 TimeoutStopSec=10s
 UMask=0077
+
+# Favor the interactive relay over the low-priority sync worker. Deployed
+# steady-state RSS is about 42 MiB, so these limits retain ample burst room.
+CPUWeight=200
+IOWeight=200
+MemoryHigh=256M
+MemoryMax=384M
+OOMScoreAdjust=-250
 
 # Pion requires netlink for ICE setup. Inside this namespace it can discover
 # only the private media veth and loopback; browser endpoints are exact-address

@@ -117,11 +117,40 @@ restarting ObsCam.
 Managed logs exist only in journald and are rate-limited per unit:
 
 ```sh
+systemctl status --no-pager \
+  obscam.service obscam-mediamtx.service obscam-media-network.service
 sudo journalctl --unit obscam.service --since today
 sudo journalctl --unit obscam-mediamtx.service --since today
 sudo journalctl --unit obscam-media-network.service --since today
 systemctl show obscam.service obscam-mediamtx.service \
-  -p User -p Group -p DynamicUser -p NRestarts -p ActiveState
+  -p User -p Group -p DynamicUser -p NRestarts -p ActiveState \
+  -p CPUUsageNSec -p MemoryCurrent -p MemoryPeak -p TasksCurrent
+```
+
+The following read-only checks cover the rest of the qualified deployment
+signals without activating optional mounts or probing unrelated interfaces:
+
+```sh
+# Qualified binaries, configuration, and health
+sha256sum /usr/local/libexec/obscam/obscam
+/usr/local/libexec/obscam/verify-mediamtx \
+  /usr/local/libexec/obscam/mediamtx \
+  /etc/obscam/mediamtx.yml \
+  /usr/local/share/obscam/mediamtx-linux-arm64.sha256 \
+  /usr/local/share/obscam/mediamtx-config.sha256
+curl --fail http://127.0.0.1:8080/api/v1/health
+
+# Optional storage and the approved browser VPN only
+systemctl status --no-pager mnt-asiair.automount mnt-library.automount
+wg show wg0
+
+# Host capacity and Raspberry Pi thermal/throttling state
+systemctl show obscam.service obscam-mediamtx.service \
+  -p CPUUsageNSec -p MemoryCurrent -p MemoryPeak -p TasksCurrent
+free -h
+vcgencmd measure_temp
+vcgencmd get_throttled
+cat /sys/class/thermal/thermal_zone0/temp
 ```
 
 Do not substitute a deterministic camera, ambient MediaMTX binary, secondary

@@ -107,18 +107,72 @@ install_owned_file() {
     install -m "$mode" "$source" "$destination"
 }
 
+appliance_files() {
+    action=$1
+    "$action" "$deploy_dir/mediamtx.yml" /etc/obscam/mediamtx.yml 0644
+    "$action" "$deploy_dir/obscam-media.nft" /etc/obscam/obscam-media.nft 0644
+    "$action" "$deploy_dir/setup-media-network" /usr/local/libexec/obscam/setup-media-network 0755
+    "$action" "$deploy_dir/verify-mediamtx" /usr/local/libexec/obscam/verify-mediamtx 0755
+    "$action" "$deploy_dir/mediamtx-linux-arm64.sha256" /usr/local/share/obscam/mediamtx-linux-arm64.sha256 0644
+    "$action" "$deploy_dir/mediamtx-config.sha256" /usr/local/share/obscam/mediamtx-config.sha256 0644
+    "$action" "$deploy_dir/sysusers.d/obscam.conf" /etc/sysusers.d/obscam.conf 0644
+    "$action" "$deploy_dir/udev/99-z-obscam.rules" /etc/udev/rules.d/99-z-obscam.rules 0644
+    "$action" "$deploy_dir/systemd/obscam.service" /etc/systemd/system/obscam.service 0644
+    # These hashes are the only accepted GRE-218 predecessor units.
+    "$action" "$deploy_dir/systemd/obscam-media-network.service" /etc/systemd/system/obscam-media-network.service 0644 b3242f896dd6c8f2f6c3fd859a7bb05f9b55c9c16b488ec3c783bc8646fb69f1
+    "$action" "$deploy_dir/systemd/obscam-mediamtx.service" /etc/systemd/system/obscam-mediamtx.service 0644 cf3d5b5a2db2ffc6a9851f18a569af07ef8723b76d2a63b5cbb18bc8699c461d
+}
+
+compare_manifest_file() {
+    compare_installed "$1" "$2"
+}
+
 static_files() {
-    compare_installed "$deploy_dir/mediamtx.yml" /etc/obscam/mediamtx.yml
-    compare_installed "$deploy_dir/obscam-media.nft" /etc/obscam/obscam-media.nft
-    compare_installed "$deploy_dir/setup-media-network" /usr/local/libexec/obscam/setup-media-network
-    compare_installed "$deploy_dir/verify-mediamtx" /usr/local/libexec/obscam/verify-mediamtx
-    compare_installed "$deploy_dir/mediamtx-linux-arm64.sha256" /usr/local/share/obscam/mediamtx-linux-arm64.sha256
-    compare_installed "$deploy_dir/mediamtx-config.sha256" /usr/local/share/obscam/mediamtx-config.sha256
-    compare_installed "$deploy_dir/sysusers.d/obscam.conf" /etc/sysusers.d/obscam.conf
-    compare_installed "$deploy_dir/udev/99-z-obscam.rules" /etc/udev/rules.d/99-z-obscam.rules
-    compare_installed "$deploy_dir/systemd/obscam.service" /etc/systemd/system/obscam.service
-    compare_installed "$deploy_dir/systemd/obscam-media-network.service" /etc/systemd/system/obscam-media-network.service
-    compare_installed "$deploy_dir/systemd/obscam-mediamtx.service" /etc/systemd/system/obscam-mediamtx.service
+    appliance_files compare_manifest_file
+}
+
+asi662mc_devices() {
+    action=$1
+    for usb_device in /sys/bus/usb/devices/*; do
+        [ -r "$usb_device/idVendor" ] || continue
+        [ -r "$usb_device/idProduct" ] || continue
+        [ "$(cat "$usb_device/idVendor")" = 03c3 ] || continue
+        [ "$(cat "$usb_device/idProduct")" = 662b ] || continue
+        usb_node=$(printf '/dev/bus/usb/%03d/%03d' "$(cat "$usb_device/busnum")" "$(cat "$usb_device/devnum")")
+        "$action" "$usb_node" "$usb_device"
+    done
+}
+
+encoder_devices() {
+    action=$1
+    for video_device in /sys/class/video4linux/video*; do
+        [ -r "$video_device/name" ] || continue
+        [ "$(cat "$video_device/name")" = bcm2835-codec-encode ] || continue
+        "$action" "/dev/${video_device##*/}" "$video_device"
+    done
+}
+
+verify_asi662mc_permissions() {
+    [ "$(stat -c '%a:%U:%G' "$1")" = 660:root:obscam-camera ] ||
+        fail "ASI662MC permissions are not root:obscam-camera 0660"
+}
+
+verify_encoder_permissions() {
+    [ "$(stat -c '%a:%U:%G' "$1")" = 660:obscam:video ] ||
+        fail "hardware encoder permissions are not obscam:video 0660"
+}
+
+set_asi662mc_permissions() {
+    [ -c "$1" ] || return
+    chown root:obscam-camera "$1"
+    chmod 0660 "$1"
+}
+
+set_encoder_permissions() {
+    udevadm trigger --action=change "$2"
+    [ -c "$1" ] || return
+    chown obscam:video "$1"
+    chmod 0660 "$1"
 }
 
 verify_installed() {
@@ -143,22 +197,8 @@ verify_installed() {
             fail "ObsCam non-login identity is missing"
         id -nG obscam | tr ' ' '\n' | grep -Fx obscam-camera >/dev/null ||
             fail "ObsCam identity lacks obscam-camera membership"
-        for usb_device in /sys/bus/usb/devices/*; do
-            [ -r "$usb_device/idVendor" ] || continue
-            [ -r "$usb_device/idProduct" ] || continue
-            [ "$(cat "$usb_device/idVendor")" = 03c3 ] || continue
-            [ "$(cat "$usb_device/idProduct")" = 662b ] || continue
-            usb_node=$(printf '/dev/bus/usb/%03d/%03d' "$(cat "$usb_device/busnum")" "$(cat "$usb_device/devnum")")
-            [ "$(stat -c '%a:%U:%G' "$usb_node")" = 660:root:obscam-camera ] ||
-                fail "ASI662MC permissions are not root:obscam-camera 0660"
-        done
-        for video_device in /sys/class/video4linux/video*; do
-            [ -r "$video_device/name" ] || continue
-            [ "$(cat "$video_device/name")" = bcm2835-codec-encode ] || continue
-            video_node=/dev/${video_device##*/}
-            [ "$(stat -c '%a:%U:%G' "$video_node")" = 660:obscam:video ] ||
-                fail "hardware encoder permissions are not obscam:video 0660"
-        done
+        asi662mc_devices verify_asi662mc_permissions
+        encoder_devices verify_encoder_permissions
         systemctl is-enabled --quiet obscam.service || fail "obscam.service is not enabled"
         systemctl is-enabled --quiet obscam-mediamtx.service || fail "obscam-mediamtx.service is not enabled"
         systemctl is-enabled --quiet obscam-media-network.service || fail "obscam-media-network.service is not enabled"
@@ -189,48 +229,20 @@ case "$operation" in
 
         install_owned_file "$obscam_binary" /usr/local/libexec/obscam/obscam 0755
         install_owned_file "$mediamtx_binary" /usr/local/libexec/obscam/mediamtx 0755
-        install_owned_file "$deploy_dir/mediamtx.yml" /etc/obscam/mediamtx.yml 0644
-        install_owned_file "$deploy_dir/obscam-media.nft" /etc/obscam/obscam-media.nft 0644
-        install_owned_file "$deploy_dir/setup-media-network" /usr/local/libexec/obscam/setup-media-network 0755
-        install_owned_file "$deploy_dir/verify-mediamtx" /usr/local/libexec/obscam/verify-mediamtx 0755
-        install_owned_file "$deploy_dir/mediamtx-linux-arm64.sha256" /usr/local/share/obscam/mediamtx-linux-arm64.sha256 0644
-        install_owned_file "$deploy_dir/mediamtx-config.sha256" /usr/local/share/obscam/mediamtx-config.sha256 0644
-        install_owned_file "$deploy_dir/sysusers.d/obscam.conf" /etc/sysusers.d/obscam.conf 0644
-        install_owned_file "$deploy_dir/udev/99-z-obscam.rules" /etc/udev/rules.d/99-z-obscam.rules 0644
-        install_owned_file "$deploy_dir/systemd/obscam.service" /etc/systemd/system/obscam.service 0644
-        # The only accepted predecessor is the checked-in temporary GRE-218 unit.
-        install_owned_file "$deploy_dir/systemd/obscam-media-network.service" /etc/systemd/system/obscam-media-network.service 0644 b3242f896dd6c8f2f6c3fd859a7bb05f9b55c9c16b488ec3c783bc8646fb69f1
-        install_owned_file "$deploy_dir/systemd/obscam-mediamtx.service" /etc/systemd/system/obscam-mediamtx.service 0644 cf3d5b5a2db2ffc6a9851f18a569af07ef8723b76d2a63b5cbb18bc8699c461d
+        appliance_files install_owned_file
 
         if [ "$root" = / ]; then
             systemd-sysusers /etc/sysusers.d/obscam.conf
             udevadm control --reload
             udevadm trigger --action=change --subsystem-match=usb --attr-match=idVendor=03c3 --attr-match=idProduct=662b
-            for usb_device in /sys/bus/usb/devices/*; do
-                [ -r "$usb_device/idVendor" ] || continue
-                [ -r "$usb_device/idProduct" ] || continue
-                [ "$(cat "$usb_device/idVendor")" = 03c3 ] || continue
-                [ "$(cat "$usb_device/idProduct")" = 662b ] || continue
-                usb_node=$(printf '/dev/bus/usb/%03d/%03d' "$(cat "$usb_device/busnum")" "$(cat "$usb_device/devnum")")
-                [ -c "$usb_node" ] || continue
-                chown root:obscam-camera "$usb_node"
-                chmod 0660 "$usb_node"
-            done
-            for video_device in /sys/class/video4linux/video*; do
-                [ -r "$video_device/name" ] || continue
-                [ "$(cat "$video_device/name")" = bcm2835-codec-encode ] || continue
-                udevadm trigger --action=change "$video_device"
-                video_node=/dev/${video_device##*/}
-                [ -c "$video_node" ] || continue
-                chown obscam:video "$video_node"
-                chmod 0660 "$video_node"
-            done
+            asi662mc_devices set_asi662mc_permissions
+            encoder_devices set_encoder_permissions
             systemctl daemon-reload
             systemctl enable obscam-media-network.service obscam-mediamtx.service obscam.service
         else
             staged_passwd=$(target /etc/passwd)
             if [ ! -f "$staged_passwd" ] || ! grep -Eq '^obscam:' "$staged_passwd"; then
-                systemd-sysusers --root="$root"
+                systemd-sysusers --root="$root" /etc/sysusers.d/obscam.conf
             fi
             systemctl --root="$root" enable obscam-media-network.service obscam-mediamtx.service obscam.service
         fi

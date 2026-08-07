@@ -14,8 +14,9 @@ cgroup admits USB and V4L2 classes, while filesystem ownership limits which
 nodes the identity can open. `AF_NETLINK` is retained because a transient-unit
 probe proved libusb initialization fails with error `-99` without it.
 
-Both long-running services restart after five seconds on unexpected failure
-with `StartLimitIntervalSec=0`. The namespace setup retries on failure as an
+Both long-running services restart after five seconds on every unexpected exit,
+including a clean exit status, with `StartLimitIntervalSec=0`. The namespace
+setup retries on failure as an
 independent oneshot. No systemd watchdog is present. Managed output goes only
 to journald with per-unit rate limits.
 
@@ -92,3 +93,14 @@ revalidated and reclaimed the exact ASI662MC, restored hardware encoding, and
 reported capture, encoder, and relay `ready`; AllSky again remained unchanged
 with zero restarts. Neither unit reached a start limit, and no watchdog or
 cross-service restart coupling was involved.
+
+Final review also sent each main process `SIGTERM`, which systemd classifies as
+a clean exit for these long-running services. `Restart=always` restarted each
+after five seconds with `ExecMainStatus=0`; the other service kept its PID,
+health returned fully ready, and AllSky retained PID 1427 with zero restarts.
+
+At final review, the deployed processes used approximately 40 MiB RSS each.
+The checked-in service policy therefore favors both interactive workloads with
+relative CPU/I/O weights of 200, protects them from OOM selection ahead of the
+`asiair-sync` worker, and sets generous high/max memory thresholds of
+384/512 MiB for ObsCam and 256/384 MiB for MediaMTX.

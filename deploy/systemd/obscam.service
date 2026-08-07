@@ -8,12 +8,21 @@ User=obscam
 Group=obscam
 SupplementaryGroups=obscam-camera
 ExecStart=/usr/local/libexec/obscam/obscam
-Restart=on-failure
+Restart=always
 RestartSec=5s
 TimeoutStopSec=10s
 UMask=0077
 
 Environment=RUST_LOG=info
+
+# The camera path stays responsive under contention while the low-priority
+# asiair-sync worker yields first. Deployed steady-state RSS is about 40 MiB;
+# these generous thresholds leave room for FFmpeg recovery and transient load.
+CPUWeight=200
+IOWeight=200
+MemoryHigh=384M
+MemoryMax=512M
+OOMScoreAdjust=-250
 
 # The SDK needs the exact ASI662MC USB node and FFmpeg needs the hardware H.264
 # encoder. Device cgroups admit those classes while udev ownership restricts

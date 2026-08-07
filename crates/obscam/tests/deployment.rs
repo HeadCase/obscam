@@ -69,7 +69,7 @@ fn obscam_and_mediamtx_are_independently_supervised() {
     let mediamtx = repository_file("deploy/systemd/obscam-mediamtx.service");
 
     assert_eq!(directive_values(&obscam, "User"), ["obscam"]);
-    assert_eq!(directive_values(&obscam, "Restart"), ["on-failure"]);
+    assert_eq!(directive_values(&obscam, "Restart"), ["always"]);
     assert_eq!(directive_values(&obscam, "RestartSec"), ["5s"]);
     assert_eq!(directive_values(&obscam, "StartLimitIntervalSec"), ["0"]);
     assert!(!obscam.contains("WatchdogSec="));
@@ -77,6 +77,7 @@ fn obscam_and_mediamtx_are_independently_supervised() {
     assert!(!mediamtx.contains("obscam.service"));
 
     for unit in [&obscam, &mediamtx] {
+        assert_eq!(directive_values(unit, "Restart"), ["always"]);
         assert!(!unit.contains("network-online.target"));
         assert!(!unit.contains("WireGuard"));
         assert!(!unit.contains("remote-fs.target"));
@@ -84,7 +85,36 @@ fn obscam_and_mediamtx_are_independently_supervised() {
         assert_eq!(directive_values(unit, "StandardError"), ["journal"]);
         assert_eq!(directive_values(unit, "LogRateLimitIntervalSec"), ["30s"]);
         assert!(!directive_values(unit, "LogRateLimitBurst").is_empty());
+        assert_eq!(directive_values(unit, "CPUWeight"), ["200"]);
+        assert_eq!(directive_values(unit, "IOWeight"), ["200"]);
+        assert!(!directive_values(unit, "MemoryHigh").is_empty());
+        assert!(!directive_values(unit, "MemoryMax").is_empty());
+        assert_eq!(directive_values(unit, "OOMScoreAdjust"), ["-250"]);
     }
+}
+
+#[test]
+fn operations_document_all_required_read_only_diagnostics() {
+    let guide = repository_file("docs/agents/local-startup.md");
+
+    for signal in [
+        "systemctl status",
+        "journalctl",
+        "verify-mediamtx",
+        "/api/v1/health",
+        "mnt-asiair.automount",
+        "mnt-library.automount",
+        "wg show wg0",
+        "MemoryCurrent",
+        "CPUUsageNSec",
+        "vcgencmd get_throttled",
+    ] {
+        assert!(
+            guide.contains(signal),
+            "missing diagnostic signal: {signal}"
+        );
+    }
+    assert!(!guide.contains("wg show wg1"));
 }
 
 #[test]
