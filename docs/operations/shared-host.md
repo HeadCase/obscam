@@ -78,10 +78,12 @@ append:
 cgroup_enable=memory cgroup_memory=1
 ```
 
-After reboot, confirm that `/proc/cmdline` no longer disables the controller,
-`memory` appears in the controller inventory, and each managed service cgroup
-contains `memory.current`, `memory.high`, and `memory.max`. The diagnostic
-command reports these facts and their actual values explicitly.
+After reboot, confirm that the trailing enable arguments are present in
+`/proc/cmdline`, `memory` appears in the controller inventory, and each managed
+service cgroup contains `memory.current`, `memory.high`, and `memory.max`.
+Raspberry Pi firmware may retain its earlier `cgroup_disable=memory` argument;
+the controller inventory and service files are the authoritative result. The
+diagnostic command reports these facts and their actual values explicitly.
 
 Use [`../verification/gre-225-shared-host.md`](../verification/gre-225-shared-host.md)
 for repository and deployed qualification.

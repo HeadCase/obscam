@@ -122,7 +122,7 @@ appliance_files() {
     "$action" "$deploy_dir/setup-media-network" /usr/local/libexec/obscam/setup-media-network 0755
     "$action" "$deploy_dir/verify-mediamtx" /usr/local/libexec/obscam/verify-mediamtx 0755
     "$action" "$deploy_dir/verify-memory-controller" /usr/local/libexec/obscam/verify-memory-controller 0755
-    "$action" "$deploy_dir/obscam-diagnostics" /usr/local/libexec/obscam/obscam-diagnostics 0755
+    "$action" "$deploy_dir/obscam-diagnostics" /usr/local/libexec/obscam/obscam-diagnostics 0755 839e6b2077c5687c12eaa9b8f0fd5dbb0ad05fd92691d600c1ba865f69150c7f pre-memory-controller
     "$action" "$deploy_dir/mediamtx-linux-arm64.sha256" /usr/local/share/obscam/mediamtx-linux-arm64.sha256 0644
     "$action" "$deploy_dir/mediamtx-config.sha256" /usr/local/share/obscam/mediamtx-config.sha256 0644
     "$action" "$deploy_dir/sysusers.d/obscam.conf" /etc/sysusers.d/obscam.conf 0644

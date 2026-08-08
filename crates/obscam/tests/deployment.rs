@@ -72,6 +72,9 @@ fn live_resource_controller_preflight_fails_closed() {
         .find("install_owned_file")
         .expect("first owned-file mutation");
     assert!(preflight < first_install);
+    assert!(installer.contains(
+        "839e6b2077c5687c12eaa9b8f0fd5dbb0ad05fd92691d600c1ba865f69150c7f pre-memory-controller"
+    ));
 }
 
 #[test]
