@@ -82,9 +82,8 @@ GRE-224 measured approximately 40 MiB ObsCam RSS and 42 MiB MediaMTX RSS and
 qualified the retained 384/512 MiB and 256/384 MiB thresholds. GRE-271 already
 qualified missing ASIAIR/NAS behavior and the bounded synchronization policy.
 
-The GRE-225 four-viewer combined-load run must be recorded here after the
-reviewed branch is installed. Until that hardware gate passes, GRE-225 is not
-fully qualified for completion.
+The reviewed branch is installed and the post-reboot hardware gate below
+completes GRE-225 qualification.
 
 ### Initial combined-load evidence
 
@@ -111,3 +110,34 @@ controllers; no service had `memory.current`, `memory.high`, or `memory.max`.
 The memory thresholds were therefore not enforceable during this run. Repeat
 the combined-load qualification after enabling the controller and rebooting;
 do not treat this partial run as final GRE-225 acceptance.
+
+### Final post-reboot evidence
+
+Status: **passed on 2026-08-08**.
+
+The Pi was rebooted after enabling the cgroup v2 memory controller. The root
+controller inventory then exposed `memory`, and the installed diagnostic
+reported real `memory.current`, `memory.peak`, `memory.high`, and `memory.max`
+files for every managed workload. ObsCam measured about 130 MiB current with
+384/512 MiB high/max limits; MediaMTX measured about 90 MiB current with
+256/384 MiB high/max limits. AllSky and sync remained unbounded by memory while
+retaining their lower CPU/I/O priorities and OOM ordering. The installer
+preflight and installed verifier both accepted this state.
+
+Five independent WebRTC readers from the approved `wg0` peer were ready after
+the reboot. Across the final sample every reader advanced by more than 2,100
+RTP packets and MediaMTX continued to report zero discarded frames. A genuine
+installed sync cycle overlapped those viewers, retained its 512 KiB/s,
+one-transfer, two-checker policy, and completed normally; it found no new files
+to copy. The initial qualified run above supplies the actual full-FITS transfer
+evidence, while this run verifies the same service path after memory-controller
+activation.
+
+ObsCam health remained fully ready. ObsCam, MediaMTX, and AllSky retained their
+post-reboot PIDs with zero supervised restarts. AllSky, the sync timer, and
+`wg0` remained active, and both configured WireGuard peers had recent
+handshakes. Genuine CIFS/NFS mounts beneath autofs remained available.
+Temperature was 67.2 C and `get_throttled` remained `0x0`. Together with the
+already-passed GRE-271 independent endpoint-loss and later-cycle recovery gate,
+this satisfies the shared-host acceptance criteria without substituting any
+camera, media, VPN, mount, or synchronization edge.
