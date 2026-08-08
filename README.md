@@ -15,7 +15,8 @@ explicitly required; they are not implementation precedent.
 
 ## Current status
 
-The production `obscam` Rust service now owns the continuously warm camera,
+The production `obscam` Rust service now runs as an independently supervised,
+least-privilege appliance service and owns the continuously warm camera,
 reconstructs default neutral monochrome directly from full-resolution RAW8,
 and feeds one long-lived FFmpeg hardware-H.264 publication through a bounded
 local RTP observer. Rust relays that unchanged stream over a private veth to
@@ -24,6 +25,10 @@ exposes WHEP only on the approved ObsCam service addresses. MediaMTX fans the
 stream directly to origin-aware browser sessions. The service
 still boots its HTTP contracts truthfully when camera or media components are
 unavailable.
+
+Operators manage the complete appliance through `obscam.target`; ObsCam,
+MediaMTX, and the isolated media network remain independently supervised
+members beneath that single lifecycle unit.
 
 The embedded browser application is compiled from vanilla TypeScript. It
 matches `requestVideoFrameCallback` RTP metadata only against bounded,
@@ -40,7 +45,7 @@ the curated exposure choices, a 0–600 gain detent in steps of 50, and either
 See:
 
 - `docs/agents/architecture.md` for binding local architecture guardrails
-- `docs/agents/local-startup.md` for temporary manual production startup
+- `docs/agents/local-startup.md` for managed appliance installation and startup
 - `docs/agents/issue-tracker.md` for the Linear workflow
 - `docs/operations/asiair-sync.md` for ASIAIR synchronization operations and
   recovery

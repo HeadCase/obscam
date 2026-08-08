@@ -1,0 +1,274 @@
+#!/bin/sh
+set -eu
+
+deploy_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+root=/
+obscam_binary=
+mediamtx_binary=
+
+usage() {
+    cat >&2 <<EOF
+usage:
+  $0 install --obscam-binary PATH --mediamtx-binary PATH [--root PATH]
+  $0 verify [--root PATH]
+EOF
+    exit 2
+}
+
+fail() {
+    echo "install-appliance: $*" >&2
+    exit 1
+}
+
+[ "$#" -gt 0 ] || usage
+operation=$1
+shift
+
+while [ "$#" -gt 0 ]; do
+    case "$1" in
+        --root)
+            [ "$#" -ge 2 ] || usage
+            root=$2
+            shift 2
+            ;;
+        --obscam-binary)
+            [ "$#" -ge 2 ] || usage
+            obscam_binary=$2
+            shift 2
+            ;;
+        --mediamtx-binary)
+            [ "$#" -ge 2 ] || usage
+            mediamtx_binary=$2
+            shift 2
+            ;;
+        *) usage ;;
+    esac
+done
+
+case "$root" in
+    /*) ;;
+    *) fail "--root must be an absolute path" ;;
+esac
+root=${root%/}
+[ -n "$root" ] || root=/
+
+target() {
+    if [ "$root" = / ]; then
+        printf '%s\n' "$1"
+    else
+        printf '%s%s\n' "$root" "$1"
+    fi
+}
+
+require_live_root() {
+    if [ "$root" = / ] && [ "$(id -u)" -ne 0 ]; then
+        fail "installation into / must run as root"
+    fi
+}
+
+compare_installed() {
+    source=$1
+    destination=$(target "$2")
+    [ -f "$destination" ] || fail "installed file is missing: $destination"
+    [ ! -L "$destination" ] || fail "installed path must not be a symlink: $destination"
+    cmp -s "$source" "$destination" || fail "installed file differs: $destination"
+}
+
+install_owned_file() {
+    source=$1
+    destination=$(target "$2")
+    mode=$3
+    predecessor_hashes=${4:-}
+    backup_suffix=${5:-pre-gre-224}
+
+    [ -f "$source" ] || fail "source file is missing: $source"
+    if [ -L "$destination" ]; then
+        fail "refusing symlink destination: $destination"
+    fi
+    if [ -e "$destination" ]; then
+        if cmp -s "$source" "$destination"; then
+            chmod "$mode" "$destination"
+            return
+        fi
+        if [ -n "$predecessor_hashes" ]; then
+            installed_hash=$(sha256sum "$destination" | awk '{ print $1 }')
+            predecessor_matches=no
+            for predecessor_hash in $predecessor_hashes; do
+                if [ "$installed_hash" = "$predecessor_hash" ]; then
+                    predecessor_matches=yes
+                    break
+                fi
+            done
+            if [ "$predecessor_matches" = yes ]; then
+                backup=$destination.$backup_suffix
+                [ ! -e "$backup" ] || fail "migration backup already exists: $backup"
+                cp -p "$destination" "$backup"
+            else
+                fail "refusing conflicting destination: $destination"
+            fi
+        else
+            fail "refusing conflicting destination: $destination"
+        fi
+    fi
+
+    install -d -m 0755 "$(dirname -- "$destination")"
+    install -m "$mode" "$source" "$destination"
+}
+
+appliance_files() {
+    action=$1
+    "$action" "$deploy_dir/mediamtx.yml" /etc/obscam/mediamtx.yml 0644
+    "$action" "$deploy_dir/obscam-media.nft" /etc/obscam/obscam-media.nft 0644
+    "$action" "$deploy_dir/setup-media-network" /usr/local/libexec/obscam/setup-media-network 0755
+    "$action" "$deploy_dir/verify-mediamtx" /usr/local/libexec/obscam/verify-mediamtx 0755
+    "$action" "$deploy_dir/mediamtx-linux-arm64.sha256" /usr/local/share/obscam/mediamtx-linux-arm64.sha256 0644
+    "$action" "$deploy_dir/mediamtx-config.sha256" /usr/local/share/obscam/mediamtx-config.sha256 0644
+    "$action" "$deploy_dir/sysusers.d/obscam.conf" /etc/sysusers.d/obscam.conf 0644
+    "$action" "$deploy_dir/udev/99-z-obscam.rules" /etc/udev/rules.d/99-z-obscam.rules 0644
+    "$action" "$deploy_dir/systemd/obscam.target" /etc/systemd/system/obscam.target 0644
+    "$action" "$deploy_dir/systemd/obscam.service" /etc/systemd/system/obscam.service 0644 8e7fdb0c6732f00757459a32f26b5cc532572cd9b3693ba7866809f37ce5030c pre-obscam-target
+    # Accept only the checked GRE-218 and GRE-224 predecessor definitions.
+    "$action" "$deploy_dir/systemd/obscam-media-network.service" /etc/systemd/system/obscam-media-network.service 0644 "b3242f896dd6c8f2f6c3fd859a7bb05f9b55c9c16b488ec3c783bc8646fb69f1 57af723c96be3590e0b91325c1b9f64e0543f8599f4e593030ce85170248f999" pre-obscam-target
+    "$action" "$deploy_dir/systemd/obscam-mediamtx.service" /etc/systemd/system/obscam-mediamtx.service 0644 "cf3d5b5a2db2ffc6a9851f18a569af07ef8723b76d2a63b5cbb18bc8699c461d 8f7c2c8cd7a22f2fec33de9b21b3fcd6948d3bfe2ab277f43fdda0f79a6dad21" pre-obscam-target
+}
+
+compare_manifest_file() {
+    compare_installed "$1" "$2"
+}
+
+static_files() {
+    appliance_files compare_manifest_file
+}
+
+asi662mc_devices() {
+    action=$1
+    for usb_device in /sys/bus/usb/devices/*; do
+        [ -r "$usb_device/idVendor" ] || continue
+        [ -r "$usb_device/idProduct" ] || continue
+        [ "$(cat "$usb_device/idVendor")" = 03c3 ] || continue
+        [ "$(cat "$usb_device/idProduct")" = 662b ] || continue
+        usb_node=$(printf '/dev/bus/usb/%03d/%03d' "$(cat "$usb_device/busnum")" "$(cat "$usb_device/devnum")")
+        "$action" "$usb_node" "$usb_device"
+    done
+}
+
+encoder_devices() {
+    action=$1
+    for video_device in /sys/class/video4linux/video*; do
+        [ -r "$video_device/name" ] || continue
+        [ "$(cat "$video_device/name")" = bcm2835-codec-encode ] || continue
+        "$action" "/dev/${video_device##*/}" "$video_device"
+    done
+}
+
+verify_asi662mc_permissions() {
+    [ "$(stat -c '%a:%U:%G' "$1")" = 660:root:obscam-camera ] ||
+        fail "ASI662MC permissions are not root:obscam-camera 0660"
+}
+
+verify_encoder_permissions() {
+    [ "$(stat -c '%a:%U:%G' "$1")" = 660:obscam:video ] ||
+        fail "hardware encoder permissions are not obscam:video 0660"
+}
+
+set_asi662mc_permissions() {
+    [ -c "$1" ] || return
+    chown root:obscam-camera "$1"
+    chmod 0660 "$1"
+}
+
+set_encoder_permissions() {
+    udevadm trigger --action=change "$2"
+    [ -c "$1" ] || return
+    chown obscam:video "$1"
+    chmod 0660 "$1"
+}
+
+verify_installed() {
+    static_files
+
+    installed_obscam=$(target /usr/local/libexec/obscam/obscam)
+    installed_mediamtx=$(target /usr/local/libexec/obscam/mediamtx)
+    installed_config=$(target /etc/obscam/mediamtx.yml)
+    installed_binary_checksum=$(target /usr/local/share/obscam/mediamtx-linux-arm64.sha256)
+    installed_config_checksum=$(target /usr/local/share/obscam/mediamtx-config.sha256)
+    verifier=$(target /usr/local/libexec/obscam/verify-mediamtx)
+
+    [ -x "$installed_obscam" ] || fail "installed ObsCam binary is not executable"
+    "$verifier" \
+        "$installed_mediamtx" \
+        "$installed_config" \
+        "$installed_binary_checksum" \
+        "$installed_config_checksum"
+
+    if [ "$root" = / ]; then
+        getent passwd obscam | awk -F: '$1 == "obscam" && $6 == "/nonexistent" && $7 == "/usr/sbin/nologin" { found=1 } END { exit !found }' ||
+            fail "ObsCam non-login identity is missing"
+        id -nG obscam | tr ' ' '\n' | grep -Fx obscam-camera >/dev/null ||
+            fail "ObsCam identity lacks obscam-camera membership"
+        asi662mc_devices verify_asi662mc_permissions
+        encoder_devices verify_encoder_permissions
+        systemctl is-enabled --quiet obscam.target || fail "obscam.target is not enabled"
+        for component in obscam.service obscam-mediamtx.service obscam-media-network.service; do
+            if systemctl is-enabled --quiet "$component"; then
+                fail "$component must be enabled only through obscam.target"
+            fi
+        done
+    else
+        passwd=$(target /etc/passwd)
+        awk -F: '$1 == "obscam" && $6 == "/nonexistent" && $7 == "/usr/sbin/nologin" { found=1 } END { exit !found }' "$passwd" ||
+            fail "staged ObsCam non-login identity is missing"
+        systemctl --root="$root" is-enabled --quiet obscam.target || fail "staged obscam.target is not enabled"
+        for component in obscam.service obscam-mediamtx.service obscam-media-network.service; do
+            if systemctl --root="$root" is-enabled --quiet "$component"; then
+                fail "staged $component must be enabled only through obscam.target"
+            fi
+        done
+    fi
+}
+
+case "$operation" in
+    install)
+        [ -n "$obscam_binary" ] || usage
+        [ -n "$mediamtx_binary" ] || usage
+        [ -x "$obscam_binary" ] || fail "ObsCam binary is not executable: $obscam_binary"
+        [ -x "$mediamtx_binary" ] || fail "MediaMTX binary is not executable: $mediamtx_binary"
+        require_live_root
+
+        # Validate the compatibility pin before creating or changing any target.
+        "$deploy_dir/verify-mediamtx" \
+            "$mediamtx_binary" \
+            "$deploy_dir/mediamtx.yml" \
+            "$deploy_dir/mediamtx-linux-arm64.sha256" \
+            "$deploy_dir/mediamtx-config.sha256"
+
+        install_owned_file "$obscam_binary" /usr/local/libexec/obscam/obscam 0755
+        install_owned_file "$mediamtx_binary" /usr/local/libexec/obscam/mediamtx 0755
+        appliance_files install_owned_file
+
+        if [ "$root" = / ]; then
+            systemd-sysusers /etc/sysusers.d/obscam.conf
+            udevadm control --reload
+            udevadm trigger --action=change --subsystem-match=usb --attr-match=idVendor=03c3 --attr-match=idProduct=662b
+            asi662mc_devices set_asi662mc_permissions
+            encoder_devices set_encoder_permissions
+            systemctl daemon-reload
+            systemctl disable obscam-media-network.service obscam-mediamtx.service obscam.service
+            systemctl enable obscam.target
+        else
+            staged_passwd=$(target /etc/passwd)
+            if [ ! -f "$staged_passwd" ] || ! grep -Eq '^obscam:' "$staged_passwd"; then
+                systemd-sysusers --root="$root" obscam.conf
+            fi
+            systemctl --root="$root" disable obscam-media-network.service obscam-mediamtx.service obscam.service
+            systemctl --root="$root" enable obscam.target
+        fi
+        verify_installed
+        ;;
+    verify)
+        [ -z "$obscam_binary" ] || usage
+        [ -z "$mediamtx_binary" ] || usage
+        verify_installed
+        ;;
+    *) usage ;;
+esac

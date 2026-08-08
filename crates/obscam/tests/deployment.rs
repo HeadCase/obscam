@@ -1,10 +1,28 @@
-use std::{fs, path::PathBuf};
+use std::{fs, path::PathBuf, process::Command};
 
 fn repository_file(path: &str) -> String {
     let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("../..")
         .join(path);
     fs::read_to_string(&path).unwrap_or_else(|error| panic!("read {}: {error}", path.display()))
+}
+
+#[test]
+fn appliance_installer_preserves_owned_paths_and_rejects_drift() {
+    let installer_test = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../..")
+        .join("deploy/tests/install-appliance-test");
+    let output = Command::new(&installer_test)
+        .output()
+        .unwrap_or_else(|error| panic!("run {}: {error}", installer_test.display()));
+
+    assert!(
+        output.status.success(),
+        "{} failed\nstdout:\n{}\nstderr:\n{}",
+        installer_test.display(),
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
 }
 
 #[test]
@@ -46,6 +64,123 @@ fn mediamtx_service_enters_the_dedicated_network_namespace() {
 }
 
 #[test]
+fn obscam_and_mediamtx_are_independently_supervised() {
+    let obscam = repository_file("deploy/systemd/obscam.service");
+    let mediamtx = repository_file("deploy/systemd/obscam-mediamtx.service");
+
+    assert_eq!(directive_values(&obscam, "User"), ["obscam"]);
+    assert_eq!(directive_values(&obscam, "Restart"), ["always"]);
+    assert_eq!(directive_values(&obscam, "RestartSec"), ["5s"]);
+    assert_eq!(directive_values(&obscam, "StartLimitIntervalSec"), ["0"]);
+    assert!(!obscam.contains("WatchdogSec="));
+    assert!(!obscam.contains("obscam-mediamtx.service"));
+    assert!(!mediamtx.contains("obscam.service"));
+
+    for unit in [&obscam, &mediamtx] {
+        assert_eq!(directive_values(unit, "Restart"), ["always"]);
+        assert!(!unit.contains("network-online.target"));
+        assert!(!unit.contains("WireGuard"));
+        assert!(!unit.contains("remote-fs.target"));
+        assert_eq!(directive_values(unit, "StandardOutput"), ["journal"]);
+        assert_eq!(directive_values(unit, "StandardError"), ["journal"]);
+        assert_eq!(directive_values(unit, "LogRateLimitIntervalSec"), ["30s"]);
+        assert!(!directive_values(unit, "LogRateLimitBurst").is_empty());
+        assert_eq!(directive_values(unit, "CPUWeight"), ["200"]);
+        assert_eq!(directive_values(unit, "IOWeight"), ["200"]);
+        assert!(!directive_values(unit, "MemoryHigh").is_empty());
+        assert!(!directive_values(unit, "MemoryMax").is_empty());
+        assert_eq!(directive_values(unit, "OOMScoreAdjust"), ["-250"]);
+    }
+}
+
+#[test]
+fn appliance_target_is_the_single_operator_lifecycle_unit() {
+    let target = repository_file("deploy/systemd/obscam.target");
+    let members = [
+        repository_file("deploy/systemd/obscam.service"),
+        repository_file("deploy/systemd/obscam-mediamtx.service"),
+        repository_file("deploy/systemd/obscam-media-network.service"),
+    ];
+
+    assert_eq!(
+        directive_values(&target, "Wants"),
+        ["obscam-media-network.service obscam-mediamtx.service obscam.service"]
+    );
+    assert_eq!(directive_values(&target, "WantedBy"), ["multi-user.target"]);
+    assert!(!target.contains("allsky.service"));
+
+    for member in members {
+        assert_eq!(directive_values(&member, "PartOf"), ["obscam.target"]);
+    }
+}
+
+#[test]
+fn operations_document_all_required_read_only_diagnostics() {
+    let guide = repository_file("docs/agents/local-startup.md");
+
+    for operation in ["start", "stop", "restart"] {
+        assert!(guide.contains(&format!("sudo systemctl {operation} obscam.target")));
+    }
+
+    for signal in [
+        "systemctl status",
+        "journalctl",
+        "verify-mediamtx",
+        "/api/v1/health",
+        "mnt-asiair.automount",
+        "mnt-library.automount",
+        "wg show wg0",
+        "MemoryCurrent",
+        "CPUUsageNSec",
+        "vcgencmd get_throttled",
+    ] {
+        assert!(
+            guide.contains(signal),
+            "missing diagnostic signal: {signal}"
+        );
+    }
+    assert!(!guide.contains("wg show wg1"));
+}
+
+#[test]
+fn obscam_identity_receives_only_the_camera_and_encoder_devices_it_owns() {
+    let sysusers = repository_file("deploy/sysusers.d/obscam.conf");
+    let rules = repository_file("deploy/udev/99-z-obscam.rules");
+    let unit = repository_file("deploy/systemd/obscam.service");
+    let installer = repository_file("deploy/install-appliance");
+
+    assert!(sysusers.contains("u obscam - \"ObsCam camera owner\" /nonexistent /usr/sbin/nologin"));
+    assert!(sysusers.contains("g obscam-camera -"));
+    assert!(sysusers.contains("m obscam obscam-camera"));
+    assert!(!sysusers.contains("obscam-encoder"));
+
+    assert!(rules.contains("ATTR{idVendor}==\"03c3\""));
+    assert!(rules.contains("ATTR{idProduct}==\"662b\""));
+    assert!(rules.contains("GROUP:=\"obscam-camera\", MODE:=\"0660\""));
+    assert!(rules.contains("ATTR{name}==\"bcm2835-codec-encode\""));
+    assert!(rules.contains("OWNER:=\"obscam\", GROUP:=\"video\", MODE:=\"0660\""));
+    assert!(!rules.contains("ATTR{idVendor}==\"03c3\", GROUP="));
+
+    assert_eq!(
+        directive_values(&unit, "SupplementaryGroups"),
+        ["obscam-camera"]
+    );
+    assert_eq!(directive_values(&unit, "DevicePolicy"), ["closed"]);
+    assert_eq!(
+        directive_values(&unit, "DeviceAllow"),
+        ["char-usb_device rw", "char-video4linux rw"]
+    );
+    assert_eq!(
+        directive_values(&unit, "RestrictAddressFamilies"),
+        ["AF_UNIX AF_INET AF_INET6 AF_NETLINK"]
+    );
+    assert!(!unit.contains("PrivateDevices=yes"));
+    assert!(installer.contains("/sys/class/video4linux/video*"));
+    assert!(installer.contains("chown obscam:video"));
+    assert!(!installer.contains("udevadm settle"));
+}
+
+#[test]
 fn mediamtx_metrics_are_readable_only_on_the_private_media_link() {
     let config = repository_file("deploy/mediamtx.yml");
     let rules = repository_file("deploy/obscam-media.nft");
@@ -66,6 +201,31 @@ fn mediamtx_metrics_are_readable_only_on_the_private_media_link() {
     assert!(rules.contains(
         "iifname \"obscam-media0\" ip saddr 169.254.218.2 tcp sport 9998 ct state established accept\n        iifname \"obscam-media0\" drop"
     ));
+}
+
+#[test]
+fn mediamtx_startup_rejects_binary_or_configuration_drift() {
+    let unit = repository_file("deploy/systemd/obscam-mediamtx.service");
+    let verifier = repository_file("deploy/verify-mediamtx");
+    let binary_checksum = repository_file("deploy/mediamtx-linux-arm64.sha256");
+    let config_checksum = repository_file("deploy/mediamtx-config.sha256");
+
+    assert_eq!(
+        directive_values(&unit, "ExecStartPre"),
+        [
+            "/usr/local/libexec/obscam/verify-mediamtx /usr/local/libexec/obscam/mediamtx /etc/obscam/mediamtx.yml /usr/local/share/obscam/mediamtx-linux-arm64.sha256 /usr/local/share/obscam/mediamtx-config.sha256"
+        ]
+    );
+    assert!(verifier.contains("expected_version=v1.19.3"));
+    assert!(verifier.contains("MediaMTX configuration must disable MoQ exactly once"));
+    assert!(
+        binary_checksum
+            .contains("b3b2b519420f24a1f262feccdfbee474c8bdedcbf318d5ec4d586f582dfacb00")
+    );
+    assert!(
+        config_checksum
+            .contains("91fa713f33ba529ebf07026fd99b75dd0dd9c02d562b1881aa7f9289518e70fa")
+    );
 }
 
 #[test]
@@ -91,6 +251,12 @@ fn media_namespace_contains_only_a_private_point_to_point_link() {
         directive_values(&unit, "CapabilityBoundingSet"),
         ["CAP_NET_ADMIN CAP_SYS_ADMIN"]
     );
+    assert_eq!(directive_values(&unit, "Restart"), ["on-failure"]);
+    assert_eq!(directive_values(&unit, "RestartSec"), ["5s"]);
+    assert_eq!(directive_values(&unit, "StartLimitIntervalSec"), ["0"]);
+    assert_eq!(directive_values(&unit, "StandardOutput"), ["journal"]);
+    assert_eq!(directive_values(&unit, "StandardError"), ["journal"]);
+    assert_eq!(directive_values(&unit, "LogRateLimitIntervalSec"), ["30s"]);
     assert!(!unit.contains("ProtectSystem="));
     assert!(!unit.contains("ProtectHome="));
 }

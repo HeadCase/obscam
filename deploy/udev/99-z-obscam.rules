@@ -1,0 +1,9 @@
+# The USB descriptors identify the ASI662MC model but do not expose its factory
+# serial. Limit the device node to the camera-owner group; Rust remains the
+# fail-closed factory-serial boundary before opening the SDK handle.
+SUBSYSTEM=="usb", ENV{DEVTYPE}=="usb_device", ATTR{idVendor}=="03c3", ATTR{idProduct}=="662b", GROUP:="obscam-camera", MODE:="0660"
+
+# FFmpeg needs only the Raspberry Pi hardware H.264 encoder. Preserve the
+# host-wide video group for existing operators while assigning this exact node
+# to the ObsCam identity; other codec and ISP nodes remain root:video.
+SUBSYSTEM=="video4linux", ATTR{name}=="bcm2835-codec-encode", OWNER:="obscam", GROUP:="video", MODE:="0660"

@@ -1,149 +1,165 @@
-# Local Production Startup
+# Managed Appliance Startup
 
-This is the temporary production startup procedure until GRE-224 and GRE-226
-complete independently supervised appliance services and qualified releases.
-It runs the real ASI662MC, the release-mode Rust application, hardware H.264,
-and the pinned MediaMTX binary. MediaMTX uses a dedicated network namespace
-because Pion requires netlink while creating ICE peer connections. It can see
-only namespace loopback and a private media veth. Exact-destination nftables
-rules expose WHEP TCP/8889 and ICE UDP/8189 only at the two approved service
-addresses. ObsCam remains a manual foreground process. This is not a
-deterministic test stack, and GRE-224 still owns the final installer and managed
-service integration.
+GRE-224 installs ObsCam and pinned MediaMTX as independently supervised
+appliance services. Until GRE-226 adds immutable release activation and
+rollback, the installer consumes two explicit, locally available binaries and
+refuses to replace differing destinations other than the known GRE-218
+temporary-service predecessors.
 
-## Prerequisites
+The managed stack runs the real ASI662MC, release-mode Rust application,
+hardware H.264, and MediaMTX v1.19.3. MediaMTX remains inside the dedicated
+`obscam-media` network namespace. ObsCam neither requires nor follows MediaMTX;
+camera capture, control, and local recovery start independently when the relay
+is absent.
 
-- Run commands from the repository root.
-- `/usr/local/bin/mediamtx` must report version `v1.19.3`.
-- Its SHA-256 must match `deploy/mediamtx-linux-arm64.sha256`.
-- `/etc/obscam/mediamtx.yml` is the installed host configuration. It matches
-  the checked production media path while advertising only the permitted
-  `wg0` and LAN addresses. Its read-only metrics endpoint listens only on the
-  namespace-private `169.254.218.2:9998` address so ObsCam can observe exact
-  relay-path readiness.
-- `/etc/obscam/obscam-media.nft` and
-  `/usr/local/libexec/obscam/setup-media-network` match the checked-in namespace
-  boundary. IPv4 forwarding must already be enabled; the helper fails closed
-  and never changes that host-global setting.
-- `/etc/systemd/system/obscam-media-network.service` matches the checked-in
-  one-shot namespace owner.
-- `/etc/systemd/system/obscam-mediamtx.service` matches the checked-in temporary
-  unit. MediaMTX receives private-veth RTP and enters `/run/netns/obscam-media`.
-- The release binary must be built from the intended checkout.
+## Build and install
 
-Verify the installed relay:
-
-```sh
-mediamtx --version
-sha256sum /usr/local/bin/mediamtx
-sed -n '$p' deploy/mediamtx-linux-arm64.sha256
-cmp --silent deploy/mediamtx.yml /etc/obscam/mediamtx.yml
-cmp --silent deploy/obscam-media.nft /etc/obscam/obscam-media.nft
-cmp --silent deploy/setup-media-network \
-  /usr/local/libexec/obscam/setup-media-network
-cmp --silent deploy/systemd/obscam-media-network.service \
-  /etc/systemd/system/obscam-media-network.service
-cmp --silent deploy/systemd/obscam-mediamtx.service \
-  /etc/systemd/system/obscam-mediamtx.service
-/usr/sbin/sysctl -n net.ipv4.ip_forward
-```
-
-Build the browser assets and production application after changing either:
+Run from the repository root. Build browser assets before the release binary:
 
 ```sh
 npm test
 cargo build --release -p obscam
 ```
 
-## Start
-
-Install the reviewed temporary boundary after either checked-in deployment file
-changes:
-
-Before the first install, stop if either destination already exists with
-different content. Preserve a recoverable copy and obtain explicit operator
-approval to adopt that path; these commands are only authorized for absent,
-matching, or explicitly adopted destinations. GRE-224 must turn this manual
-boundary into an ownership-enforcing installer.
+Provide the exact MediaMTX v1.19.3 Linux ARM64 binary as an explicit installer
+input. The checked checksum is `deploy/mediamtx-linux-arm64.sha256`; the
+installer verifies its hash and reported version before changing the host.
 
 ```sh
-sudo install -D -m 0644 deploy/mediamtx.yml /etc/obscam/mediamtx.yml
-sudo install -D -m 0644 deploy/obscam-media.nft \
-  /etc/obscam/obscam-media.nft
-sudo install -D -m 0755 deploy/setup-media-network \
-  /usr/local/libexec/obscam/setup-media-network
-sudo install -D -m 0644 deploy/systemd/obscam-media-network.service \
-  /etc/systemd/system/obscam-media-network.service
-sudo install -D -m 0644 deploy/systemd/obscam-mediamtx.service \
-  /etc/systemd/system/obscam-mediamtx.service
-sudo systemctl daemon-reload
+sudo deploy/install-appliance install \
+  --obscam-binary target/release/obscam \
+  --mediamtx-binary /path/to/mediamtx
 ```
 
-Use two terminals. Start MediaMTX first only for clearer logs; ObsCam does not
-depend on startup ordering.
+The installer:
 
-Terminal one runs:
+- creates the non-login `obscam` identity and its exact camera-access group;
+- installs both binaries under `/usr/local/libexec/obscam`;
+- installs the pinned relay configuration, namespace/firewall boundary,
+  checksum manifests, udev rules, systemd units, and the operator-facing
+  `obscam.target`;
+- restricts ASI662MC `03c3:662b` to `root:obscam-camera 0660` while Rust retains
+  the factory-serial ownership check;
+- assigns only the named `bcm2835-codec-encode` node to the `obscam` owner while
+  preserving the host `video` group;
+- enables `obscam.target` as the single boot and operator lifecycle unit;
+- refuses unknown differing files or symlink destinations.
+
+Repeat the read-only installed contract check at any time:
 
 ```sh
-sudo systemctl start obscam-mediamtx.service
-sudo journalctl --follow --unit obscam-mediamtx.service
+sudo deploy/install-appliance verify
+systemd-analyze verify \
+  obscam.target \
+  obscam.service \
+  obscam-media-network.service \
+  obscam-mediamtx.service
 ```
 
-The installed configuration disables candidate advertisement from discovered
-interfaces and advertises only `10.44.0.1` and `192.168.1.200`. The namespace
-is the independent discovery boundary: MediaMTX can enumerate only `lo` and
-`media0`, while nftables translates only the two approved destination addresses
-and service ports. Forwarded namespace traffic is limited to established flows
-and ICE from UDP/8189 to the approved WireGuard and LAN client networks; other
-namespace forwarding and host access are dropped. No other host interface is
-named or visible to MediaMTX.
+GRE-226 will replace this binary-copy boundary with immutable compatibility
+sets, a stable active-release link, and automatic rollback.
 
-Terminal two runs the production application with its default real-camera
-configuration:
+## Start and reboot
+
+`obscam.target` is enabled for `multi-user.target`; no manual ordering is
+required:
 
 ```sh
-RUST_LOG=info target/release/obscam
+sudo systemctl start obscam.target
+sudo systemctl stop obscam.target
+sudo systemctl restart obscam.target
 ```
 
-Do not set `OBSCAM_CAMERA_SOURCE=deterministic` for a production session.
+The target is the normal operator interface. Its three members remain separate
+services, so an unexpected ObsCam or MediaMTX exit still restarts only the
+failed process. Direct per-service commands remain available for isolated
+diagnostics and recovery.
 
-## Open and verify
+At reboot, all three start from local readiness. They do not order themselves
+after `network-online.target`, WireGuard, DNS, internet access, remote mounts,
+or optional storage. ObsCam and MediaMTX do not order themselves after one
+another. The namespace owner is the only local prerequisite of MediaMTX.
 
-On the observatory LAN, open:
+Expected camera and FFmpeg faults recover inside Rust. Unexpected ObsCam,
+MediaMTX, or namespace-setup exits receive delayed systemd retries with no
+start-limit lockout. No systemd watchdog is configured.
 
-```text
-http://192.168.1.200:8080
-```
-
-Over the permitted WireGuard route, open:
-
-```text
-http://10.44.0.1:8080
-```
-
-The local health contracts are:
+## Verify the running stack
 
 ```sh
+systemctl is-active \
+  obscam.target \
+  obscam.service \
+  obscam-mediamtx.service \
+  obscam-media-network.service
 curl --fail http://127.0.0.1:8080/api/v1/health
 curl --fail http://127.0.0.1:8080/api/v1/runtime
+sudo journalctl --unit obscam.service --unit obscam-mediamtx.service
 ```
 
-MediaMTX should log that path `obscam` is online with one H.264 track. A
-browser WHEP connection should return HTTP 201 and display native 1920×1080
-video. `/api/v1/runtime` should report the relay ready only after MediaMTX's
-private metrics endpoint reports the `obscam` path ready. Stopping MediaMTX must make
-the relay unavailable without changing capture, encoder, settings, or lease
-state; restarting it must restore relay readiness while the continuing RTP
-publication establishes a fresh decodable GOP boundary.
-
-## Stop
-
-Press `Ctrl-C` once in the ObsCam terminal, then stop the temporary relay unit:
+The installed MediaMTX unit runs the private binary and refuses to start unless
+its binary hash, `v1.19.3` version, configuration hash, and exactly one
+MoQ-disabled setting all match:
 
 ```sh
-sudo systemctl stop obscam-mediamtx.service obscam-media-network.service
+systemctl show obscam-mediamtx.service -p ExecStartPre -p ExecStart
+/usr/local/libexec/obscam/verify-mediamtx \
+  /usr/local/libexec/obscam/mediamtx \
+  /etc/obscam/mediamtx.yml \
+  /usr/local/share/obscam/mediamtx-linux-arm64.sha256 \
+  /usr/local/share/obscam/mediamtx-config.sha256
 ```
 
-GRE-224 owns the complete installer, final service identity decisions, reboot
-and recovery qualification, and integration of this temporary MediaMTX unit
-into the independently supervised appliance service set.
+On the observatory LAN, open `http://192.168.1.200:8080`. Over the permitted
+ObsCam WireGuard route, open `http://10.44.0.1:8080`. Never inspect or advertise
+`wg1`; it is unrelated storage infrastructure.
+
+MediaMTX should report path `obscam` online with one H.264 track. A browser WHEP
+connection should return HTTP 201 and display native 1920×1080 video. Stopping
+MediaMTX must leave capture, settings, control, and encoder ownership intact;
+restarting it must restore relay readiness and a fresh decodable GOP without
+restarting ObsCam.
+
+## Diagnostics
+
+Managed logs exist only in journald and are rate-limited per unit:
+
+```sh
+systemctl status --no-pager \
+  obscam.service obscam-mediamtx.service obscam-media-network.service
+sudo journalctl --unit obscam.service --since today
+sudo journalctl --unit obscam-mediamtx.service --since today
+sudo journalctl --unit obscam-media-network.service --since today
+systemctl show obscam.service obscam-mediamtx.service \
+  -p User -p Group -p DynamicUser -p NRestarts -p ActiveState \
+  -p CPUUsageNSec -p MemoryCurrent -p MemoryPeak -p TasksCurrent
+```
+
+The following read-only checks cover the rest of the qualified deployment
+signals without activating optional mounts or probing unrelated interfaces:
+
+```sh
+# Qualified binaries, configuration, and health
+sha256sum /usr/local/libexec/obscam/obscam
+/usr/local/libexec/obscam/verify-mediamtx \
+  /usr/local/libexec/obscam/mediamtx \
+  /etc/obscam/mediamtx.yml \
+  /usr/local/share/obscam/mediamtx-linux-arm64.sha256 \
+  /usr/local/share/obscam/mediamtx-config.sha256
+curl --fail http://127.0.0.1:8080/api/v1/health
+
+# Optional storage and the approved browser VPN only
+systemctl status --no-pager mnt-asiair.automount mnt-library.automount
+wg show wg0
+
+# Host capacity and Raspberry Pi thermal/throttling state
+systemctl show obscam.service obscam-mediamtx.service \
+  -p CPUUsageNSec -p MemoryCurrent -p MemoryPeak -p TasksCurrent
+free -h
+vcgencmd measure_temp
+vcgencmd get_throttled
+cat /sys/class/thermal/thermal_zone0/temp
+```
+
+Do not substitute a deterministic camera, ambient MediaMTX binary, secondary
+media path, or custom startup stack for production qualification.
