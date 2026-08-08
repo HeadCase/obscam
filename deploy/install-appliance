@@ -121,6 +121,7 @@ appliance_files() {
     "$action" "$deploy_dir/obscam-media.nft" /etc/obscam/obscam-media.nft 0644
     "$action" "$deploy_dir/setup-media-network" /usr/local/libexec/obscam/setup-media-network 0755
     "$action" "$deploy_dir/verify-mediamtx" /usr/local/libexec/obscam/verify-mediamtx 0755
+    "$action" "$deploy_dir/obscam-diagnostics" /usr/local/libexec/obscam/obscam-diagnostics 0755
     "$action" "$deploy_dir/mediamtx-linux-arm64.sha256" /usr/local/share/obscam/mediamtx-linux-arm64.sha256 0644
     "$action" "$deploy_dir/mediamtx-config.sha256" /usr/local/share/obscam/mediamtx-config.sha256 0644
     "$action" "$deploy_dir/sysusers.d/obscam.conf" /etc/sysusers.d/obscam.conf 0644
@@ -130,6 +131,7 @@ appliance_files() {
     # Accept only the checked GRE-218 and GRE-224 predecessor definitions.
     "$action" "$deploy_dir/systemd/obscam-media-network.service" /etc/systemd/system/obscam-media-network.service 0644 "b3242f896dd6c8f2f6c3fd859a7bb05f9b55c9c16b488ec3c783bc8646fb69f1 57af723c96be3590e0b91325c1b9f64e0543f8599f4e593030ce85170248f999" pre-obscam-target
     "$action" "$deploy_dir/systemd/obscam-mediamtx.service" /etc/systemd/system/obscam-mediamtx.service 0644 "cf3d5b5a2db2ffc6a9851f18a569af07ef8723b76d2a63b5cbb18bc8699c461d 8f7c2c8cd7a22f2fec33de9b21b3fcd6948d3bfe2ab277f43fdda0f79a6dad21" pre-obscam-target
+    "$action" "$deploy_dir/systemd/allsky.service.d/50-obscam-resource-policy.conf" /etc/systemd/system/allsky.service.d/50-obscam-resource-policy.conf 0644
 }
 
 compare_manifest_file() {

@@ -49,8 +49,10 @@ See:
 - `docs/agents/issue-tracker.md` for the Linear workflow
 - `docs/operations/asiair-sync.md` for ASIAIR synchronization operations and
   recovery
+- `docs/operations/shared-host.md` for resource policy and read-only diagnostics
 - `docs/verification/asiair-sync.md` for ASIAIR synchronization acceptance and
   deployed evidence
+- `docs/verification/gre-225-shared-host.md` for shared-host qualification
 
 ## Quality gate
 

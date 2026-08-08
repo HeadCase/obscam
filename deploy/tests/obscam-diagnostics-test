@@ -1,0 +1,67 @@
+#!/bin/sh
+set -eu
+
+repo=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)
+diagnostics=$repo/deploy/obscam-diagnostics
+tmp=$(mktemp -d)
+trap 'rm -rf "$tmp"' EXIT HUP INT TERM
+
+tools=$tmp/tools
+capture=$tmp/calls
+mkdir -p "$tools"
+
+make_fake() {
+    command=$1
+    cat >"$tools/$command" <<'EOF'
+#!/bin/sh
+printf '%s:%s\n' "${0##*/}" "$*" >>"$DIAGNOSTICS_CAPTURE"
+if [ "${0##*/}" = curl ]; then
+    echo "health unavailable" >&2
+    exit 7
+fi
+printf '%s output\n' "${0##*/}"
+EOF
+    chmod +x "$tools/$command"
+}
+
+for command in cat curl findmnt free journalctl sha256sum systemctl vcgencmd wg; do
+    make_fake "$command"
+done
+
+export DIAGNOSTICS_CAPTURE=$capture
+PATH=$tools "$diagnostics" >"$tmp/output" 2>"$tmp/errors"
+
+fail() {
+    echo "FAIL: $*" >&2
+    exit 1
+}
+
+for section in \
+    "qualified versions" \
+    "service state" \
+    "recent logs" \
+    "health" \
+    "mounts" \
+    "VPN state" \
+    "resources" \
+    "temperature and throttling"; do
+    grep -F "== $section ==" "$tmp/output" >/dev/null ||
+        fail "missing section: $section"
+done
+
+grep -F "curl: command failed with status 7" "$tmp/output" >/dev/null ||
+    fail "health failure was not reported"
+grep -F "vcgencmd:measure_temp" "$capture" >/dev/null ||
+    fail "a failed health check stopped later diagnostics"
+grep -F "journalctl:--no-pager --lines=100" "$capture" >/dev/null ||
+    fail "journal output is not bounded to 100 records"
+grep -F "wg:show wg0" "$capture" >/dev/null ||
+    fail "approved WireGuard interface was not inspected"
+if grep -F "wg1" "$capture" "$diagnostics" >/dev/null; then
+    fail "unrelated WireGuard infrastructure was inspected or advertised"
+fi
+if grep -E '(systemctl:(start|stop|restart)|mount:|umount:)' "$capture" >/dev/null; then
+    fail "diagnostics performed a mutating service or mount operation"
+fi
+
+echo "obscam-diagnostics tests passed"

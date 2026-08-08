@@ -76,8 +76,9 @@ sudo systemctl restart mnt-asiair.automount mnt-library.automount
 
 ## Installation
 
-This manual procedure remains in force until GRE-224 provides the managed
-appliance installer:
+The synchronization identity and host-specific configuration remain separate
+from the camera-appliance installer. Install this independently supervised
+worker with:
 
 ```sh
 sudo install -d -o root -g root -m 0755 /etc/obscam /usr/local/libexec/obscam

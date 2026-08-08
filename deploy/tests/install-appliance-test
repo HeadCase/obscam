@@ -12,6 +12,7 @@ mkdir -p "$fixture_deploy/systemd" "$fixture_deploy/sysusers.d" "$fixture_deploy
 
 cp "$repo/deploy/install-appliance" "$fixture_deploy/install-appliance"
 cp "$repo/deploy/verify-mediamtx" "$fixture_deploy/verify-mediamtx"
+cp "$repo/deploy/obscam-diagnostics" "$fixture_deploy/obscam-diagnostics"
 cp "$repo/deploy/mediamtx.yml" "$fixture_deploy/mediamtx.yml"
 cp "$repo/deploy/obscam-media.nft" "$fixture_deploy/obscam-media.nft"
 cp "$repo/deploy/setup-media-network" "$fixture_deploy/setup-media-network"
@@ -19,6 +20,9 @@ cp "$repo/deploy/systemd/obscam.service" "$fixture_deploy/systemd/obscam.service
 cp "$repo/deploy/systemd/obscam.target" "$fixture_deploy/systemd/obscam.target"
 cp "$repo/deploy/systemd/obscam-media-network.service" "$fixture_deploy/systemd/obscam-media-network.service"
 cp "$repo/deploy/systemd/obscam-mediamtx.service" "$fixture_deploy/systemd/obscam-mediamtx.service"
+mkdir -p "$fixture_deploy/systemd/allsky.service.d"
+cp "$repo/deploy/systemd/allsky.service.d/50-obscam-resource-policy.conf" \
+    "$fixture_deploy/systemd/allsky.service.d/50-obscam-resource-policy.conf"
 cp "$repo/deploy/sysusers.d/obscam.conf" "$fixture_deploy/sysusers.d/obscam.conf"
 cp "$repo/deploy/udev/99-z-obscam.rules" "$fixture_deploy/udev/99-z-obscam.rules"
 
@@ -62,6 +66,14 @@ cmp -s "$obscam_binary" "$root/usr/local/libexec/obscam/obscam" ||
     fail "ObsCam binary was not installed"
 cmp -s "$mediamtx_binary" "$root/usr/local/libexec/obscam/mediamtx" ||
     fail "MediaMTX binary was not installed"
+cmp -s \
+    "$fixture_deploy/obscam-diagnostics" \
+    "$root/usr/local/libexec/obscam/obscam-diagnostics" ||
+    fail "read-only diagnostics were not installed"
+cmp -s \
+    "$fixture_deploy/systemd/allsky.service.d/50-obscam-resource-policy.conf" \
+    "$root/etc/systemd/system/allsky.service.d/50-obscam-resource-policy.conf" ||
+    fail "AllSky resource policy was not installed"
 grep -Eq '^obscam:[^:]*:[^:]+:[^:]+:ObsCam camera owner:/nonexistent:/usr/sbin/nologin$' \
     "$root/etc/passwd" || fail "non-login ObsCam identity was not created"
 find "$root/etc/systemd/system/multi-user.target.wants" -type l \
