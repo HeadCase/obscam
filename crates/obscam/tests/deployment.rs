@@ -44,6 +44,37 @@ fn diagnostics_are_bounded_read_only_and_fail_soft() {
 }
 
 #[test]
+fn live_resource_controller_preflight_fails_closed() {
+    let verifier_test = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../..")
+        .join("deploy/tests/verify-memory-controller-test");
+    let output = Command::new(&verifier_test)
+        .output()
+        .unwrap_or_else(|error| panic!("run {}: {error}", verifier_test.display()));
+
+    assert!(
+        output.status.success(),
+        "{} failed\nstdout:\n{}\nstderr:\n{}",
+        verifier_test.display(),
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let installer = repository_file("deploy/install-appliance");
+    let live_install = installer
+        .split("case \"$operation\" in")
+        .nth(1)
+        .expect("installer operation dispatch");
+    let preflight = live_install
+        .find("verify-memory-controller")
+        .expect("live memory-controller preflight");
+    let first_install = live_install
+        .find("install_owned_file")
+        .expect("first owned-file mutation");
+    assert!(preflight < first_install);
+}
+
+#[test]
 fn mediamtx_advertises_only_permitted_browser_hosts() {
     let config = repository_file("deploy/mediamtx.yml");
 

@@ -121,6 +121,7 @@ appliance_files() {
     "$action" "$deploy_dir/obscam-media.nft" /etc/obscam/obscam-media.nft 0644
     "$action" "$deploy_dir/setup-media-network" /usr/local/libexec/obscam/setup-media-network 0755
     "$action" "$deploy_dir/verify-mediamtx" /usr/local/libexec/obscam/verify-mediamtx 0755
+    "$action" "$deploy_dir/verify-memory-controller" /usr/local/libexec/obscam/verify-memory-controller 0755
     "$action" "$deploy_dir/obscam-diagnostics" /usr/local/libexec/obscam/obscam-diagnostics 0755
     "$action" "$deploy_dir/mediamtx-linux-arm64.sha256" /usr/local/share/obscam/mediamtx-linux-arm64.sha256 0644
     "$action" "$deploy_dir/mediamtx-config.sha256" /usr/local/share/obscam/mediamtx-config.sha256 0644
@@ -204,6 +205,7 @@ verify_installed() {
         "$installed_config_checksum"
 
     if [ "$root" = / ]; then
+        /usr/local/libexec/obscam/verify-memory-controller
         getent passwd obscam | awk -F: '$1 == "obscam" && $6 == "/nonexistent" && $7 == "/usr/sbin/nologin" { found=1 } END { exit !found }' ||
             fail "ObsCam non-login identity is missing"
         id -nG obscam | tr ' ' '\n' | grep -Fx obscam-camera >/dev/null ||
@@ -236,6 +238,10 @@ case "$operation" in
         [ -x "$obscam_binary" ] || fail "ObsCam binary is not executable: $obscam_binary"
         [ -x "$mediamtx_binary" ] || fail "MediaMTX binary is not executable: $mediamtx_binary"
         require_live_root
+
+        if [ "$root" = / ]; then
+            "$deploy_dir/verify-memory-controller"
+        fi
 
         # Validate the compatibility pin before creating or changing any target.
         "$deploy_dir/verify-mediamtx" \

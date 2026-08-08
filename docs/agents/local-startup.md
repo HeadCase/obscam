@@ -14,6 +14,13 @@ is absent.
 
 ## Build and install
 
+The live host must expose the cgroup v2 memory controller. The installer checks
+`/sys/fs/cgroup/cgroup.controllers` before changing any live file and refuses
+installation when `memory` is absent. On the qualified Raspberry Pi OS image,
+append `cgroup_enable=memory cgroup_memory=1` to the existing single line in
+`/boot/firmware/cmdline.txt`, reboot, and confirm `memory` is present before
+installation. Do not replace the existing root, console, or device arguments.
+
 Run from the repository root. Build browser assets before the release binary:
 
 ```sh
@@ -51,6 +58,7 @@ Repeat the read-only installed contract check at any time:
 
 ```sh
 sudo deploy/install-appliance verify
+/usr/local/libexec/obscam/verify-memory-controller
 systemd-analyze verify \
   obscam.target \
   obscam.service \

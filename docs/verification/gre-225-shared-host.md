@@ -20,10 +20,13 @@ Run:
 sh -n \
   deploy/install-appliance \
   deploy/obscam-diagnostics \
+  deploy/verify-memory-controller \
   deploy/tests/install-appliance-test \
-  deploy/tests/obscam-diagnostics-test
+  deploy/tests/obscam-diagnostics-test \
+  deploy/tests/verify-memory-controller-test
 deploy/tests/install-appliance-test
 deploy/tests/obscam-diagnostics-test
+deploy/tests/verify-memory-controller-test
 deploy/tests/asiair-sync-test
 cargo fmt --all -- --check
 cargo clippy --workspace --all-targets --all-features -- -D warnings
@@ -82,3 +85,29 @@ qualified missing ASIAIR/NAS behavior and the bounded synchronization policy.
 The GRE-225 four-viewer combined-load run must be recorded here after the
 reviewed branch is installed. Until that hardware gate passes, GRE-225 is not
 fully qualified for completion.
+
+### Initial combined-load evidence
+
+Status: **resource policy partial; memory enforcement blocked on 2026-08-08**.
+
+The reviewed policy and diagnostics installed without restarting ObsCam,
+MediaMTX, or AllSky. AllSky adopted CPU/I/O weights of 100 and OOM adjustment
+-100 under its original PID; the two interactive services retained 200/200 and
+-250, while the active sync worker retained 10/10, idle I/O scheduling, and
+500. Every managed service retained zero supervised restarts.
+
+A genuine sync cycle copied full FITS files at the configured 512 KiB/s with
+one transfer and two checkers. Four independent WebRTC readers from the
+approved `wg0` peer remained ready during the transfer. Over a 30-second
+sample, each reader advanced by approximately 3,172 RTP packets and MediaMTX
+reported zero discarded frames. ObsCam health remained fully ready, AllSky and
+`wg0` remained active, temperature fell from 68.1 C to 66.7 C, and throttling
+remained `0x0`.
+
+The run then exposed that the host kernel command line contained
+`cgroup_disable=memory`. Although `CONFIG_MEMCG=y` and systemd displayed the
+configured limits, the cgroup v2 root exposed only CPU, I/O, and PID
+controllers; no service had `memory.current`, `memory.high`, or `memory.max`.
+The memory thresholds were therefore not enforceable during this run. Repeat
+the combined-load qualification after enabling the controller and rebooting;
+do not treat this partial run as final GRE-225 acceptance.

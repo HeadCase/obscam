@@ -58,5 +58,30 @@ It does not probe the paths or trigger their automounts. The report deliberately
 names only the approved browser VPN interface and must never be broadened to
 unrelated infrastructure.
 
+## Memory-controller prerequisite
+
+`MemoryHigh` and `MemoryMax` require the cgroup v2 memory controller. A unit
+file can retain those properties even when the kernel controller is disabled,
+so successful `systemd-analyze verify` is not proof that the limits are active.
+The appliance installer therefore fails closed on a live host unless `memory`
+appears in:
+
+```sh
+cat /sys/fs/cgroup/cgroup.controllers
+```
+
+Raspberry Pi firmware can add `cgroup_disable=memory` ahead of the arguments in
+`cmdline.txt`. On the qualified host, retain the existing single boot line and
+append:
+
+```text
+cgroup_enable=memory cgroup_memory=1
+```
+
+After reboot, confirm that `/proc/cmdline` no longer disables the controller,
+`memory` appears in the controller inventory, and each managed service cgroup
+contains `memory.current`, `memory.high`, and `memory.max`. The diagnostic
+command reports these facts and their actual values explicitly.
+
 Use [`../verification/gre-225-shared-host.md`](../verification/gre-225-shared-host.md)
 for repository and deployed qualification.

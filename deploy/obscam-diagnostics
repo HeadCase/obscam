@@ -15,6 +15,35 @@ run() {
     fi
 }
 
+report_cgroup_memory() {
+    cgroup_root=${OBSCAM_DIAGNOSTICS_CGROUP_ROOT:-/sys/fs/cgroup}
+    controllers=$cgroup_root/cgroup.controllers
+    if [ ! -r "$controllers" ] || ! IFS= read -r available_controllers <"$controllers"; then
+        printf 'memory controller: unavailable (controller inventory unreadable)\n'
+        return
+    fi
+
+    case " $available_controllers " in
+        *" memory "*) printf 'memory controller: enabled\n' ;;
+        *)
+            printf 'memory controller: unavailable\n'
+            return
+            ;;
+    esac
+
+    for unit in obscam.service obscam-mediamtx.service allsky.service asiair-sync.service; do
+        unit_cgroup=$cgroup_root/system.slice/$unit
+        for property in memory.current memory.peak memory.high memory.max; do
+            value_path=$unit_cgroup/$property
+            if [ -r "$value_path" ] && IFS= read -r value <"$value_path"; then
+                printf '%s %s=%s\n' "$unit" "$property" "$value"
+            else
+                printf '%s %s=unavailable\n' "$unit" "$property"
+            fi
+        done
+    done
+}
+
 section "qualified versions"
 run sha256sum /usr/local/libexec/obscam/obscam
 run /usr/local/libexec/obscam/mediamtx --version
@@ -70,6 +99,7 @@ section "VPN state"
 run wg show wg0
 
 section "resources"
+report_cgroup_memory
 run systemctl show \
     obscam.service \
     obscam-mediamtx.service \
