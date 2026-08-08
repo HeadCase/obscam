@@ -258,7 +258,7 @@ case "$operation" in
         else
             staged_passwd=$(target /etc/passwd)
             if [ ! -f "$staged_passwd" ] || ! grep -Eq '^obscam:' "$staged_passwd"; then
-                systemd-sysusers --root="$root" /etc/sysusers.d/obscam.conf
+                systemd-sysusers --root="$root" obscam.conf
             fi
             systemctl --root="$root" disable obscam-media-network.service obscam-mediamtx.service obscam.service
             systemctl --root="$root" enable obscam.target
