@@ -3,7 +3,7 @@ set -eu
 
 repo=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)
 tmp=$(mktemp -d)
-trap 'rm -rf "$tmp"' EXIT HUP INT TERM
+trap 'chmod -R u+w "$tmp" 2>/dev/null || true; rm -rf "$tmp"' EXIT HUP INT TERM
 
 fixture=$tmp/fixture
 fixture_deploy=$fixture/deploy
@@ -14,6 +14,9 @@ cp "$repo/deploy/install-appliance" "$fixture_deploy/install-appliance"
 cp "$repo/deploy/verify-mediamtx" "$fixture_deploy/verify-mediamtx"
 cp "$repo/deploy/obscam-diagnostics" "$fixture_deploy/obscam-diagnostics"
 cp "$repo/deploy/verify-memory-controller" "$fixture_deploy/verify-memory-controller"
+cp "$repo/deploy/verify-release" "$fixture_deploy/verify-release"
+cp "$repo/deploy/validate-host-config" "$fixture_deploy/validate-host-config"
+cp "$repo/deploy/check-release" "$fixture_deploy/check-release"
 cp "$repo/deploy/mediamtx.yml" "$fixture_deploy/mediamtx.yml"
 cp "$repo/deploy/obscam-media.nft" "$fixture_deploy/obscam-media.nft"
 cp "$repo/deploy/setup-media-network" "$fixture_deploy/setup-media-network"
@@ -26,9 +29,13 @@ cp "$repo/deploy/systemd/allsky.service.d/50-obscam-resource-policy.conf" \
     "$fixture_deploy/systemd/allsky.service.d/50-obscam-resource-policy.conf"
 cp "$repo/deploy/sysusers.d/obscam.conf" "$fixture_deploy/sysusers.d/obscam.conf"
 cp "$repo/deploy/udev/99-z-obscam.rules" "$fixture_deploy/udev/99-z-obscam.rules"
+mkdir -p "$fixture/web/dist"
+cp "$repo/web/dist/index.html" "$repo/web/dist/app.js" "$repo/web/dist/styles.css" "$fixture/web/dist/"
 
 obscam_binary=$tmp/obscam
 mediamtx_binary=$tmp/mediamtx
+zwo_sdk=$tmp/libASICamera2.so.1.41
+host_config=$tmp/host.env
 cat >"$obscam_binary" <<'EOF'
 #!/bin/sh
 exit 0
@@ -42,11 +49,23 @@ fi
 exit 0
 EOF
 chmod +x "$obscam_binary" "$mediamtx_binary"
+printf 'qualified SDK fixture\n' >"$zwo_sdk"
+cat >"$host_config" <<'EOF'
+OBSCAM_BIND_ADDRESS=0.0.0.0:8080
+OBSCAM_WHEP_PORT=8889
+OBSCAM_WHEP_PATH=/obscam/whep
+OBSCAM_CAMERA_SOURCE=production
+OBSCAM_DEFAULT_EXPOSURE_MS=500
+OBSCAM_DEFAULT_GAIN=100
+OBSCAM_DEFAULT_TREATMENT=monochrome
+EOF
 
 binary_hash=$(sha256sum "$mediamtx_binary" | awk '{ print $1 }')
 config_hash=$(sha256sum "$fixture_deploy/mediamtx.yml" | awk '{ print $1 }')
 printf '%s  mediamtx\n' "$binary_hash" >"$fixture_deploy/mediamtx-linux-arm64.sha256"
 printf '%s  mediamtx.yml\n' "$config_hash" >"$fixture_deploy/mediamtx-config.sha256"
+sdk_hash=$(sha256sum "$zwo_sdk" | awk '{ print $1 }')
+printf '%s  libASICamera2.so.1.41\n' "$sdk_hash" >"$fixture_deploy/zwo-sdk-linux-arm64.sha256"
 
 fail() {
     echo "FAIL: $*" >&2
@@ -54,63 +73,426 @@ fail() {
 }
 
 install_fixture() {
-    "$fixture_deploy/install-appliance" install \
-        --root "$root" \
-        --obscam-binary "$obscam_binary" \
-        --mediamtx-binary "$mediamtx_binary"
+    fixture_release_id=${1:-gre-226-test-1}
+    fixture_obscam_binary=${2:-$obscam_binary}
+    (
+        umask 077
+        "$fixture_deploy/install-appliance" install \
+            --root "$root" \
+            --release-id "$fixture_release_id" \
+            --obscam-binary "$fixture_obscam_binary" \
+            --mediamtx-binary "$mediamtx_binary" \
+            --zwo-sdk-library "$zwo_sdk" \
+            --host-config "$host_config"
+    )
 }
 
 install_fixture
 "$fixture_deploy/install-appliance" verify --root "$root"
 
-cmp -s "$obscam_binary" "$root/usr/local/libexec/obscam/obscam" ||
+release=$root/opt/obscam/releases/gre-226-test-1
+[ "$(readlink "$root/opt/obscam/active")" = releases/gre-226-test-1 ] ||
+    fail "clean install did not activate the qualified release"
+[ ! -e "$root/opt/obscam/previous" ] ||
+    fail "clean install invented a previous release"
+cmp -s "$obscam_binary" "$release/bin/obscam" ||
     fail "ObsCam binary was not installed"
-cmp -s "$mediamtx_binary" "$root/usr/local/libexec/obscam/mediamtx" ||
+cmp -s "$mediamtx_binary" "$release/bin/mediamtx" ||
     fail "MediaMTX binary was not installed"
-cmp -s \
-    "$fixture_deploy/obscam-diagnostics" \
-    "$root/usr/local/libexec/obscam/obscam-diagnostics" ||
-    fail "read-only diagnostics were not installed"
-cmp -s \
-    "$fixture_deploy/verify-memory-controller" \
-    "$root/usr/local/libexec/obscam/verify-memory-controller" ||
-    fail "resource-controller verifier was not installed"
-cmp -s \
-    "$fixture_deploy/systemd/allsky.service.d/50-obscam-resource-policy.conf" \
-    "$root/etc/systemd/system/allsky.service.d/50-obscam-resource-policy.conf" ||
-    fail "AllSky resource policy was not installed"
+cmp -s "$zwo_sdk" "$release/lib/libASICamera2.so.1.41" ||
+    fail "qualified ZWO SDK was not installed"
+cmp -s "$host_config" "$root/etc/obscam/host.env" ||
+    fail "host configuration was not kept outside the release"
+[ -f "$release/release.env" ] || fail "release metadata is missing"
+[ -f "$release/SHA256SUMS" ] || fail "release checksum manifest is missing"
+[ "$(stat -c %a "$release/release.env")" = 444 ] || fail "release metadata is not operator-readable and immutable"
+[ "$(stat -c %a "$release/SHA256SUMS")" = 444 ] || fail "release manifest is not operator-readable and immutable"
+[ -z "$(find "$release" \( -type f -o -type d \) -perm /0222 -print -quit)" ] ||
+    fail "release content remains mutable"
+
+# Validation rejects content outside the qualified manifest.
+extra_release=$tmp/extra-release
+cp -a "$release" "$extra_release"
+chmod u+w "$extra_release" "$extra_release/config"
+printf 'unqualified\n' >"$extra_release/config/extra"
+chmod a-w "$extra_release" "$extra_release/config" "$extra_release/config/extra"
+if "$extra_release/bin/verify-release" "$extra_release" >/dev/null 2>&1; then
+    fail "release verifier accepted content outside the manifest"
+fi
+[ "$(readlink "$root/usr/local/bin/obscam-diagnostics")" = ../../../opt/obscam/active/bin/obscam-diagnostics ] ||
+    fail "stable read-only diagnostic entry point was not installed"
+[ "$(readlink "$root/usr/local/sbin/obscam-release")" = ../../../opt/obscam/active/bin/install-appliance ] ||
+    fail "stable release-manager entry point was not installed"
+[ "$(readlink "$root/etc/systemd/system/allsky.service.d/50-obscam-resource-policy.conf")" = ../../../../opt/obscam/active/systemd/50-obscam-resource-policy.conf ] ||
+    fail "AllSky policy does not follow the active qualified release"
 grep -Eq '^obscam:[^:]*:[^:]+:[^:]+:ObsCam camera owner:/nonexistent:/usr/sbin/nologin$' \
     "$root/etc/passwd" || fail "non-login ObsCam identity was not created"
 find "$root/etc/systemd/system/multi-user.target.wants" -type l \
     -name 'obscam.target' | grep -q . || fail "ObsCam appliance target was not enabled"
+[ "$(readlink "$root/etc/systemd/system/multi-user.target.wants/obscam.target")" = ../obscam.target ] ||
+    fail "target enablement bypasses the stable active-release link"
 for component in obscam.service obscam-mediamtx.service obscam-media-network.service; do
     if find "$root/etc/systemd/system/multi-user.target.wants" -type l \
         -name "$component" | grep -q .; then
         fail "$component was enabled outside obscam.target"
     fi
 done
+if [ "${OBSCAM_TEST_SYSTEMD_VERIFY:-no}" = yes ]; then
+    mkdir -p "$root/usr/lib/systemd"
+    cp -a /usr/lib/systemd/system "$root/usr/lib/systemd/"
+    systemd-analyze --root="$root" verify \
+        obscam.target \
+        obscam.service \
+        obscam-media-network.service \
+        obscam-mediamtx.service
+fi
 
 # Exact reinstallation is intentionally idempotent.
 install_fixture
 
-# A changed destination is never silently adopted.
-printf '\n# local drift\n' >>"$root/etc/obscam/mediamtx.yml"
+# A release ID can never be reused for a different compatibility-set member.
+cp "$fixture_deploy/check-release" "$tmp/check-release.original"
+printf '\n# drifted release helper\n' >>"$fixture_deploy/check-release"
 if install_fixture >/dev/null 2>&1; then
-    fail "installer adopted a conflicting destination"
+    fail "installer reused a release ID for different content"
+fi
+cp "$tmp/check-release.original" "$fixture_deploy/check-release"
+
+status=$($fixture_deploy/install-appliance status --root "$root")
+[ "$status" = "active=gre-226-test-1
+previous=none
+pending=none
+installation=none" ] || fail "clean-install status was not truthful"
+
+# Active and previous links accept only one validated release ID component.
+link_root=$tmp/link-root
+mkdir -p "$link_root/opt/obscam"
+ln -s releases/../../tmp "$link_root/opt/obscam/active"
+if "$fixture_deploy/install-appliance" status --root "$link_root" >/dev/null 2>&1; then
+    fail "status accepted a traversing active-release link"
+fi
+rm "$link_root/opt/obscam/active"
+ln -s releases/.. "$link_root/opt/obscam/active"
+if "$fixture_deploy/install-appliance" status --root "$link_root" >/dev/null 2>&1; then
+    fail "status accepted the parent-directory release ID"
+fi
+if install_fixture .. >/dev/null 2>&1; then
+    fail "installer accepted the parent-directory release ID"
+fi
+
+# An upgrade advances the complete set and retains the previous known-good set.
+obscam_binary_2=$tmp/obscam-2
+cp "$obscam_binary" "$obscam_binary_2"
+printf '# release 2\n' >>"$obscam_binary_2"
+chmod +x "$obscam_binary_2"
+
+# An installed upgrade refuses drift in the active compatibility-set sources.
+active_asset=$root/opt/obscam/releases/gre-226-test-1/browser/app.js
+chmod 0644 "$active_asset"
+printf '\n// drift\n' >>"$active_asset"
+if "$root/usr/local/sbin/obscam-release" install \
+    --root "$root" \
+    --release-id gre-226-drifted-source \
+    --obscam-binary "$obscam_binary_2" \
+    --mediamtx-binary "$mediamtx_binary" \
+    --zwo-sdk-library "$zwo_sdk" \
+    --host-config "$host_config" >/dev/null 2>&1; then
+    fail "installed manager laundered drift from its active release"
+fi
+[ "$(readlink "$root/opt/obscam/active")" = releases/gre-226-test-1 ] ||
+    fail "source drift changed the active release"
+cp "$fixture/web/dist/app.js" "$active_asset"
+chmod 0444 "$active_asset"
+
+"$root/usr/local/sbin/obscam-release" install \
+    --root "$root" \
+    --release-id gre-226-test-2 \
+    --obscam-binary "$obscam_binary_2" \
+    --mediamtx-binary "$mediamtx_binary" \
+    --zwo-sdk-library "$zwo_sdk" \
+    --host-config "$host_config"
+[ "$(readlink "$root/opt/obscam/active")" = releases/gre-226-test-2 ] ||
+    fail "upgrade did not advance the active release"
+[ "$(readlink "$root/opt/obscam/previous")" = releases/gre-226-test-1 ] ||
+    fail "upgrade did not retain the previous release"
+
+status=$($fixture_deploy/install-appliance status --root "$root")
+[ "$status" = "active=gre-226-test-2
+previous=gre-226-test-1
+pending=none
+installation=none" ] || fail "upgrade status was not truthful"
+
+# Manual rollback swaps the two complete qualified sets.
+$fixture_deploy/install-appliance rollback --root "$root"
+[ "$(readlink "$root/opt/obscam/active")" = releases/gre-226-test-1 ] ||
+    fail "manual rollback did not restore the previous release"
+[ "$(readlink "$root/opt/obscam/previous")" = releases/gre-226-test-2 ] ||
+    fail "manual rollback did not retain the replaced release"
+
+# A post-activation failure restores both pre-existing release links.
+cp "$fixture_deploy/check-release" "$tmp/check-release.good"
+cat >"$fixture_deploy/check-release" <<'EOF'
+#!/bin/sh
+exit 1
+EOF
+chmod +x "$fixture_deploy/check-release"
+obscam_binary_3=$tmp/obscam-3
+cp "$obscam_binary" "$obscam_binary_3"
+printf '# release 3\n' >>"$obscam_binary_3"
+chmod +x "$obscam_binary_3"
+if install_fixture gre-226-test-3 "$obscam_binary_3" >/dev/null 2>&1; then
+    fail "installer accepted failed post-activation checks"
+fi
+[ "$(readlink "$root/opt/obscam/active")" = releases/gre-226-test-1 ] ||
+    fail "automatic rollback did not restore the active release"
+[ "$(readlink "$root/opt/obscam/previous")" = releases/gre-226-test-2 ] ||
+    fail "automatic rollback did not restore the prior rollback candidate"
+cp "$tmp/check-release.good" "$fixture_deploy/check-release"
+
+# A restoration that cannot pass the old release gate remains explicitly pending.
+restoration_root=$tmp/restoration-root
+mkdir "$restoration_root"
+"$fixture_deploy/install-appliance" install \
+    --root "$restoration_root" \
+    --release-id gre-226-restore-1 \
+    --obscam-binary "$obscam_binary" \
+    --mediamtx-binary "$mediamtx_binary" \
+    --zwo-sdk-library "$zwo_sdk" \
+    --host-config "$host_config"
+cp "$fixture_deploy/check-release" "$tmp/check-release.restore-good"
+cat >"$fixture_deploy/check-release" <<'EOF'
+#!/bin/sh
+set -eu
+test_root=/
+if [ "${1:-}" = --root ]; then test_root=$2; fi
+printf '\n# post-switch failure\n' >>"${test_root%/}/etc/obscam/host.env"
+exit 1
+EOF
+chmod +x "$fixture_deploy/check-release"
+if "$fixture_deploy/install-appliance" install \
+    --root "$restoration_root" \
+    --release-id gre-226-restore-2 \
+    --obscam-binary "$obscam_binary_2" \
+    --mediamtx-binary "$mediamtx_binary" \
+    --zwo-sdk-library "$zwo_sdk" \
+    --host-config "$host_config" >/dev/null 2>&1; then
+    fail "installer claimed an unverified restoration succeeded"
+fi
+[ -f "$restoration_root/var/lib/obscam/activation-pending" ] ||
+    fail "failed restoration cleared its recovery marker"
+[ -f "$restoration_root/var/lib/obscam/installation-pending" ] ||
+    fail "failed restoration cleared its installation journal"
+cp "$tmp/check-release.restore-good" "$fixture_deploy/check-release"
+
+# An interrupted switch is reported read-only and recovered before mutation resumes.
+printf 'candidate=gre-226-test-3\nprevious=gre-226-test-1\nprior_previous=gre-226-test-2\n' \
+    >"$root/var/lib/obscam/activation-pending"
+rm "$root/opt/obscam/active"
+ln -s releases/gre-226-test-3 "$root/opt/obscam/active"
+status=$($fixture_deploy/install-appliance status --root "$root")
+printf '%s\n' "$status" | grep -q '^active=gre-226-test-3$' || fail "pending active release was hidden"
+printf '%s\n' "$status" | grep -q '^pending=candidate=gre-226-test-3 previous=gre-226-test-1 prior_previous=gre-226-test-2$' ||
+    fail "interrupted activation was not reported"
+obscam_binary_4=$tmp/obscam-4
+cp "$obscam_binary" "$obscam_binary_4"
+printf '# release 4\n' >>"$obscam_binary_4"
+chmod +x "$obscam_binary_4"
+install_fixture gre-226-test-4 "$obscam_binary_4"
+[ "$(readlink "$root/opt/obscam/active")" = releases/gre-226-test-4 ] ||
+    fail "installation did not resume after interrupted-activation recovery"
+[ "$(readlink "$root/opt/obscam/previous")" = releases/gre-226-test-1 ] ||
+    fail "interrupted-activation recovery lost the known-good release"
+[ ! -e "$root/var/lib/obscam/activation-pending" ] || fail "pending activation marker was not cleared"
+
+# A changed destination is never silently adopted.
+chmod u+w "$root/etc/obscam/host.env"
+printf '\n# local drift\n' >>"$root/etc/obscam/host.env"
+if install_fixture >/dev/null 2>&1; then
+    fail "installer adopted conflicting host configuration"
 fi
 
 # A binary that no longer matches the supplied compatibility pin is rejected
 # before another root can be changed.
 other_root=$tmp/other-root
 mkdir "$other_root"
+cp "$mediamtx_binary" "$tmp/mediamtx-clean"
 printf '\n# drift\n' >>"$mediamtx_binary"
 if "$fixture_deploy/install-appliance" install \
     --root "$other_root" \
+    --release-id gre-226-bad-relay \
     --obscam-binary "$obscam_binary" \
-    --mediamtx-binary "$mediamtx_binary" >/dev/null 2>&1; then
+    --mediamtx-binary "$mediamtx_binary" \
+    --zwo-sdk-library "$zwo_sdk" \
+    --host-config "$host_config" >/dev/null 2>&1; then
     fail "installer accepted a MediaMTX checksum mismatch"
 fi
 [ -z "$(find "$other_root" -mindepth 1 -print -quit)" ] ||
     fail "pin rejection modified the target root"
+
+# A journaled partial scaffold resumes instead of being silently adopted or refused.
+resume_root=$tmp/resume-root
+mkdir -p "$resume_root/var/lib/obscam" "$resume_root/etc/obscam" "$resume_root/etc/systemd/system"
+printf 'candidate=gre-226-resume\nmode=clean\n' >"$resume_root/var/lib/obscam/installation-pending"
+cp "$host_config" "$resume_root/etc/obscam/host.env"
+ln -s ../../../opt/obscam/active/systemd/obscam.service "$resume_root/etc/systemd/system/obscam.service"
+"$fixture_deploy/install-appliance" install \
+    --root "$resume_root" \
+    --release-id gre-226-resume \
+    --obscam-binary "$obscam_binary_2" \
+    --mediamtx-binary "$tmp/mediamtx-clean" \
+    --zwo-sdk-library "$zwo_sdk" \
+    --host-config "$host_config"
+[ "$(readlink "$resume_root/opt/obscam/active")" = releases/gre-226-resume ] ||
+    fail "journaled partial installation did not resume"
+[ ! -e "$resume_root/var/lib/obscam/installation-pending" ] ||
+    fail "completed resumed installation retained its journal"
+
+# An incompatible SDK is rejected before target mutation.
+sdk_root=$tmp/sdk-root
+mkdir "$sdk_root"
+bad_sdk=$tmp/bad-sdk
+cp "$zwo_sdk" "$bad_sdk"
+printf 'drift\n' >>"$bad_sdk"
+if "$fixture_deploy/install-appliance" install \
+    --root "$sdk_root" \
+    --release-id gre-226-bad-sdk \
+    --obscam-binary "$obscam_binary_2" \
+    --mediamtx-binary "$tmp/mediamtx-clean" \
+    --zwo-sdk-library "$bad_sdk" \
+    --host-config "$host_config" >/dev/null 2>&1; then
+    fail "installer accepted an incompatible ZWO SDK"
+fi
+[ -z "$(find "$sdk_root" -mindepth 1 -print -quit)" ] || fail "SDK rejection modified the target root"
+
+# Invalid host configuration is rejected before target mutation.
+config_root=$tmp/config-root
+mkdir "$config_root"
+bad_host_config=$tmp/bad-host.env
+cp "$host_config" "$bad_host_config"
+sed -i 's/OBSCAM_WHEP_PORT=8889/OBSCAM_WHEP_PORT=0/' "$bad_host_config"
+if "$fixture_deploy/install-appliance" install \
+    --root "$config_root" \
+    --release-id gre-226-bad-config \
+    --obscam-binary "$obscam_binary_2" \
+    --mediamtx-binary "$tmp/mediamtx-clean" \
+    --zwo-sdk-library "$zwo_sdk" \
+    --host-config "$bad_host_config" >/dev/null 2>&1; then
+    fail "installer accepted invalid host configuration"
+fi
+[ -z "$(find "$config_root" -mindepth 1 -print -quit)" ] || fail "configuration rejection modified the target root"
+
+bind_root=$tmp/bind-root
+mkdir "$bind_root"
+bad_bind_config=$tmp/bad-bind.env
+cp "$host_config" "$bad_bind_config"
+sed -i 's/OBSCAM_BIND_ADDRESS=0.0.0.0:8080/OBSCAM_BIND_ADDRESS=garbage:anything/' "$bad_bind_config"
+if "$fixture_deploy/install-appliance" install \
+    --root "$bind_root" \
+    --release-id gre-226-bad-bind \
+    --obscam-binary "$obscam_binary_2" \
+    --mediamtx-binary "$tmp/mediamtx-clean" \
+    --zwo-sdk-library "$zwo_sdk" \
+    --host-config "$bad_bind_config" >/dev/null 2>&1; then
+    fail "installer accepted a malformed bind socket"
+fi
+[ -z "$(find "$bind_root" -mindepth 1 -print -quit)" ] || fail "bind rejection modified the target root"
+
+abbreviated_bind_root=$tmp/abbreviated-bind-root
+mkdir "$abbreviated_bind_root"
+abbreviated_bind_config=$tmp/abbreviated-bind.env
+cp "$host_config" "$abbreviated_bind_config"
+sed -i 's/OBSCAM_BIND_ADDRESS=0.0.0.0:8080/OBSCAM_BIND_ADDRESS=1.2.3:8080/' "$abbreviated_bind_config"
+if "$fixture_deploy/install-appliance" install \
+    --root "$abbreviated_bind_root" \
+    --release-id gre-226-abbreviated-bind \
+    --obscam-binary "$obscam_binary_2" \
+    --mediamtx-binary "$tmp/mediamtx-clean" \
+    --zwo-sdk-library "$zwo_sdk" \
+    --host-config "$abbreviated_bind_config" >/dev/null 2>&1; then
+    fail "installer accepted an abbreviated IPv4 socket rejected by Rust"
+fi
+[ -z "$(find "$abbreviated_bind_root" -mindepth 1 -print -quit)" ] || fail "abbreviated bind rejection modified the target root"
+
+# Existing unowned host paths and identities are refused without adoption.
+ownership_root=$tmp/ownership-root
+mkdir -p "$ownership_root/etc/systemd/system"
+printf 'unowned service\n' >"$ownership_root/etc/systemd/system/obscam.service"
+if "$fixture_deploy/install-appliance" install \
+    --root "$ownership_root" \
+    --release-id gre-226-ownership-conflict \
+    --obscam-binary "$obscam_binary_2" \
+    --mediamtx-binary "$tmp/mediamtx-clean" \
+    --zwo-sdk-library "$zwo_sdk" \
+    --host-config "$host_config" >/dev/null 2>&1; then
+    fail "installer adopted an unowned service path"
+fi
+[ "$(cat "$ownership_root/etc/systemd/system/obscam.service")" = 'unowned service' ] ||
+    fail "installer overwrote an unowned service path"
+[ ! -e "$ownership_root/opt/obscam/active" ] || fail "ownership conflict switched a release"
+
+identity_root=$tmp/identity-root
+mkdir -p "$identity_root/etc"
+printf 'obscam:x:998:998:ObsCam camera owner:/nonexistent:/usr/sbin/nologin\n' >"$identity_root/etc/passwd"
+if "$fixture_deploy/install-appliance" install \
+    --root "$identity_root" \
+    --release-id gre-226-identity-conflict \
+    --obscam-binary "$obscam_binary_2" \
+    --mediamtx-binary "$tmp/mediamtx-clean" \
+    --zwo-sdk-library "$zwo_sdk" \
+    --host-config "$host_config" >/dev/null 2>&1; then
+    fail "installer silently adopted an existing identity"
+fi
+
+# The known GRE-225 predecessor is migratable only through explicit adoption.
+legacy_root=$tmp/legacy-root
+mkdir -p \
+    "$legacy_root/usr/local/libexec/obscam" \
+    "$legacy_root/usr/local/share/obscam" \
+    "$legacy_root/etc/obscam" \
+    "$legacy_root/etc/systemd/system/allsky.service.d" \
+    "$legacy_root/etc/sysusers.d" \
+    "$legacy_root/etc/udev/rules.d"
+cp "$obscam_binary_2" "$legacy_root/usr/local/libexec/obscam/obscam"
+cp "$tmp/mediamtx-clean" "$legacy_root/usr/local/libexec/obscam/mediamtx"
+cp "$fixture_deploy/verify-mediamtx" "$legacy_root/usr/local/libexec/obscam/verify-mediamtx"
+cp "$fixture_deploy/mediamtx.yml" "$legacy_root/etc/obscam/mediamtx.yml"
+cp "$fixture_deploy/mediamtx-linux-arm64.sha256" "$legacy_root/usr/local/share/obscam/mediamtx-linux-arm64.sha256"
+cp "$fixture_deploy/mediamtx-config.sha256" "$legacy_root/usr/local/share/obscam/mediamtx-config.sha256"
+cp "$fixture_deploy/systemd/obscam.target" "$legacy_root/etc/systemd/system/obscam.target"
+printf '[Service]\nExecStart=/usr/local/libexec/obscam/obscam\n' >"$legacy_root/etc/systemd/system/obscam.service"
+printf '[Service]\nExecStart=/usr/local/libexec/obscam/mediamtx /etc/obscam/mediamtx.yml\n' >"$legacy_root/etc/systemd/system/obscam-mediamtx.service"
+printf '[Service]\nExecStart=/usr/local/libexec/obscam/setup-media-network start\n' >"$legacy_root/etc/systemd/system/obscam-media-network.service"
+cp "$fixture_deploy/systemd/allsky.service.d/50-obscam-resource-policy.conf" \
+    "$legacy_root/etc/systemd/system/allsky.service.d/50-obscam-resource-policy.conf"
+cp "$fixture_deploy/sysusers.d/obscam.conf" "$legacy_root/etc/sysusers.d/obscam.conf"
+cp "$fixture_deploy/udev/99-z-obscam.rules" "$legacy_root/etc/udev/rules.d/99-z-obscam.rules"
+printf 'obscam:x:998:998:ObsCam camera owner:/nonexistent:/usr/sbin/nologin\n' >"$legacy_root/etc/passwd"
+printf 'obscam:x:998:\nobscam-camera:x:999:obscam\n' >"$legacy_root/etc/group"
+
+if "$fixture_deploy/install-appliance" install \
+    --root "$legacy_root" \
+    --release-id gre-226-adopted \
+    --obscam-binary "$obscam_binary_2" \
+    --mediamtx-binary "$tmp/mediamtx-clean" \
+    --zwo-sdk-library "$zwo_sdk" \
+    --host-config "$host_config" >/dev/null 2>&1; then
+    fail "installer adopted GRE-225 without explicit authority"
+fi
+mkdir -p "$legacy_root/var/lib/obscam"
+printf 'candidate=gre-226-adopted\nmode=adopt-gre-225\n' >"$legacy_root/var/lib/obscam/installation-pending"
+mv "$legacy_root/etc/systemd/system/obscam.service" \
+    "$legacy_root/etc/systemd/system/obscam.service.pre-gre-226"
+"$fixture_deploy/install-appliance" install \
+    --root "$legacy_root" \
+    --release-id gre-226-adopted \
+    --obscam-binary "$obscam_binary_2" \
+    --mediamtx-binary "$tmp/mediamtx-clean" \
+    --zwo-sdk-library "$zwo_sdk" \
+    --host-config "$host_config" \
+    --adopt-gre-225
+[ "$(readlink "$legacy_root/opt/obscam/active")" = releases/gre-226-adopted ] ||
+    fail "explicit GRE-225 adoption did not activate the qualified release"
+[ -f "$legacy_root/etc/systemd/system/obscam.service.pre-gre-226" ] ||
+    fail "explicit adoption did not preserve the predecessor unit"
 
 echo "install-appliance tests passed"

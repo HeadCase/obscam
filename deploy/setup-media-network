@@ -4,7 +4,8 @@ set -eu
 namespace=obscam-media
 host_link=obscam-media0
 namespace_link=media0
-rules=/etc/obscam/obscam-media.nft
+release_root=$(CDPATH= cd -P -- "$(dirname -- "$0")/.." && pwd)
+rules=$release_root/config/obscam-media.nft
 
 remove_owned_network() {
     if /usr/sbin/nft list table inet obscam_media >/dev/null 2>&1; then

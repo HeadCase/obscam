@@ -8,8 +8,8 @@ After=obscam-media-network.service
 [Service]
 Type=exec
 DynamicUser=yes
-ExecStartPre=/usr/local/libexec/obscam/verify-mediamtx /usr/local/libexec/obscam/mediamtx /etc/obscam/mediamtx.yml /usr/local/share/obscam/mediamtx-linux-arm64.sha256 /usr/local/share/obscam/mediamtx-config.sha256
-ExecStart=/usr/local/libexec/obscam/mediamtx /etc/obscam/mediamtx.yml
+ExecStartPre=/opt/obscam/active/bin/verify-mediamtx /opt/obscam/active/bin/mediamtx /opt/obscam/active/config/mediamtx.yml /opt/obscam/active/config/mediamtx-linux-arm64.sha256 /opt/obscam/active/config/mediamtx-config.sha256
+ExecStart=/opt/obscam/active/bin/mediamtx /opt/obscam/active/config/mediamtx.yml
 NetworkNamespacePath=/run/netns/obscam-media
 Restart=always
 RestartSec=5s

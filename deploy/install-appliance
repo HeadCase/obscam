@@ -1,16 +1,47 @@
 #!/bin/sh
 set -eu
 
-deploy_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+script_path=$(readlink -f -- "$0") || {
+    echo "install-appliance: could not resolve installed release manager path: $0" >&2
+    exit 1
+}
+deploy_dir=$(CDPATH= cd -- "$(dirname -- "$script_path")" && pwd)
+if [ -f "$deploy_dir/../release.env" ] && [ -d "$deploy_dir/../browser" ]; then
+    release_source_root=$(CDPATH= cd -- "$deploy_dir/.." && pwd)
+    release_source_is_installed=yes
+    helper_source_dir=$release_source_root/bin
+    config_source_dir=$release_source_root/config
+    browser_source_dir=$release_source_root/browser
+    systemd_source_dir=$release_source_root/systemd
+    allsky_policy_source=$systemd_source_dir/50-obscam-resource-policy.conf
+    sysusers_source_dir=$release_source_root/sysusers.d
+    udev_source_dir=$release_source_root/udev
+else
+    release_source_is_installed=no
+    helper_source_dir=$deploy_dir
+    config_source_dir=$deploy_dir
+    browser_source_dir=$deploy_dir/../web/dist
+    systemd_source_dir=$deploy_dir/systemd
+    allsky_policy_source=$systemd_source_dir/allsky.service.d/50-obscam-resource-policy.conf
+    sysusers_source_dir=$deploy_dir/sysusers.d
+    udev_source_dir=$deploy_dir/udev
+fi
 root=/
+release_id=
 obscam_binary=
 mediamtx_binary=
+zwo_sdk_library=
+host_config=
+adopt_gre_225=no
+installation_mode=
 
 usage() {
     cat >&2 <<EOF
 usage:
-  $0 install --obscam-binary PATH --mediamtx-binary PATH [--root PATH]
+  $0 install --release-id ID --obscam-binary PATH --mediamtx-binary PATH --zwo-sdk-library PATH --host-config PATH [--adopt-gre-225] [--root PATH]
   $0 verify [--root PATH]
+  $0 status [--root PATH]
+  $0 rollback [--root PATH]
 EOF
     exit 2
 }
@@ -20,44 +51,36 @@ fail() {
     exit 1
 }
 
+validate_release_id() {
+    candidate_id=$1
+    case "$candidate_id" in
+        .|..|*[!A-Za-z0-9._-]*|'') fail "release ID must use one non-traversing component of letters, numbers, dot, underscore, and hyphen" ;;
+    esac
+}
+
 [ "$#" -gt 0 ] || usage
 operation=$1
 shift
 
 while [ "$#" -gt 0 ]; do
     case "$1" in
-        --root)
-            [ "$#" -ge 2 ] || usage
-            root=$2
-            shift 2
-            ;;
-        --obscam-binary)
-            [ "$#" -ge 2 ] || usage
-            obscam_binary=$2
-            shift 2
-            ;;
-        --mediamtx-binary)
-            [ "$#" -ge 2 ] || usage
-            mediamtx_binary=$2
-            shift 2
-            ;;
+        --root) [ "$#" -ge 2 ] || usage; root=$2; shift 2 ;;
+        --release-id) [ "$#" -ge 2 ] || usage; release_id=$2; shift 2 ;;
+        --obscam-binary) [ "$#" -ge 2 ] || usage; obscam_binary=$2; shift 2 ;;
+        --mediamtx-binary) [ "$#" -ge 2 ] || usage; mediamtx_binary=$2; shift 2 ;;
+        --zwo-sdk-library) [ "$#" -ge 2 ] || usage; zwo_sdk_library=$2; shift 2 ;;
+        --host-config) [ "$#" -ge 2 ] || usage; host_config=$2; shift 2 ;;
+        --adopt-gre-225) adopt_gre_225=yes; shift ;;
         *) usage ;;
     esac
 done
 
-case "$root" in
-    /*) ;;
-    *) fail "--root must be an absolute path" ;;
-esac
+case "$root" in /*) ;; *) fail "--root must be an absolute path" ;; esac
 root=${root%/}
 [ -n "$root" ] || root=/
 
 target() {
-    if [ "$root" = / ]; then
-        printf '%s\n' "$1"
-    else
-        printf '%s%s\n' "$root" "$1"
-    fi
+    if [ "$root" = / ]; then printf '%s\n' "$1"; else printf '%s%s\n' "$root" "$1"; fi
 }
 
 require_live_root() {
@@ -66,112 +89,311 @@ require_live_root() {
     fi
 }
 
-compare_installed() {
-    source=$1
-    destination=$(target "$2")
-    [ -f "$destination" ] || fail "installed file is missing: $destination"
-    [ ! -L "$destination" ] || fail "installed path must not be a symlink: $destination"
-    cmp -s "$source" "$destination" || fail "installed file differs: $destination"
+require_install_arguments() {
+    validate_release_id "$release_id"
+    if [ "$release_source_is_installed" = yes ]; then
+        "$helper_source_dir/verify-release" "$release_source_root"
+    fi
+    [ -x "$obscam_binary" ] || fail "ObsCam binary is not executable: $obscam_binary"
+    [ -x "$mediamtx_binary" ] || fail "MediaMTX binary is not executable: $mediamtx_binary"
+    [ -f "$zwo_sdk_library" ] && [ ! -L "$zwo_sdk_library" ] || fail "ZWO SDK library must be a regular file"
+    "$helper_source_dir/validate-host-config" "$host_config"
+    "$helper_source_dir/verify-mediamtx" \
+        "$mediamtx_binary" "$config_source_dir/mediamtx.yml" \
+        "$config_source_dir/mediamtx-linux-arm64.sha256" "$config_source_dir/mediamtx-config.sha256"
+    expected_sdk=$(awk 'length($1) == 64 { print $1; exit }' "$config_source_dir/zwo-sdk-linux-arm64.sha256")
+    actual_sdk=$(sha256sum "$zwo_sdk_library" | awk '{ print $1 }')
+    [ -n "$expected_sdk" ] && [ "$actual_sdk" = "$expected_sdk" ] || fail "ZWO SDK checksum mismatch"
 }
 
-install_owned_file() {
-    source=$1
-    destination=$(target "$2")
-    mode=$3
-    predecessor_hashes=${4:-}
-    backup_suffix=${5:-pre-gre-224}
+copy_file() {
+    copy_source=$1
+    copy_destination=$2
+    copy_mode=$3
+    [ -f "$copy_source" ] || fail "release source is missing: $copy_source"
+    install -D -m "$copy_mode" "$copy_source" "$copy_destination"
+}
 
-    [ -f "$source" ] || fail "source file is missing: $source"
-    if [ -L "$destination" ]; then
-        fail "refusing symlink destination: $destination"
+require_same_release_member() {
+    member_source=$1
+    member_destination=$2
+    cmp -s "$member_source" "$member_destination" || fail "release ID already names different content: $release_id ($member_destination)"
+}
+
+verify_reused_release_inputs() {
+    reused_release=$1
+    grep -Fx "release_id=$release_id" "$reused_release/release.env" >/dev/null || fail "release directory metadata differs: $release_id"
+    require_same_release_member "$obscam_binary" "$reused_release/bin/obscam"
+    require_same_release_member "$mediamtx_binary" "$reused_release/bin/mediamtx"
+    require_same_release_member "$zwo_sdk_library" "$reused_release/lib/libASICamera2.so.1.41"
+    for reused_executable in check-release install-appliance obscam-diagnostics setup-media-network validate-host-config verify-mediamtx verify-memory-controller verify-release; do
+        require_same_release_member "$helper_source_dir/$reused_executable" "$reused_release/bin/$reused_executable"
+    done
+    for reused_config in mediamtx.yml mediamtx-config.sha256 mediamtx-linux-arm64.sha256 obscam-media.nft zwo-sdk-linux-arm64.sha256; do
+        require_same_release_member "$config_source_dir/$reused_config" "$reused_release/config/$reused_config"
+    done
+    for reused_asset in index.html app.js styles.css; do
+        require_same_release_member "$browser_source_dir/$reused_asset" "$reused_release/browser/$reused_asset"
+    done
+    for reused_unit in obscam.target obscam.service obscam-mediamtx.service obscam-media-network.service; do
+        require_same_release_member "$systemd_source_dir/$reused_unit" "$reused_release/systemd/$reused_unit"
+    done
+    require_same_release_member "$allsky_policy_source" "$reused_release/systemd/50-obscam-resource-policy.conf"
+    require_same_release_member "$sysusers_source_dir/obscam.conf" "$reused_release/sysusers.d/obscam.conf"
+    require_same_release_member "$udev_source_dir/99-z-obscam.rules" "$reused_release/udev/99-z-obscam.rules"
+}
+
+stage_release() {
+    releases=$(target /opt/obscam/releases)
+    release_destination=$releases/$release_id
+    if [ -e "$release_destination" ]; then
+        "$release_destination/bin/verify-release" "$release_destination"
+        verify_reused_release_inputs "$release_destination"
+        printf '%s\n' "$release_destination"
+        return
     fi
-    if [ -e "$destination" ]; then
-        if cmp -s "$source" "$destination"; then
-            chmod "$mode" "$destination"
-            return
-        fi
-        if [ -n "$predecessor_hashes" ]; then
-            installed_hash=$(sha256sum "$destination" | awk '{ print $1 }')
-            predecessor_matches=no
-            for predecessor_hash in $predecessor_hashes; do
-                if [ "$installed_hash" = "$predecessor_hash" ]; then
-                    predecessor_matches=yes
-                    break
-                fi
-            done
-            if [ "$predecessor_matches" = yes ]; then
-                backup=$destination.$backup_suffix
-                [ ! -e "$backup" ] || fail "migration backup already exists: $backup"
-                cp -p "$destination" "$backup"
-            else
-                fail "refusing conflicting destination: $destination"
-            fi
+
+    install -d -m 0755 "$releases"
+    staging=$releases/.$release_id.staging.$$
+    [ ! -e "$staging" ] || fail "staging path already exists: $staging"
+    install -d -m 0755 "$staging"
+    trap 'chmod -R u+w "$staging" 2>/dev/null || true; rm -rf "$staging"' EXIT HUP INT TERM
+
+    copy_file "$obscam_binary" "$staging/bin/obscam" 0755
+    copy_file "$mediamtx_binary" "$staging/bin/mediamtx" 0755
+    copy_file "$zwo_sdk_library" "$staging/lib/libASICamera2.so.1.41" 0755
+    ln -s libASICamera2.so.1.41 "$staging/lib/libASICamera2.so"
+
+    for executable in check-release install-appliance obscam-diagnostics setup-media-network validate-host-config verify-mediamtx verify-memory-controller verify-release; do
+        copy_file "$helper_source_dir/$executable" "$staging/bin/$executable" 0755
+    done
+    for config in mediamtx.yml mediamtx-config.sha256 mediamtx-linux-arm64.sha256 obscam-media.nft zwo-sdk-linux-arm64.sha256; do
+        copy_file "$config_source_dir/$config" "$staging/config/$config" 0644
+    done
+    for asset in index.html app.js styles.css; do
+        copy_file "$browser_source_dir/$asset" "$staging/browser/$asset" 0644
+    done
+    for unit in obscam.target obscam.service obscam-mediamtx.service obscam-media-network.service; do
+        copy_file "$systemd_source_dir/$unit" "$staging/systemd/$unit" 0644
+    done
+    copy_file "$allsky_policy_source" "$staging/systemd/50-obscam-resource-policy.conf" 0644
+    copy_file "$sysusers_source_dir/obscam.conf" "$staging/sysusers.d/obscam.conf" 0644
+    copy_file "$udev_source_dir/99-z-obscam.rules" "$staging/udev/99-z-obscam.rules" 0644
+
+    {
+        printf 'format=1\n'
+        printf 'release_id=%s\n' "$release_id"
+        printf 'mediamtx_version=v1.19.3\n'
+        printf 'zwo_sdk_abi=1\n'
+        printf 'zwo_sdk_version=1.41\n'
+    } >"$staging/release.env"
+    (cd "$staging" && find . -type f ! -name SHA256SUMS -print | LC_ALL=C sort | xargs sha256sum >SHA256SUMS)
+    chmod 0444 "$staging/release.env" "$staging/SHA256SUMS"
+    chmod -R a-w "$staging"
+    "$staging/bin/verify-release" "$staging"
+    mv "$staging" "$release_destination"
+    trap - EXIT HUP INT TERM
+    printf '%s\n' "$release_destination"
+}
+
+install_host_configuration() {
+    destination=$(target /etc/obscam/host.env)
+    if [ -e "$destination" ] || [ -L "$destination" ]; then
+        [ -f "$destination" ] && [ ! -L "$destination" ] || fail "refusing unowned host configuration path: $destination"
+        cmp -s "$host_config" "$destination" || fail "refusing to overwrite host configuration: $destination"
+    else
+        install -D -m 0640 "$host_config" "$destination"
+    fi
+    "$helper_source_dir/validate-host-config" "$destination"
+}
+
+install_stable_link() {
+    link=$(target "$1")
+    destination=$2
+    if [ -L "$link" ]; then
+        [ "$(readlink "$link")" = "$destination" ] || fail "refusing conflicting symlink: $link"
+        return
+    fi
+    [ ! -e "$link" ] || fail "refusing unowned host path: $link"
+    install -d -m 0755 "$(dirname -- "$link")"
+    ln -s "$destination" "$link"
+}
+
+managed_paths() {
+    printf '%s\n' \
+        /etc/obscam/host.env \
+        /etc/systemd/system/obscam.target \
+        /etc/systemd/system/obscam.service \
+        /etc/systemd/system/obscam-mediamtx.service \
+        /etc/systemd/system/obscam-media-network.service \
+        /etc/systemd/system/multi-user.target.wants/obscam.target \
+        /etc/systemd/system/multi-user.target.wants/obscam.service \
+        /etc/systemd/system/multi-user.target.wants/obscam-mediamtx.service \
+        /etc/systemd/system/multi-user.target.wants/obscam-media-network.service \
+        /etc/systemd/system/allsky.service.d/50-obscam-resource-policy.conf \
+        /etc/sysusers.d/obscam.conf \
+        /etc/udev/rules.d/99-z-obscam.rules \
+        /usr/local/sbin/obscam-release \
+        /usr/local/bin/obscam-diagnostics
+}
+
+preflight_managed_installation() {
+    ownership_marker=$(target /var/lib/obscam/managed)
+    if [ -f "$ownership_marker" ] && [ ! -L "$ownership_marker" ] &&
+        [ "$(cat "$ownership_marker")" = obscam-release-manager-v1 ]; then
+        [ "$adopt_gre_225" = no ] || fail "--adopt-gre-225 is valid only for an unmanaged predecessor"
+        verify_bootstrap_links
+        installation_mode=managed
+        return 0
+    fi
+    [ ! -e "$ownership_marker" ] && [ ! -L "$ownership_marker" ] || fail "refusing unowned installer state: $ownership_marker"
+    if [ "$adopt_gre_225" = yes ]; then
+        validate_gre_225_adoption
+        installation_mode=adopt-gre-225
+        return 0
+    fi
+    [ ! -e "$(target /opt/obscam)" ] || fail "refusing unowned release root: $(target /opt/obscam)"
+    for managed_path in $(managed_paths); do
+        managed_target=$(target "$managed_path")
+        [ ! -e "$managed_target" ] && [ ! -L "$managed_target" ] || fail "refusing unowned host path: $managed_target"
+    done
+    passwd_file=$(target /etc/passwd)
+    if [ -f "$passwd_file" ] && grep -Eq '^obscam:' "$passwd_file"; then
+        fail "refusing to adopt existing obscam identity"
+    fi
+    group_file=$(target /etc/group)
+    if [ -f "$group_file" ] && grep -Eq '^(obscam|obscam-camera):' "$group_file"; then
+        fail "refusing to adopt existing obscam groups"
+    fi
+    installation_mode=clean
+}
+
+preflight_host_configuration() {
+    host_destination=$(target /etc/obscam/host.env)
+    if [ -e "$host_destination" ] || [ -L "$host_destination" ]; then
+        [ -f "$host_destination" ] && [ ! -L "$host_destination" ] || fail "refusing unowned host configuration path: $host_destination"
+        cmp -s "$host_config" "$host_destination" || fail "refusing to overwrite host configuration: $host_destination"
+        "$helper_source_dir/validate-host-config" "$host_destination"
+    elif [ "$installation_mode" = managed ]; then
+        fail "managed host configuration is missing: $host_destination"
+    fi
+}
+
+legacy_regular_file() {
+    legacy_path=$(target "$1")
+    [ -f "$legacy_path" ] && [ ! -L "$legacy_path" ] || fail "GRE-225 predecessor path is missing or not a regular file: $legacy_path"
+}
+
+backup_legacy_path() {
+    legacy_path=$(target "$1")
+    legacy_backup=$legacy_path.pre-gre-226
+    [ ! -e "$legacy_backup" ] && [ ! -L "$legacy_backup" ] || fail "legacy backup already exists: $legacy_backup"
+    mv "$legacy_path" "$legacy_backup"
+}
+
+validate_gre_225_adoption() {
+    [ ! -e "$(target /opt/obscam)" ] || fail "GRE-225 predecessor must not contain a release root"
+    legacy_regular_file /usr/local/libexec/obscam/obscam
+    legacy_regular_file /usr/local/libexec/obscam/mediamtx
+    cmp -s "$obscam_binary" "$(target /usr/local/libexec/obscam/obscam)" || fail "GRE-225 ObsCam binary differs from the qualified input"
+    cmp -s "$mediamtx_binary" "$(target /usr/local/libexec/obscam/mediamtx)" || fail "GRE-225 MediaMTX binary differs from the qualified input"
+
+    for legacy_managed_path in \
+        /etc/obscam/mediamtx.yml \
+        /usr/local/share/obscam/mediamtx-linux-arm64.sha256 \
+        /usr/local/share/obscam/mediamtx-config.sha256 \
+        /usr/local/libexec/obscam/verify-mediamtx \
+        /etc/systemd/system/obscam.target \
+        /etc/systemd/system/obscam.service \
+        /etc/systemd/system/obscam-mediamtx.service \
+        /etc/systemd/system/obscam-media-network.service \
+        /etc/systemd/system/allsky.service.d/50-obscam-resource-policy.conf \
+        /etc/sysusers.d/obscam.conf \
+        /etc/udev/rules.d/99-z-obscam.rules
+    do
+        legacy_regular_file "$legacy_managed_path"
+    done
+    "$(target /usr/local/libexec/obscam/verify-mediamtx)" \
+        "$(target /usr/local/libexec/obscam/mediamtx)" \
+        "$(target /etc/obscam/mediamtx.yml)" \
+        "$(target /usr/local/share/obscam/mediamtx-linux-arm64.sha256)" \
+        "$(target /usr/local/share/obscam/mediamtx-config.sha256)"
+    grep -Fx 'ExecStart=/usr/local/libexec/obscam/obscam' "$(target /etc/systemd/system/obscam.service)" >/dev/null || fail "unrecognized GRE-225 ObsCam unit"
+    grep -F '/usr/local/libexec/obscam/mediamtx' "$(target /etc/systemd/system/obscam-mediamtx.service)" >/dev/null || fail "unrecognized GRE-225 MediaMTX unit"
+    grep -F '/usr/local/libexec/obscam/setup-media-network' "$(target /etc/systemd/system/obscam-media-network.service)" >/dev/null || fail "unrecognized GRE-225 network unit"
+
+    legacy_passwd=$(target /etc/passwd)
+    grep -Eq '^obscam:[^:]*:[^:]+:[^:]+:ObsCam camera owner:/nonexistent:/usr/sbin/nologin$' "$legacy_passwd" || fail "GRE-225 ObsCam identity is missing or differs"
+    legacy_group=$(target /etc/group)
+    awk -F: '$1 == "obscam-camera" && $4 ~ /(^|,)obscam(,|$)/ { found=1 } END { exit !found }' "$legacy_group" || fail "GRE-225 camera group membership is missing or differs"
+}
+
+backup_gre_225_paths() {
+    for legacy_link_path in \
+        /etc/systemd/system/obscam.target \
+        /etc/systemd/system/obscam.service \
+        /etc/systemd/system/obscam-mediamtx.service \
+        /etc/systemd/system/obscam-media-network.service \
+        /etc/systemd/system/allsky.service.d/50-obscam-resource-policy.conf \
+        /etc/sysusers.d/obscam.conf \
+        /etc/udev/rules.d/99-z-obscam.rules
+    do
+        legacy_original=$(target "$legacy_link_path")
+        legacy_backup=$legacy_original.pre-gre-226
+        if [ -f "$legacy_backup" ] && [ ! -L "$legacy_backup" ]; then
+            [ ! -e "$legacy_original" ] || [ -L "$legacy_original" ] || fail "partial GRE-225 adoption contains conflicting content: $legacy_original"
         else
-            fail "refusing conflicting destination: $destination"
+            backup_legacy_path "$legacy_link_path"
         fi
+    done
+    legacy_target_enablement=$(target /etc/systemd/system/multi-user.target.wants/obscam.target)
+    legacy_target_backup=$legacy_target_enablement.pre-gre-226
+    if [ -L "$legacy_target_backup" ]; then
+        [ ! -e "$legacy_target_enablement" ] && [ ! -L "$legacy_target_enablement" ] || fail "partial GRE-225 target adoption conflicts"
+    elif [ -L "$legacy_target_enablement" ]; then
+        mv "$legacy_target_enablement" "$legacy_target_backup"
+    elif [ -e "$legacy_target_enablement" ]; then
+        fail "GRE-225 target enablement is not a symlink"
     fi
-
-    install -d -m 0755 "$(dirname -- "$destination")"
-    install -m "$mode" "$source" "$destination"
 }
 
-appliance_files() {
-    action=$1
-    "$action" "$deploy_dir/mediamtx.yml" /etc/obscam/mediamtx.yml 0644
-    "$action" "$deploy_dir/obscam-media.nft" /etc/obscam/obscam-media.nft 0644
-    "$action" "$deploy_dir/setup-media-network" /usr/local/libexec/obscam/setup-media-network 0755
-    "$action" "$deploy_dir/verify-mediamtx" /usr/local/libexec/obscam/verify-mediamtx 0755
-    "$action" "$deploy_dir/verify-memory-controller" /usr/local/libexec/obscam/verify-memory-controller 0755
-    "$action" "$deploy_dir/obscam-diagnostics" /usr/local/libexec/obscam/obscam-diagnostics 0755 839e6b2077c5687c12eaa9b8f0fd5dbb0ad05fd92691d600c1ba865f69150c7f pre-memory-controller
-    "$action" "$deploy_dir/mediamtx-linux-arm64.sha256" /usr/local/share/obscam/mediamtx-linux-arm64.sha256 0644
-    "$action" "$deploy_dir/mediamtx-config.sha256" /usr/local/share/obscam/mediamtx-config.sha256 0644
-    "$action" "$deploy_dir/sysusers.d/obscam.conf" /etc/sysusers.d/obscam.conf 0644
-    "$action" "$deploy_dir/udev/99-z-obscam.rules" /etc/udev/rules.d/99-z-obscam.rules 0644
-    "$action" "$deploy_dir/systemd/obscam.target" /etc/systemd/system/obscam.target 0644
-    "$action" "$deploy_dir/systemd/obscam.service" /etc/systemd/system/obscam.service 0644 8e7fdb0c6732f00757459a32f26b5cc532572cd9b3693ba7866809f37ce5030c pre-obscam-target
-    # Accept only the checked GRE-218 and GRE-224 predecessor definitions.
-    "$action" "$deploy_dir/systemd/obscam-media-network.service" /etc/systemd/system/obscam-media-network.service 0644 "b3242f896dd6c8f2f6c3fd859a7bb05f9b55c9c16b488ec3c783bc8646fb69f1 57af723c96be3590e0b91325c1b9f64e0543f8599f4e593030ce85170248f999" pre-obscam-target
-    "$action" "$deploy_dir/systemd/obscam-mediamtx.service" /etc/systemd/system/obscam-mediamtx.service 0644 "cf3d5b5a2db2ffc6a9851f18a569af07ef8723b76d2a63b5cbb18bc8699c461d 8f7c2c8cd7a22f2fec33de9b21b3fcd6948d3bfe2ab277f43fdda0f79a6dad21" pre-obscam-target
-    "$action" "$deploy_dir/systemd/allsky.service.d/50-obscam-resource-policy.conf" /etc/systemd/system/allsky.service.d/50-obscam-resource-policy.conf 0644
+claim_managed_installation() {
+    ownership_marker=$(target /var/lib/obscam/managed)
+    install -D -m 0644 /dev/null "$ownership_marker"
+    printf 'obscam-release-manager-v1\n' >"$ownership_marker"
 }
 
-compare_manifest_file() {
-    compare_installed "$1" "$2"
-}
-
-static_files() {
-    appliance_files compare_manifest_file
+install_bootstrap_links() {
+    install_stable_link /etc/systemd/system/obscam.target ../../../opt/obscam/active/systemd/obscam.target
+    install_stable_link /etc/systemd/system/obscam.service ../../../opt/obscam/active/systemd/obscam.service
+    install_stable_link /etc/systemd/system/obscam-mediamtx.service ../../../opt/obscam/active/systemd/obscam-mediamtx.service
+    install_stable_link /etc/systemd/system/obscam-media-network.service ../../../opt/obscam/active/systemd/obscam-media-network.service
+    install_stable_link /etc/systemd/system/allsky.service.d/50-obscam-resource-policy.conf ../../../../opt/obscam/active/systemd/50-obscam-resource-policy.conf
+    install_stable_link /etc/sysusers.d/obscam.conf ../../opt/obscam/active/sysusers.d/obscam.conf
+    install_stable_link /etc/udev/rules.d/99-z-obscam.rules ../../../opt/obscam/active/udev/99-z-obscam.rules
+    install_stable_link /usr/local/sbin/obscam-release ../../../opt/obscam/active/bin/install-appliance
+    install_stable_link /usr/local/bin/obscam-diagnostics ../../../opt/obscam/active/bin/obscam-diagnostics
 }
 
 asi662mc_devices() {
-    action=$1
+    device_action=$1
     for usb_device in /sys/bus/usb/devices/*; do
         [ -r "$usb_device/idVendor" ] || continue
         [ -r "$usb_device/idProduct" ] || continue
         [ "$(cat "$usb_device/idVendor")" = 03c3 ] || continue
         [ "$(cat "$usb_device/idProduct")" = 662b ] || continue
         usb_node=$(printf '/dev/bus/usb/%03d/%03d' "$(cat "$usb_device/busnum")" "$(cat "$usb_device/devnum")")
-        "$action" "$usb_node" "$usb_device"
+        "$device_action" "$usb_node" "$usb_device"
     done
 }
 
 encoder_devices() {
-    action=$1
+    device_action=$1
     for video_device in /sys/class/video4linux/video*; do
         [ -r "$video_device/name" ] || continue
         [ "$(cat "$video_device/name")" = bcm2835-codec-encode ] || continue
-        "$action" "/dev/${video_device##*/}" "$video_device"
+        "$device_action" "/dev/${video_device##*/}" "$video_device"
     done
-}
-
-verify_asi662mc_permissions() {
-    [ "$(stat -c '%a:%U:%G' "$1")" = 660:root:obscam-camera ] ||
-        fail "ASI662MC permissions are not root:obscam-camera 0660"
-}
-
-verify_encoder_permissions() {
-    [ "$(stat -c '%a:%U:%G' "$1")" = 660:obscam:video ] ||
-        fail "hardware encoder permissions are not obscam:video 0660"
 }
 
 set_asi662mc_permissions() {
@@ -187,96 +409,332 @@ set_encoder_permissions() {
     chmod 0660 "$1"
 }
 
-verify_installed() {
-    static_files
+verify_asi662mc_permissions() {
+    [ "$(stat -c '%a:%U:%G' "$1")" = 660:root:obscam-camera ] || fail "ASI662MC permissions are not root:obscam-camera 0660"
+}
 
-    installed_obscam=$(target /usr/local/libexec/obscam/obscam)
-    installed_mediamtx=$(target /usr/local/libexec/obscam/mediamtx)
-    installed_config=$(target /etc/obscam/mediamtx.yml)
-    installed_binary_checksum=$(target /usr/local/share/obscam/mediamtx-linux-arm64.sha256)
-    installed_config_checksum=$(target /usr/local/share/obscam/mediamtx-config.sha256)
-    verifier=$(target /usr/local/libexec/obscam/verify-mediamtx)
+verify_encoder_permissions() {
+    [ "$(stat -c '%a:%U:%G' "$1")" = 660:obscam:video ] || fail "hardware encoder permissions are not obscam:video 0660"
+}
 
-    [ -x "$installed_obscam" ] || fail "installed ObsCam binary is not executable"
-    "$verifier" \
-        "$installed_mediamtx" \
-        "$installed_config" \
-        "$installed_binary_checksum" \
-        "$installed_config_checksum"
+verify_stable_link() {
+    stable_path=$(target "$1")
+    stable_destination=$2
+    [ -L "$stable_path" ] && [ "$(readlink "$stable_path")" = "$stable_destination" ] ||
+        fail "stable installer link differs: $stable_path"
+}
 
+verify_bootstrap_links() {
+    verify_stable_link /etc/systemd/system/obscam.target ../../../opt/obscam/active/systemd/obscam.target
+    verify_stable_link /etc/systemd/system/obscam.service ../../../opt/obscam/active/systemd/obscam.service
+    verify_stable_link /etc/systemd/system/obscam-mediamtx.service ../../../opt/obscam/active/systemd/obscam-mediamtx.service
+    verify_stable_link /etc/systemd/system/obscam-media-network.service ../../../opt/obscam/active/systemd/obscam-media-network.service
+    verify_stable_link /etc/systemd/system/allsky.service.d/50-obscam-resource-policy.conf ../../../../opt/obscam/active/systemd/50-obscam-resource-policy.conf
+    verify_stable_link /etc/sysusers.d/obscam.conf ../../opt/obscam/active/sysusers.d/obscam.conf
+    verify_stable_link /etc/udev/rules.d/99-z-obscam.rules ../../../opt/obscam/active/udev/99-z-obscam.rules
+    verify_stable_link /usr/local/sbin/obscam-release ../../../opt/obscam/active/bin/install-appliance
+    verify_stable_link /usr/local/bin/obscam-diagnostics ../../../opt/obscam/active/bin/obscam-diagnostics
+}
+
+refuse_direct_component_enablement() {
+    for component in obscam.service obscam-mediamtx.service obscam-media-network.service; do
+        component_link=$(target "/etc/systemd/system/multi-user.target.wants/$component")
+        [ ! -e "$component_link" ] && [ ! -L "$component_link" ] || fail "refusing direct component enablement: $component_link"
+    done
+}
+
+enable_appliance_target() {
+    target_link=$(target /etc/systemd/system/multi-user.target.wants/obscam.target)
+    target_destination=../obscam.target
+    if [ -L "$target_link" ]; then
+        [ "$(readlink "$target_link")" = "$target_destination" ] || fail "appliance target enablement differs: $target_link"
+        return
+    fi
+    [ ! -e "$target_link" ] || fail "refusing non-symlink appliance target enablement: $target_link"
+    install -d -m 0755 "$(dirname -- "$target_link")"
+    ln -s "$target_destination" "$target_link"
+}
+
+link_release_id() {
+    link=$1
+    [ -L "$link" ] || return 0
+    value=$(readlink "$link")
+    case "$value" in
+        releases/*)
+            linked_release_id=${value#releases/}
+            validate_release_id "$linked_release_id"
+            printf '%s\n' "$linked_release_id"
+            ;;
+        *) fail "invalid release link target: $link -> $value" ;;
+    esac
+}
+
+switch_link() {
+    name=$1
+    id=$2
+    directory=$(target /opt/obscam)
+    temp=$directory/.$name.$$
+    ln -s "releases/$id" "$temp"
+    mv -Tf "$temp" "$directory/$name"
+}
+
+pending_value() {
+    pending_path=$1
+    pending_key=$2
+    [ "$(grep -Ec "^${pending_key}=" "$pending_path")" -eq 1 ] || fail "invalid activation marker"
+    sed -n "s/^${pending_key}=//p" "$pending_path"
+}
+
+resume_or_preflight_installation() {
+    installation_state=$(target /var/lib/obscam/installation-pending)
+    if [ ! -f "$installation_state" ]; then
+        preflight_managed_installation
+        return
+    fi
+    resumed_candidate=$(pending_value "$installation_state" candidate)
+    resumed_mode=$(pending_value "$installation_state" mode)
+    validate_recorded_release_id "$resumed_candidate"
+    [ "$resumed_candidate" = "$release_id" ] || fail "installation of $resumed_candidate must be resumed before another release"
+    case "$resumed_mode" in clean|managed|adopt-gre-225) installation_mode=$resumed_mode ;; *) fail "invalid installation transaction mode" ;; esac
+}
+
+begin_installation_transaction() {
+    installation_state=$(target /var/lib/obscam/installation-pending)
+    install -d -m 0755 "$(dirname -- "$installation_state")"
+    if [ ! -f "$installation_state" ]; then
+        write_marker_atomically "$installation_state" \
+            "candidate=$release_id" "mode=$installation_mode"
+    fi
+}
+
+write_marker_atomically() {
+    marker_path=$1
+    shift
+    marker_temp=$marker_path.tmp.$$
+    (umask 022; printf '%s\n' "$@" >"$marker_temp")
+    sync -f "$marker_temp"
+    mv -f "$marker_temp" "$marker_path"
+    sync -f "$(dirname -- "$marker_path")"
+}
+
+validate_recorded_release_id() {
+    recorded_id=$1
+    [ "$recorded_id" = - ] || validate_release_id "$recorded_id"
+}
+
+recover_interrupted_activation() {
+    recovery_state=$(target /var/lib/obscam/activation-pending)
+    [ -f "$recovery_state" ] || return 0
+    recovery_previous=$(pending_value "$recovery_state" previous)
+    recovery_prior_previous=$(pending_value "$recovery_state" prior_previous)
+    validate_recorded_release_id "$recovery_previous"
+    validate_recorded_release_id "$recovery_prior_previous"
+
+    recovery_root=$(target /opt/obscam)
+    if [ "$recovery_previous" = - ]; then
+        stop_candidate_without_prior_release
+        rm -f "$recovery_root/active"
+        rm -f "$(target /etc/systemd/system/multi-user.target.wants/obscam.target)"
+    else
+        restored_active_release=$(target "/opt/obscam/releases/$recovery_previous")
+        "$restored_active_release/bin/verify-release" "$restored_active_release"
+        switch_link active "$recovery_previous"
+    fi
+    if [ "$recovery_prior_previous" = - ]; then
+        rm -f "$recovery_root/previous"
+    else
+        restored_previous_release=$(target "/opt/obscam/releases/$recovery_prior_previous")
+        "$restored_previous_release/bin/verify-release" "$restored_previous_release"
+        switch_link previous "$recovery_prior_previous"
+    fi
+    if [ "$root" = / ] && [ "$recovery_previous" != - ]; then
+        apply_hardware_policy || fail "could not restore device policy; activation marker retained"
+        systemctl daemon-reload || fail "could not reload the restored release; activation marker retained"
+        systemctl restart obscam.target || fail "could not restart the restored release; activation marker retained"
+        "$restored_active_release/bin/check-release" --root "$root" || fail "restored release did not pass checks; activation marker retained"
+    fi
+    rm -f "$recovery_state"
+}
+
+stop_candidate_without_prior_release() {
+    [ "$root" = / ] || return 0
+    systemctl stop obscam.target || fail "could not stop the unqualified candidate; activation marker retained"
+    if systemctl is-active --quiet obscam.target; then
+        fail "unqualified candidate remains active; activation marker retained"
+    fi
+}
+
+restore_prior_release_links() {
+    if [ -n "$active_id" ]; then
+        switch_link active "$active_id"
+    else
+        rm -f "$obscam_root/active"
+        rm -f "$(target /etc/systemd/system/multi-user.target.wants/obscam.target)"
+    fi
+    if [ -n "$prior_previous_id" ]; then
+        switch_link previous "$prior_previous_id"
+    else
+        rm -f "$obscam_root/previous"
+    fi
+}
+
+apply_candidate_release() {
+    candidate_release=$1
+    refuse_direct_component_enablement || return 1
+    enable_appliance_target || return 1
     if [ "$root" = / ]; then
-        /usr/local/libexec/obscam/verify-memory-controller
-        getent passwd obscam | awk -F: '$1 == "obscam" && $6 == "/nonexistent" && $7 == "/usr/sbin/nologin" { found=1 } END { exit !found }' ||
-            fail "ObsCam non-login identity is missing"
-        id -nG obscam | tr ' ' '\n' | grep -Fx obscam-camera >/dev/null ||
-            fail "ObsCam identity lacks obscam-camera membership"
+        apply_hardware_policy || return 1
+        systemctl daemon-reload || return 1
+        systemctl restart obscam.target || return 1
+    fi
+    "$candidate_release/bin/check-release" --root "$root"
+}
+
+apply_hardware_policy() {
+    udevadm control --reload || return 1
+    udevadm trigger --action=change --subsystem-match=usb --attr-match=idVendor=03c3 --attr-match=idProduct=662b || return 1
+    asi662mc_devices set_asi662mc_permissions || return 1
+    encoder_devices set_encoder_permissions || return 1
+}
+
+activate_staged_release() {
+    candidate=$1
+    obscam_root=$(target /opt/obscam)
+    state=$(target /var/lib/obscam)
+    install -d -m 0755 "$obscam_root" "$state"
+    active_id=$(link_release_id "$obscam_root/active")
+    prior_previous_id=$(link_release_id "$obscam_root/previous")
+    [ "$active_id" != "$release_id" ] || return 0
+
+    write_marker_atomically "$state/activation-pending" \
+        "candidate=$release_id" "previous=${active_id:--}" "prior_previous=${prior_previous_id:--}"
+    if [ -n "$active_id" ]; then
+        switch_link previous "$active_id" || {
+            rm -f "$state/activation-pending"
+            fail "could not retain the active release"
+        }
+    fi
+    switch_link active "$release_id" || {
+        restore_prior_release_links
+        rm -f "$state/activation-pending"
+        fail "could not switch the active release"
+    }
+
+    if apply_candidate_release "$candidate"; then
+        rm -f "$state/activation-pending"
+        return 0
+    fi
+
+    if [ -z "$active_id" ]; then
+        stop_candidate_without_prior_release
+    fi
+    restore_prior_release_links
+    if [ -n "$active_id" ]; then
+        restored_release=$(target "/opt/obscam/releases/$active_id")
+        if [ "$root" = / ]; then
+            apply_hardware_policy &&
+                systemctl daemon-reload &&
+                systemctl restart obscam.target &&
+                "$restored_release/bin/check-release" --root "$root" ||
+                fail "candidate failed and the restored release did not pass checks; activation marker retained"
+        else
+            "$restored_release/bin/check-release" --root "$root" ||
+                fail "candidate failed and the restored release did not pass checks; activation marker retained"
+        fi
+    fi
+    rm -f "$state/installation-pending"
+    rm -f "$state/activation-pending"
+    fail "post-activation checks failed; restored ${active_id:-no active release}"
+}
+
+verify_active() {
+    active=$(target /opt/obscam/active)
+    active_id=$(link_release_id "$active")
+    [ -n "$active_id" ] || fail "no active release"
+    release=$(target "/opt/obscam/releases/$active_id")
+    "$release/bin/verify-release" "$release"
+    "$release/bin/validate-host-config" "$(target /etc/obscam/host.env)"
+    [ "$(cat "$(target /var/lib/obscam/managed)")" = obscam-release-manager-v1 ] || fail "installer ownership marker is missing"
+    verify_bootstrap_links
+    if [ "$root" = / ]; then
+        getent passwd obscam | awk -F: '$1 == "obscam" && $6 == "/nonexistent" && $7 == "/usr/sbin/nologin" { found=1 } END { exit !found }' || fail "ObsCam non-login identity is missing"
+        id -nG obscam | tr ' ' '\n' | grep -Fx obscam-camera >/dev/null || fail "ObsCam identity lacks obscam-camera membership"
         asi662mc_devices verify_asi662mc_permissions
         encoder_devices verify_encoder_permissions
         systemctl is-enabled --quiet obscam.target || fail "obscam.target is not enabled"
         for component in obscam.service obscam-mediamtx.service obscam-media-network.service; do
-            if systemctl is-enabled --quiet "$component"; then
-                fail "$component must be enabled only through obscam.target"
-            fi
+            if systemctl is-enabled --quiet "$component"; then fail "$component must be enabled only through obscam.target"; fi
         done
     else
-        passwd=$(target /etc/passwd)
-        awk -F: '$1 == "obscam" && $6 == "/nonexistent" && $7 == "/usr/sbin/nologin" { found=1 } END { exit !found }' "$passwd" ||
-            fail "staged ObsCam non-login identity is missing"
+        staged_passwd=$(target /etc/passwd)
+        staged_group=$(target /etc/group)
+        awk -F: '$1 == "obscam" && $6 == "/nonexistent" && $7 == "/usr/sbin/nologin" { found=1 } END { exit !found }' "$staged_passwd" || fail "staged ObsCam non-login identity is missing"
+        awk -F: '$1 == "obscam-camera" && $4 ~ /(^|,)obscam(,|$)/ { found=1 } END { exit !found }' "$staged_group" || fail "staged ObsCam camera group membership is missing"
         systemctl --root="$root" is-enabled --quiet obscam.target || fail "staged obscam.target is not enabled"
         for component in obscam.service obscam-mediamtx.service obscam-media-network.service; do
-            if systemctl --root="$root" is-enabled --quiet "$component"; then
-                fail "staged $component must be enabled only through obscam.target"
-            fi
+            if systemctl --root="$root" is-enabled --quiet "$component"; then fail "staged $component must be enabled only through obscam.target"; fi
         done
     fi
 }
 
+show_status() {
+    active=$(link_release_id "$(target /opt/obscam/active)")
+    previous=$(link_release_id "$(target /opt/obscam/previous)")
+    pending=none
+    pending_file=$(target /var/lib/obscam/activation-pending)
+    if [ -f "$pending_file" ]; then pending=$(tr '\n' ' ' <"$pending_file" | sed 's/[[:space:]]*$//'); fi
+    installation=none
+    installation_file=$(target /var/lib/obscam/installation-pending)
+    if [ -f "$installation_file" ]; then installation=$(tr '\n' ' ' <"$installation_file" | sed 's/[[:space:]]*$//'); fi
+    printf 'active=%s\nprevious=%s\npending=%s\ninstallation=%s\n' "${active:-none}" "${previous:-none}" "$pending" "$installation"
+}
+
 case "$operation" in
     install)
-        [ -n "$obscam_binary" ] || usage
-        [ -n "$mediamtx_binary" ] || usage
-        [ -x "$obscam_binary" ] || fail "ObsCam binary is not executable: $obscam_binary"
-        [ -x "$mediamtx_binary" ] || fail "MediaMTX binary is not executable: $mediamtx_binary"
         require_live_root
-
+        require_install_arguments
+        if [ "$root" = / ]; then "$helper_source_dir/verify-memory-controller"; fi
+        recover_interrupted_activation
+        resume_or_preflight_installation
+        preflight_host_configuration
+        candidate=$(stage_release)
+        begin_installation_transaction
+        install_host_configuration
+        if [ "$installation_mode" = adopt-gre-225 ]; then backup_gre_225_paths; fi
         if [ "$root" = / ]; then
-            "$deploy_dir/verify-memory-controller"
-        fi
-
-        # Validate the compatibility pin before creating or changing any target.
-        "$deploy_dir/verify-mediamtx" \
-            "$mediamtx_binary" \
-            "$deploy_dir/mediamtx.yml" \
-            "$deploy_dir/mediamtx-linux-arm64.sha256" \
-            "$deploy_dir/mediamtx-config.sha256"
-
-        install_owned_file "$obscam_binary" /usr/local/libexec/obscam/obscam 0755
-        install_owned_file "$mediamtx_binary" /usr/local/libexec/obscam/mediamtx 0755
-        appliance_files install_owned_file
-
-        if [ "$root" = / ]; then
-            systemd-sysusers /etc/sysusers.d/obscam.conf
-            udevadm control --reload
-            udevadm trigger --action=change --subsystem-match=usb --attr-match=idVendor=03c3 --attr-match=idProduct=662b
-            asi662mc_devices set_asi662mc_permissions
-            encoder_devices set_encoder_permissions
-            systemctl daemon-reload
-            systemctl disable obscam-media-network.service obscam-mediamtx.service obscam.service
-            systemctl enable obscam.target
+            systemd-sysusers "$candidate/sysusers.d/obscam.conf"
+            install_bootstrap_links
         else
             staged_passwd=$(target /etc/passwd)
-            if [ ! -f "$staged_passwd" ] || ! grep -Eq '^obscam:' "$staged_passwd"; then
-                systemd-sysusers --root="$root" obscam.conf
-            fi
-            systemctl --root="$root" disable obscam-media-network.service obscam-mediamtx.service obscam.service
-            systemctl --root="$root" enable obscam.target
+            if [ ! -f "$staged_passwd" ] || ! grep -Eq '^obscam:' "$staged_passwd"; then systemd-sysusers --root="$root" "$candidate/sysusers.d/obscam.conf"; fi
+            install_bootstrap_links
         fi
-        verify_installed
+        claim_managed_installation
+        activate_staged_release "$candidate"
+        verify_active
+        rm -f "$(target /var/lib/obscam/installation-pending)"
         ;;
     verify)
-        [ -z "$obscam_binary" ] || usage
-        [ -z "$mediamtx_binary" ] || usage
-        verify_installed
+        [ -z "$release_id$obscam_binary$mediamtx_binary$zwo_sdk_library$host_config" ] && [ "$adopt_gre_225" = no ] || usage
+        verify_active
+        ;;
+    status)
+        [ -z "$release_id$obscam_binary$mediamtx_binary$zwo_sdk_library$host_config" ] && [ "$adopt_gre_225" = no ] || usage
+        show_status
+        ;;
+    rollback)
+        [ -z "$release_id$obscam_binary$mediamtx_binary$zwo_sdk_library$host_config" ] && [ "$adopt_gre_225" = no ] || usage
+        require_live_root
+        recover_interrupted_activation
+        rollback_root=$(target /opt/obscam)
+        rollback_id=$(link_release_id "$rollback_root/previous")
+        [ -n "$rollback_id" ] || fail "no previous release is available"
+        rollback_release=$(target "/opt/obscam/releases/$rollback_id")
+        "$rollback_release/bin/verify-release" "$rollback_release"
+        "$rollback_release/bin/validate-host-config" "$(target /etc/obscam/host.env)"
+        release_id=$rollback_id
+        activate_staged_release "$rollback_release"
+        verify_active
         ;;
     *) usage ;;
 esac

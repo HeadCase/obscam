@@ -1,0 +1,135 @@
+#!/bin/sh
+set -eu
+
+root=/
+if [ "${1:-}" = --root ]; then
+    [ "$#" -eq 2 ] || exit 2
+    root=$2
+elif [ "$#" -ne 0 ]; then
+    exit 2
+fi
+root=${root%/}
+[ -n "$root" ] || root=/
+
+target() {
+    if [ "$root" = / ]; then printf '%s\n' "$1"; else printf '%s%s\n' "$root" "$1"; fi
+}
+
+active=$(target /opt/obscam/active)
+[ -L "$active" ] || {
+    echo "check-release: active release link is missing" >&2
+    exit 1
+}
+release_link=$(readlink "$active")
+case "$release_link" in releases/*) ;; *) exit 1 ;; esac
+release=$(target "/opt/obscam/$release_link")
+"$release/bin/verify-release" "$release"
+"$release/bin/validate-host-config" "$(target /etc/obscam/host.env)"
+
+# A staged-root check proves the complete immutable and host-configuration
+# contract. Live service, HTTP, media, and recovery checks run only on the host.
+[ "$root" != / ] && exit 0
+
+check_timeout_seconds=30
+bind_address=$(sed -n 's/^OBSCAM_BIND_ADDRESS=//p' "$(target /etc/obscam/host.env)")
+case "$bind_address" in
+    \[*\]:*)
+        health_host=${bind_address#\[}
+        health_host=${health_host%%\]*}
+        health_port=${bind_address##*\]:}
+        if [ "$health_host" = :: ]; then health_host=::1; fi
+        health_origin="http://[$health_host]:$health_port"
+        ;;
+    *)
+        health_host=${bind_address%:*}
+        health_port=${bind_address##*:}
+        if [ "$health_host" = 0.0.0.0 ]; then health_host=127.0.0.1; fi
+        health_origin="http://$health_host:$health_port"
+        ;;
+esac
+
+services_ready() {
+    systemctl is-active --quiet obscam.target obscam.service obscam-mediamtx.service obscam-media-network.service
+}
+
+health_ready() {
+    health_json=$(curl --noproxy '*' --fail --silent --show-error --max-time 5 "$health_origin/api/v1/health") || return 1
+    for health_component in capture encoder relay; do
+        printf '%s\n' "$health_json" | grep -Eq "\"$health_component\":\\{[^}]*\"state\":\"ready\"" || return 1
+    done
+}
+
+media_ready() {
+    curl --fail --silent --show-error --max-time 5 http://169.254.218.2:9998/metrics |
+        grep -Eq '^paths\{.*name="obscam".*\}[[:space:]]+1$'
+}
+
+wait_for() {
+    wait_description=$1
+    wait_check=$2
+    wait_deadline=$(($(date +%s) + check_timeout_seconds))
+    until "$wait_check"; do
+        [ "$(date +%s)" -lt "$wait_deadline" ] || {
+            echo "check-release: timed out waiting for $wait_description" >&2
+            return 1
+        }
+        sleep 1
+    done
+}
+
+wait_for "service readiness" services_ready
+wait_for "local health" health_ready
+wait_for "media publication" media_ready
+
+check_tmp=$(mktemp -d)
+trap 'rm -rf "$check_tmp"' EXIT HUP INT TERM
+asset_matches() {
+    asset_url=$1
+    asset_file=$2
+    curl --noproxy '*' --fail --silent --show-error --max-time 5 "$asset_url" >"$check_tmp/asset"
+    cmp -s "$check_tmp/asset" "$release/browser/$asset_file"
+}
+asset_matches "$health_origin/" index.html
+asset_matches "$health_origin/assets/app.js" app.js
+asset_matches "$health_origin/assets/styles.css" styles.css
+
+main_pid() {
+    systemctl show "$1" --property=MainPID --value
+}
+
+obscam_pid=$(main_pid obscam.service)
+mediamtx_pid=$(main_pid obscam-mediamtx.service)
+case "$obscam_pid" in ''|*[!0-9]*) exit 1 ;; esac
+case "$mediamtx_pid" in ''|*[!0-9]*) exit 1 ;; esac
+[ "$obscam_pid" -gt 0 ] && [ "$mediamtx_pid" -gt 0 ]
+[ "$(readlink -f "/proc/$obscam_pid/exe")" = "$(readlink -f "$release/bin/obscam")" ] || {
+    echo "check-release: running ObsCam binary is outside the active release" >&2
+    exit 1
+}
+[ "$(readlink -f "/proc/$mediamtx_pid/exe")" = "$(readlink -f "$release/bin/mediamtx")" ] || {
+    echo "check-release: running MediaMTX binary is outside the active release" >&2
+    exit 1
+}
+grep -F "$(readlink -f "$release/lib/libASICamera2.so.1.41")" "/proc/$obscam_pid/maps" >/dev/null || {
+    echo "check-release: running ObsCam process does not map the qualified ZWO SDK" >&2
+    exit 1
+}
+
+systemctl restart obscam-mediamtx.service
+wait_for "relay recovery" media_ready
+[ "$(main_pid obscam.service)" = "$obscam_pid" ] || {
+    echo "check-release: relay recovery restarted ObsCam" >&2
+    exit 1
+}
+restarted_mediamtx_pid=$(main_pid obscam-mediamtx.service)
+[ "$restarted_mediamtx_pid" -gt 0 ] && [ "$restarted_mediamtx_pid" != "$mediamtx_pid" ]
+
+systemctl restart obscam.service
+wait_for "ObsCam recovery" health_ready
+wait_for "publication after ObsCam recovery" media_ready
+[ "$(main_pid obscam-mediamtx.service)" = "$restarted_mediamtx_pid" ] || {
+    echo "check-release: ObsCam recovery restarted MediaMTX" >&2
+    exit 1
+}
+restarted_obscam_pid=$(main_pid obscam.service)
+[ "$restarted_obscam_pid" -gt 0 ] && [ "$restarted_obscam_pid" != "$obscam_pid" ]
