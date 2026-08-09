@@ -13,6 +13,46 @@ The legacy Python/JPEG application and executable exploration prototypes have
 been removed. Git history preserves them when historical investigation is
 explicitly required; they are not implementation precedent.
 
+## Install and run
+
+Install ObsCam on the qualified Raspberry Pi 4 host with the ASI662MC attached
+and the cgroup v2 memory controller enabled. From a fresh repository checkout,
+build the embedded browser and release binary:
+
+```sh
+npm ci
+npm test
+cargo build --release -p obscam
+```
+
+Supply the pinned MediaMTX v1.19.3 Linux ARM64 binary and ZWO SDK 1.41 library,
+then install the complete qualified release. Copy and edit the host
+configuration only when the local addresses or camera defaults differ:
+
+```sh
+cp deploy/host.env.example /tmp/obscam-host.env
+obscam_release_id=obscam-$(git rev-parse --short HEAD)
+sudo deploy/install-appliance install \
+  --release-id "$obscam_release_id" \
+  --obscam-binary target/release/obscam \
+  --mediamtx-binary /path/to/mediamtx \
+  --zwo-sdk-library /usr/local/lib/libASICamera2.so.1.41 \
+  --host-config /tmp/obscam-host.env
+sudo systemctl start obscam.target
+```
+
+Verify the application and open it from an approved browser route:
+
+```sh
+systemctl is-active obscam.target obscam.service obscam-mediamtx.service
+curl --fail http://127.0.0.1:8080/api/v1/health
+```
+
+Browse to `http://192.168.1.200:8080` on the observatory LAN or
+`http://10.44.0.1:8080` over the permitted ObsCam WireGuard route. See the
+[qualified release guide](docs/agents/qualified-releases.md) for host
+preflight, migration, rollback, and diagnostics.
+
 ## Current status
 
 The production `obscam` Rust service now runs as an independently supervised,
