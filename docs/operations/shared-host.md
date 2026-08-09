@@ -39,7 +39,7 @@ not replace or couple AllSky's service definition to the ObsCam target.
 Run:
 
 ```sh
-/usr/local/libexec/obscam/obscam-diagnostics
+/usr/local/bin/obscam-diagnostics
 ```
 
 The command reads qualified binary/configuration identity, service state, the

@@ -69,12 +69,9 @@ fn live_resource_controller_preflight_fails_closed() {
         .find("verify-memory-controller")
         .expect("live memory-controller preflight");
     let first_install = live_install
-        .find("install_owned_file")
-        .expect("first owned-file mutation");
+        .find("stage_release")
+        .expect("first release mutation");
     assert!(preflight < first_install);
-    assert!(installer.contains(
-        "839e6b2077c5687c12eaa9b8f0fd5dbb0ad05fd92691d600c1ba865f69150c7f pre-memory-controller"
-    ));
 }
 
 #[test]
@@ -228,7 +225,7 @@ fn installed_command_covers_all_required_read_only_diagnostics() {
     }
     assert!(diagnostics.contains("--lines=100"));
     assert!(!diagnostics.contains("wg1"));
-    assert!(guide.contains("/usr/local/libexec/obscam/obscam-diagnostics"));
+    assert!(guide.contains("/usr/local/bin/obscam-diagnostics"));
 }
 
 #[test]
@@ -302,7 +299,7 @@ fn mediamtx_startup_rejects_binary_or_configuration_drift() {
     assert_eq!(
         directive_values(&unit, "ExecStartPre"),
         [
-            "/usr/local/libexec/obscam/verify-mediamtx /usr/local/libexec/obscam/mediamtx /etc/obscam/mediamtx.yml /usr/local/share/obscam/mediamtx-linux-arm64.sha256 /usr/local/share/obscam/mediamtx-config.sha256"
+            "/opt/obscam/active/bin/verify-mediamtx /opt/obscam/active/bin/mediamtx /opt/obscam/active/config/mediamtx.yml /opt/obscam/active/config/mediamtx-linux-arm64.sha256 /opt/obscam/active/config/mediamtx-config.sha256"
         ]
     );
     assert!(verifier.contains("expected_version=v1.19.3"));
@@ -334,7 +331,7 @@ fn media_namespace_contains_only_a_private_point_to_point_link() {
     assert!(!setup.contains("ip route show"));
     assert_eq!(
         directive_values(&unit, "ExecStart"),
-        ["/usr/local/libexec/obscam/setup-media-network start"]
+        ["/opt/obscam/active/bin/setup-media-network start"]
     );
     assert_eq!(
         directive_values(&unit, "CapabilityBoundingSet"),
@@ -348,6 +345,70 @@ fn media_namespace_contains_only_a_private_point_to_point_link() {
     assert_eq!(directive_values(&unit, "LogRateLimitIntervalSec"), ["30s"]);
     assert!(!unit.contains("ProtectSystem="));
     assert!(!unit.contains("ProtectHome="));
+}
+
+#[test]
+fn service_runtime_and_host_configuration_follow_one_active_release() {
+    let obscam = repository_file("deploy/systemd/obscam.service");
+    let mediamtx = repository_file("deploy/systemd/obscam-mediamtx.service");
+    let network = repository_file("deploy/systemd/obscam-media-network.service");
+    let installer = repository_file("deploy/install-appliance");
+    let verifier = repository_file("deploy/verify-release");
+
+    assert_eq!(
+        directive_values(&obscam, "ExecStart"),
+        ["/opt/obscam/active/bin/obscam"]
+    );
+    assert_eq!(
+        directive_values(&obscam, "EnvironmentFile"),
+        ["/etc/obscam/host.env"]
+    );
+    assert_eq!(
+        directive_values(&obscam, "Environment"),
+        ["LD_LIBRARY_PATH=/opt/obscam/active/lib", "RUST_LOG=info"]
+    );
+    for unit in [&mediamtx, &network] {
+        assert!(unit.contains("/opt/obscam/active/"));
+        assert!(!unit.contains("/usr/local/libexec/obscam/"));
+    }
+    for member in [
+        "browser/index.html",
+        "browser/app.js",
+        "browser/styles.css",
+        "lib/libASICamera2.so.1.41",
+        "systemd/obscam.service",
+    ] {
+        assert!(verifier.contains(member));
+    }
+    assert!(installer.contains("mv -Tf \"$temp\" \"$directory/$name\""));
+    assert!(installer.contains("activation-pending"));
+    assert!(installer.contains("prior_previous"));
+}
+
+#[test]
+fn post_activation_gate_is_bounded_and_exercises_public_runtime_contracts() {
+    let checks = repository_file("deploy/check-release");
+
+    for evidence in [
+        "systemctl is-active",
+        "/api/v1/health",
+        "/assets/app.js",
+        "/assets/styles.css",
+        "169.254.218.2:9998/metrics",
+        "name=\"obscam\"",
+        "systemctl restart obscam-mediamtx.service",
+        "systemctl restart obscam.service",
+        "MainPID",
+        "/proc/$obscam_pid/exe",
+        "/proc/$obscam_pid/maps",
+    ] {
+        assert!(
+            checks.contains(evidence),
+            "missing post-activation evidence: {evidence}"
+        );
+    }
+    assert!(checks.contains("check_timeout_seconds=30"));
+    assert!(checks.contains("--max-time 5"));
 }
 
 #[test]

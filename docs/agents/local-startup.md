@@ -1,10 +1,11 @@
-# Managed Appliance Startup
+# Qualified Appliance Releases
 
-GRE-224 installs ObsCam and pinned MediaMTX as independently supervised
-appliance services. Until GRE-226 adds immutable release activation and
-rollback, the installer consumes two explicit, locally available binaries and
-refuses to replace differing destinations other than the known GRE-218
-temporary-service predecessors.
+GRE-226 installs ObsCam as an immutable qualified compatibility set. The Rust
+application and its embedded browser assets, MediaMTX v1.19.3, relay
+configuration, systemd definitions, deployment helpers, and ZWO SDK 1.41 are
+hashed together beneath `/opt/obscam/releases/<release-id>`. Stable
+`active` and `previous` links switch the complete set; host configuration stays
+separate at `/etc/obscam/host.env`.
 
 The managed stack runs the real ASI662MC, release-mode Rust application,
 hardware H.264, and MediaMTX v1.19.3. MediaMTX remains inside the dedicated
@@ -28,23 +29,34 @@ npm test
 cargo build --release -p obscam
 ```
 
-Provide the exact MediaMTX v1.19.3 Linux ARM64 binary as an explicit installer
-input. The checked checksum is `deploy/mediamtx-linux-arm64.sha256`; the
-installer verifies its hash and reported version before changing the host.
+Provide the exact MediaMTX v1.19.3 Linux ARM64 binary and ZWO SDK 1.41 library
+as explicit installer inputs. Their checked hashes are
+`deploy/mediamtx-linux-arm64.sha256` and
+`deploy/zwo-sdk-linux-arm64.sha256`. Copy and edit the host configuration
+example only when the local bind or camera defaults need to differ.
 
 ```sh
+cp deploy/host.env.example /tmp/obscam-host.env
 sudo deploy/install-appliance install \
+  --release-id gre-226-<commit> \
   --obscam-binary target/release/obscam \
-  --mediamtx-binary /path/to/mediamtx
+  --mediamtx-binary /path/to/mediamtx \
+  --zwo-sdk-library /usr/local/lib/libASICamera2.so.1.41 \
+  --host-config /tmp/obscam-host.env
 ```
+
+The first migration from the installed GRE-225 layout additionally requires
+`--adopt-gre-225`. This explicit operation verifies the existing identities,
+binaries, relay pin, configuration, and service paths, preserves the replaced
+host definitions with a `.pre-gre-226` suffix, and refuses any unrecognized
+predecessor. Do not use the option for a clean installation or later upgrade.
 
 The installer:
 
 - creates the non-login `obscam` identity and its exact camera-access group;
-- installs both binaries under `/usr/local/libexec/obscam`;
-- installs the pinned relay configuration, namespace/firewall boundary,
-  checksum manifests, udev rules, systemd units, and the operator-facing
-  `obscam.target`;
+- validates and freezes the complete release under `/opt/obscam/releases`;
+- installs stable systemd, udev, sysusers, diagnostics, and release-manager
+  links through `/opt/obscam/active`;
 - installs the read-only diagnostic command and the repository-owned AllSky
   resource-policy drop-in without replacing AllSky's service definition;
 - restricts ASI662MC `03c3:662b` to `root:obscam-camera 0660` while Rust retains
@@ -52,19 +64,35 @@ The installer:
 - assigns only the named `bcm2835-codec-encode` node to the `obscam` owner while
   preserving the host `video` group;
 - enables `obscam.target` as the single boot and operator lifecycle unit;
-- refuses unknown differing files or symlink destinations.
+- refuses unknown paths, identities, configuration, binaries, and symlink
+  destinations;
+- switches the complete set atomically, runs bounded production checks, and
+  restores both prior release links if any check fails.
 
 Repeat the read-only installed contract check at any time:
 
 ```sh
-sudo deploy/install-appliance verify
-/usr/local/libexec/obscam/verify-memory-controller
+sudo /usr/local/sbin/obscam-release verify
+/opt/obscam/active/bin/verify-memory-controller
 systemd-analyze verify \
   obscam.target \
   obscam.service \
   obscam-media-network.service \
   obscam-mediamtx.service
 ```
+
+Inspect or roll back without rebuilding a release:
+
+```sh
+/usr/local/sbin/obscam-release status
+sudo /usr/local/sbin/obscam-release rollback
+```
+
+`status` is read-only and reports active, previous, and interrupted activation
+state. `rollback` validates the previous set and host configuration, switches
+the whole set, and applies the same post-activation gate. A mutating install or
+rollback first recovers any activation interrupted after its atomic link
+switch.
 
 GRE-226 will replace this binary-copy boundary with immutable compatibility
 sets, a stable active-release link, and automatic rollback.
@@ -113,11 +141,11 @@ MoQ-disabled setting all match:
 
 ```sh
 systemctl show obscam-mediamtx.service -p ExecStartPre -p ExecStart
-/usr/local/libexec/obscam/verify-mediamtx \
-  /usr/local/libexec/obscam/mediamtx \
-  /etc/obscam/mediamtx.yml \
-  /usr/local/share/obscam/mediamtx-linux-arm64.sha256 \
-  /usr/local/share/obscam/mediamtx-config.sha256
+/opt/obscam/active/bin/verify-mediamtx \
+  /opt/obscam/active/bin/mediamtx \
+  /opt/obscam/active/config/mediamtx.yml \
+  /opt/obscam/active/config/mediamtx-linux-arm64.sha256 \
+  /opt/obscam/active/config/mediamtx-config.sha256
 ```
 
 On the observatory LAN, open `http://192.168.1.200:8080`. Over the permitted
@@ -137,7 +165,7 @@ sections report failures and continue so an unavailable camera, VPN, or mount
 does not hide the remaining host evidence:
 
 ```sh
-/usr/local/libexec/obscam/obscam-diagnostics
+/usr/local/bin/obscam-diagnostics
 ```
 
 The report includes qualified binary/configuration evidence, service state,

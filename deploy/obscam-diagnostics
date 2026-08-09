@@ -45,13 +45,16 @@ report_cgroup_memory() {
 }
 
 section "qualified versions"
-run sha256sum /usr/local/libexec/obscam/obscam
-run /usr/local/libexec/obscam/mediamtx --version
-run /usr/local/libexec/obscam/verify-mediamtx \
-    /usr/local/libexec/obscam/mediamtx \
-    /etc/obscam/mediamtx.yml \
-    /usr/local/share/obscam/mediamtx-linux-arm64.sha256 \
-    /usr/local/share/obscam/mediamtx-config.sha256
+run /usr/local/sbin/obscam-release status
+active_release=$(readlink -f /opt/obscam/active)
+run "$active_release/bin/verify-release" "$active_release"
+run sha256sum /opt/obscam/active/bin/obscam
+run /opt/obscam/active/bin/mediamtx --version
+run /opt/obscam/active/bin/verify-mediamtx \
+    /opt/obscam/active/bin/mediamtx \
+    /opt/obscam/active/config/mediamtx.yml \
+    /opt/obscam/active/config/mediamtx-linux-arm64.sha256 \
+    /opt/obscam/active/config/mediamtx-config.sha256
 
 section "service state"
 run systemctl show \

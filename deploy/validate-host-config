@@ -1,0 +1,59 @@
+#!/bin/sh
+set -eu
+
+fail() {
+    echo "validate-host-config: $*" >&2
+    exit 1
+}
+
+[ "$#" -eq 1 ] || fail "usage: $0 HOST_CONFIG"
+config=$1
+[ -f "$config" ] && [ ! -L "$config" ] || fail "host configuration must be a regular file"
+
+keys='OBSCAM_BIND_ADDRESS OBSCAM_WHEP_PORT OBSCAM_WHEP_PATH OBSCAM_CAMERA_SOURCE OBSCAM_DEFAULT_EXPOSURE_MS OBSCAM_DEFAULT_GAIN OBSCAM_DEFAULT_TREATMENT'
+for key in $keys; do
+    [ "$(grep -Ec "^${key}=" "$config")" -eq 1 ] || fail "$key must occur exactly once"
+done
+
+if grep -Ev '^(OBSCAM_BIND_ADDRESS|OBSCAM_WHEP_PORT|OBSCAM_WHEP_PATH|OBSCAM_CAMERA_SOURCE|OBSCAM_DEFAULT_EXPOSURE_MS|OBSCAM_DEFAULT_GAIN|OBSCAM_DEFAULT_TREATMENT)=[^[:space:]]+$' "$config" | grep -q .; then
+    fail "configuration contains an unknown, empty, or whitespace-bearing entry"
+fi
+
+value() {
+    sed -n "s/^$1=//p" "$config"
+}
+
+bind_address=$(value OBSCAM_BIND_ADDRESS)
+case "$bind_address" in
+    *:*) ;;
+    *) fail "OBSCAM_BIND_ADDRESS must be an IP socket address" ;;
+esac
+
+whep_port=$(value OBSCAM_WHEP_PORT)
+case "$whep_port" in *[!0-9]*|'') fail "OBSCAM_WHEP_PORT must be numeric" ;; esac
+[ "$whep_port" -ge 1 ] && [ "$whep_port" -le 65535 ] || fail "OBSCAM_WHEP_PORT is out of range"
+
+whep_path=$(value OBSCAM_WHEP_PATH)
+case "$whep_path" in
+    /*) ;;
+    *) fail "OBSCAM_WHEP_PATH must be absolute" ;;
+esac
+case "$whep_path" in //*|*\?*|*\#*) fail "OBSCAM_WHEP_PATH must be hostless" ;; esac
+[ "${#whep_path}" -le 256 ] || fail "OBSCAM_WHEP_PATH exceeds 256 bytes"
+
+[ "$(value OBSCAM_CAMERA_SOURCE)" = production ] || fail "production releases require OBSCAM_CAMERA_SOURCE=production"
+
+exposure=$(value OBSCAM_DEFAULT_EXPOSURE_MS)
+case " 50 100 200 300 500 1000 2000 5000 10000 15000 20000 30000 " in
+    *" $exposure "*) ;;
+    *) fail "OBSCAM_DEFAULT_EXPOSURE_MS is not an accepted detent" ;;
+esac
+
+gain=$(value OBSCAM_DEFAULT_GAIN)
+case "$gain" in *[!0-9]*|'') fail "OBSCAM_DEFAULT_GAIN must be numeric" ;; esac
+[ "$gain" -le 600 ] && [ $((gain % 50)) -eq 0 ] || fail "OBSCAM_DEFAULT_GAIN is not an accepted detent"
+
+case "$(value OBSCAM_DEFAULT_TREATMENT)" in
+    monochrome|colour) ;;
+    *) fail "OBSCAM_DEFAULT_TREATMENT must be monochrome or colour" ;;
+esac

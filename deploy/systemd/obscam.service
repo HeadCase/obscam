@@ -8,7 +8,9 @@ Type=exec
 User=obscam
 Group=obscam
 SupplementaryGroups=obscam-camera
-ExecStart=/usr/local/libexec/obscam/obscam
+EnvironmentFile=/etc/obscam/host.env
+Environment=LD_LIBRARY_PATH=/opt/obscam/active/lib
+ExecStart=/opt/obscam/active/bin/obscam
 Restart=always
 RestartSec=5s
 TimeoutStopSec=10s

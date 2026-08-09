@@ -1,0 +1,74 @@
+#!/bin/sh
+set -eu
+
+fail() {
+    echo "verify-release: $*" >&2
+    exit 1
+}
+
+[ "$#" -eq 1 ] || fail "usage: $0 RELEASE_DIRECTORY"
+release=$1
+[ -d "$release" ] && [ ! -L "$release" ] || fail "release directory is missing or is a symlink"
+[ -f "$release/release.env" ] || fail "release metadata is missing"
+[ -f "$release/SHA256SUMS" ] || fail "release checksum manifest is missing"
+
+metadata() {
+    key=$1
+    [ "$(grep -Ec "^${key}=" "$release/release.env")" -eq 1 ] || fail "$key must occur exactly once"
+    sed -n "s/^${key}=//p" "$release/release.env"
+}
+
+[ "$(metadata format)" = 1 ] || fail "unsupported release format"
+release_id=$(metadata release_id)
+case "$release_id" in *[!A-Za-z0-9._-]*|'') fail "invalid release ID" ;; esac
+[ "$(metadata mediamtx_version)" = v1.19.3 ] || fail "unqualified MediaMTX version"
+[ "$(metadata zwo_sdk_abi)" = 1 ] || fail "unqualified ZWO SDK ABI"
+[ "$(metadata zwo_sdk_version)" = 1.41 ] || fail "unqualified ZWO SDK version"
+[ "$(wc -l <"$release/release.env")" -eq 5 ] || fail "release metadata contains unqualified fields"
+
+(cd "$release" && sha256sum --check --strict SHA256SUMS >/dev/null) || fail "release checksum verification failed"
+inventory_tmp=$(mktemp -d)
+trap 'rm -rf "$inventory_tmp"' EXIT HUP INT TERM
+sed -n 's/^[0-9a-f]\{64\}  //p' "$release/SHA256SUMS" | LC_ALL=C sort >"$inventory_tmp/manifest"
+(cd "$release" && find . -type f ! -name SHA256SUMS -print | LC_ALL=C sort) >"$inventory_tmp/release"
+cmp -s "$inventory_tmp/manifest" "$inventory_tmp/release" || fail "release inventory differs from its manifest"
+[ -z "$(find "$release" \( -type f -o -type d \) -perm /0222 -print -quit)" ] || fail "release content is writable"
+[ "$(find "$release" -type l -print)" = "$release/lib/libASICamera2.so" ] || fail "release contains an unexpected symlink"
+[ "$(readlink "$release/lib/libASICamera2.so")" = libASICamera2.so.1.41 ] || fail "ZWO SDK ABI link differs"
+
+for path in \
+    bin/obscam \
+    bin/mediamtx \
+    bin/check-release \
+    bin/install-appliance \
+    bin/obscam-diagnostics \
+    bin/setup-media-network \
+    bin/validate-host-config \
+    bin/verify-mediamtx \
+    bin/verify-memory-controller \
+    browser/index.html \
+    browser/app.js \
+    browser/styles.css \
+    config/mediamtx.yml \
+    config/mediamtx-config.sha256 \
+    config/mediamtx-linux-arm64.sha256 \
+    config/obscam-media.nft \
+    config/zwo-sdk-linux-arm64.sha256 \
+    lib/libASICamera2.so.1.41 \
+    systemd/obscam.target \
+    systemd/obscam.service \
+    systemd/obscam-mediamtx.service \
+    systemd/obscam-media-network.service
+do
+    [ -f "$release/$path" ] || fail "qualified release member is missing: $path"
+done
+
+"$release/bin/verify-mediamtx" \
+    "$release/bin/mediamtx" \
+    "$release/config/mediamtx.yml" \
+    "$release/config/mediamtx-linux-arm64.sha256" \
+    "$release/config/mediamtx-config.sha256"
+
+sdk_expected=$(awk 'length($1) == 64 { print $1; exit }' "$release/config/zwo-sdk-linux-arm64.sha256")
+sdk_actual=$(sha256sum "$release/lib/libASICamera2.so.1.41" | awk '{ print $1 }')
+[ -n "$sdk_expected" ] && [ "$sdk_actual" = "$sdk_expected" ] || fail "ZWO SDK checksum mismatch"
