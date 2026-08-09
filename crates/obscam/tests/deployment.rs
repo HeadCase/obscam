@@ -207,7 +207,7 @@ fn appliance_target_is_the_single_operator_lifecycle_unit() {
 
 #[test]
 fn installed_command_covers_all_required_read_only_diagnostics() {
-    let guide = repository_file("docs/agents/local-startup.md");
+    let guide = repository_file("docs/agents/qualified-releases.md");
     let diagnostics = repository_file("deploy/obscam-diagnostics");
 
     for operation in ["start", "stop", "restart"] {
