@@ -45,6 +45,11 @@ when restoration cannot be qualified. The Rust deployment contract ensures
 the services and helpers consume only the active release and that the
 post-activation gate contains every required bounded public check.
 
+The installed-command fixtures additionally invoke upgrades through the stable
+`/usr/local/sbin/obscam-release` symlink, verify the resolved active source set
+before copying it, refuse source drift without switching, and create
+operator-readable immutable release evidence under a restrictive root umask.
+
 The following repository gates passed on 2026-08-09:
 
 ```text
@@ -72,14 +77,33 @@ GRE-226 gate.
 
 ## Deployed Pi gate
 
-Status: **not yet run**.
+Status: **passed on 2026-08-09**.
 
-The final appliance gate requires the real ASI662MC, official ZWO SDK, hardware
-H.264 encoder, MediaMTX namespace, systemd supervision, and browser/media
-contracts. Install a reviewed release over the qualified GRE-225 predecessor;
-capture `status` and diagnostics; exercise a successful upgrade, a deliberately
-failed candidate with automatic restoration, and explicit manual rollback.
-For every switch confirm exact assets and versions, health, publication,
-independent service recovery, unchanged AllSky ownership, and truthful active
-and previous release IDs. Unavailable hardware evidence is not replaced by a
-fixture.
+The live `osprey` Raspberry Pi qualified the real ASI662MC (`03c3:662b`), ZWO
+SDK 1.41, hardware H.264 encoder, MediaMTX v1.19.3 namespace, systemd
+supervision, and Mac Chromium over the approved `wg0` route. GRE-225 was
+explicitly adopted into `gre-226-467b839-a`; later qualified sets were upgraded
+through the installed release manager.
+
+The gate exercised:
+
+- a deliberately non-starting candidate, which timed out at local health and
+  automatically restored `gre-226-432e805-b` with no pending journals;
+- a successful installed-command upgrade to `gre-226-432e805-c` and an
+  explicit manual rollback to `gre-226-432e805-b`;
+- final activation of `gre-226-407bf2c-d`, with
+  `gre-226-432e805-b` retained as the previous set;
+- full installed verification, exact active executable paths, ready health and
+  MediaMTX publication, independent service restarts, camera permission
+  recovery, and operator-readable diagnostics;
+- unchanged `/etc/systemd/system/allsky.service` ownership, metadata, and
+  SHA-256 (`542f48082c8eb17a277342caf4c910f28096cb07e88bb0e7e12b4ab0ab2f83b4`);
+- desktop `1440x900` and mobile `390x844` Chromium checks at
+  `http://10.44.0.1:8080`: Live, advancing 1920x1080 video, WHEP HTTP 201,
+  browser API HTTP 200, no viewport overflow, console errors, or failed
+  requests.
+
+The live gate found and drove regression coverage for two defects before final
+qualification: installed-manager source-layout resolution and root-umask
+permissions on release metadata. Both fixes passed the full repository gates
+and independent Standards and Spec re-review before deployment.
