@@ -1,0 +1,115 @@
+#!/bin/sh
+set -u
+
+section() {
+    printf '\n== %s ==\n' "$1"
+}
+
+run() {
+    command_name=${1##*/}
+    if "$@" 2>&1; then
+        return 0
+    else
+        status=$?
+        printf '%s: command failed with status %s\n' "$command_name" "$status"
+    fi
+}
+
+report_cgroup_memory() {
+    cgroup_root=${OBSCAM_DIAGNOSTICS_CGROUP_ROOT:-/sys/fs/cgroup}
+    controllers=$cgroup_root/cgroup.controllers
+    if [ ! -r "$controllers" ] || ! IFS= read -r available_controllers <"$controllers"; then
+        printf 'memory controller: unavailable (controller inventory unreadable)\n'
+        return
+    fi
+
+    case " $available_controllers " in
+        *" memory "*) printf 'memory controller: enabled\n' ;;
+        *)
+            printf 'memory controller: unavailable\n'
+            return
+            ;;
+    esac
+
+    for unit in obscam.service obscam-mediamtx.service allsky.service asiair-sync.service; do
+        unit_cgroup=$cgroup_root/system.slice/$unit
+        for property in memory.current memory.peak memory.high memory.max; do
+            value_path=$unit_cgroup/$property
+            if [ -r "$value_path" ] && IFS= read -r value <"$value_path"; then
+                printf '%s %s=%s\n' "$unit" "$property" "$value"
+            else
+                printf '%s %s=unavailable\n' "$unit" "$property"
+            fi
+        done
+    done
+}
+
+section "qualified versions"
+run sha256sum /usr/local/libexec/obscam/obscam
+run /usr/local/libexec/obscam/mediamtx --version
+run /usr/local/libexec/obscam/verify-mediamtx \
+    /usr/local/libexec/obscam/mediamtx \
+    /etc/obscam/mediamtx.yml \
+    /usr/local/share/obscam/mediamtx-linux-arm64.sha256 \
+    /usr/local/share/obscam/mediamtx-config.sha256
+
+section "service state"
+run systemctl show \
+    obscam.target \
+    obscam.service \
+    obscam-mediamtx.service \
+    obscam-media-network.service \
+    allsky.service \
+    asiair-sync.service \
+    asiair-sync.timer \
+    wg-quick@wg0.service \
+    --property=Id,LoadState,ActiveState,SubState,NRestarts,Result \
+    --no-pager
+
+section "recent logs"
+run journalctl \
+    --no-pager \
+    --lines=100 \
+    --unit=obscam.service \
+    --unit=obscam-mediamtx.service \
+    --unit=obscam-media-network.service \
+    --unit=allsky.service \
+    --unit=asiair-sync.service
+
+section "health"
+run curl \
+    --fail \
+    --silent \
+    --show-error \
+    --max-time 5 \
+    http://127.0.0.1:8080/api/v1/health
+
+section "mounts"
+run systemctl show \
+    mnt-asiair.automount \
+    mnt-asiair.mount \
+    mnt-library.automount \
+    mnt-library.mount \
+    --property=Id,LoadState,ActiveState,SubState,Result \
+    --no-pager
+run findmnt --noheadings --mountpoint /mnt/asiair --output TARGET,FSTYPE,SOURCE
+run findmnt --noheadings --mountpoint /mnt/library --output TARGET,FSTYPE,SOURCE
+
+section "VPN state"
+run wg show wg0
+
+section "resources"
+report_cgroup_memory
+run systemctl show \
+    obscam.service \
+    obscam-mediamtx.service \
+    allsky.service \
+    asiair-sync.service \
+    --property=Id,CPUUsageNSec,CPUWeight,IOWeight,MemoryCurrent,MemoryPeak,MemoryHigh,MemoryMax,OOMScoreAdjust,TasksCurrent,TasksMax \
+    --no-pager
+run free -h
+
+section "temperature and throttling"
+run vcgencmd measure_temp
+run vcgencmd get_throttled
+run cat /sys/class/thermal/thermal_zone0/temp

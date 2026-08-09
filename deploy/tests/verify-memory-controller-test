@@ -1,0 +1,29 @@
+#!/bin/sh
+set -eu
+
+repo=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)
+verifier=$repo/deploy/verify-memory-controller
+tmp=$(mktemp -d)
+trap 'rm -rf "$tmp"' EXIT HUP INT TERM
+
+fail() {
+    echo "FAIL: $*" >&2
+    exit 1
+}
+
+printf '%s\n' 'cpu io memory pids' >"$tmp/cgroup.controllers"
+"$verifier" "$tmp"
+
+printf '%s\n' 'cpu io pids' >"$tmp/cgroup.controllers"
+if "$verifier" "$tmp" >"$tmp/output" 2>&1; then
+    fail "missing memory controller was accepted"
+fi
+grep -F 'memory cgroup controller is unavailable' "$tmp/output" >/dev/null ||
+    fail "missing controller failure was not explained"
+
+rm "$tmp/cgroup.controllers"
+if "$verifier" "$tmp" >"$tmp/output" 2>&1; then
+    fail "missing controller inventory was accepted"
+fi
+
+echo "memory-controller verifier tests passed"

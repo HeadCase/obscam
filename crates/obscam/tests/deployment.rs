@@ -26,6 +26,58 @@ fn appliance_installer_preserves_owned_paths_and_rejects_drift() {
 }
 
 #[test]
+fn diagnostics_are_bounded_read_only_and_fail_soft() {
+    let diagnostics_test = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../..")
+        .join("deploy/tests/obscam-diagnostics-test");
+    let output = Command::new(&diagnostics_test)
+        .output()
+        .unwrap_or_else(|error| panic!("run {}: {error}", diagnostics_test.display()));
+
+    assert!(
+        output.status.success(),
+        "{} failed\nstdout:\n{}\nstderr:\n{}",
+        diagnostics_test.display(),
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[test]
+fn live_resource_controller_preflight_fails_closed() {
+    let verifier_test = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../..")
+        .join("deploy/tests/verify-memory-controller-test");
+    let output = Command::new(&verifier_test)
+        .output()
+        .unwrap_or_else(|error| panic!("run {}: {error}", verifier_test.display()));
+
+    assert!(
+        output.status.success(),
+        "{} failed\nstdout:\n{}\nstderr:\n{}",
+        verifier_test.display(),
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let installer = repository_file("deploy/install-appliance");
+    let live_install = installer
+        .split("case \"$operation\" in")
+        .nth(1)
+        .expect("installer operation dispatch");
+    let preflight = live_install
+        .find("verify-memory-controller")
+        .expect("live memory-controller preflight");
+    let first_install = live_install
+        .find("install_owned_file")
+        .expect("first owned-file mutation");
+    assert!(preflight < first_install);
+    assert!(installer.contains(
+        "839e6b2077c5687c12eaa9b8f0fd5dbb0ad05fd92691d600c1ba865f69150c7f pre-memory-controller"
+    ));
+}
+
+#[test]
 fn mediamtx_advertises_only_permitted_browser_hosts() {
     let config = repository_file("deploy/mediamtx.yml");
 
@@ -94,6 +146,41 @@ fn obscam_and_mediamtx_are_independently_supervised() {
 }
 
 #[test]
+fn shared_host_policy_keeps_camera_workloads_useful_and_sync_yields_first() {
+    let obscam = repository_file("deploy/systemd/obscam.service");
+    let mediamtx = repository_file("deploy/systemd/obscam-mediamtx.service");
+    let allsky = repository_file("deploy/systemd/allsky.service.d/50-obscam-resource-policy.conf");
+    let sync = repository_file("deploy/systemd/asiair-sync.service");
+
+    for unit in [&obscam, &mediamtx, &allsky, &sync] {
+        assert!(!unit.contains("CPUQuota="));
+        assert!(!unit.contains("CPUSchedulingPolicy=fifo"));
+        assert!(!unit.contains("CPUSchedulingPolicy=rr"));
+        assert!(!unit.contains("viewer"));
+    }
+
+    assert_eq!(directive_values(&obscam, "CPUWeight"), ["200"]);
+    assert_eq!(directive_values(&obscam, "IOWeight"), ["200"]);
+    assert_eq!(directive_values(&mediamtx, "CPUWeight"), ["200"]);
+    assert_eq!(directive_values(&mediamtx, "IOWeight"), ["200"]);
+    assert_eq!(directive_values(&allsky, "CPUWeight"), ["100"]);
+    assert_eq!(directive_values(&allsky, "IOWeight"), ["100"]);
+    assert_eq!(directive_values(&sync, "CPUWeight"), ["10"]);
+    assert_eq!(directive_values(&sync, "IOWeight"), ["10"]);
+    assert_eq!(directive_values(&sync, "IOSchedulingClass"), ["idle"]);
+
+    assert_eq!(directive_values(&obscam, "OOMScoreAdjust"), ["-250"]);
+    assert_eq!(directive_values(&mediamtx, "OOMScoreAdjust"), ["-250"]);
+    assert_eq!(directive_values(&allsky, "OOMScoreAdjust"), ["-100"]);
+    assert_eq!(directive_values(&sync, "OOMScoreAdjust"), ["500"]);
+
+    assert!(directive_values(&allsky, "MemoryHigh").is_empty());
+    assert!(directive_values(&allsky, "MemoryMax").is_empty());
+    assert!(directive_values(&sync, "MemoryHigh").is_empty());
+    assert!(directive_values(&sync, "MemoryMax").is_empty());
+}
+
+#[test]
 fn appliance_target_is_the_single_operator_lifecycle_unit() {
     let target = repository_file("deploy/systemd/obscam.target");
     let members = [
@@ -115,31 +202,33 @@ fn appliance_target_is_the_single_operator_lifecycle_unit() {
 }
 
 #[test]
-fn operations_document_all_required_read_only_diagnostics() {
+fn installed_command_covers_all_required_read_only_diagnostics() {
     let guide = repository_file("docs/agents/local-startup.md");
+    let diagnostics = repository_file("deploy/obscam-diagnostics");
 
     for operation in ["start", "stop", "restart"] {
         assert!(guide.contains(&format!("sudo systemctl {operation} obscam.target")));
     }
 
     for signal in [
-        "systemctl status",
         "journalctl",
         "verify-mediamtx",
         "/api/v1/health",
-        "mnt-asiair.automount",
-        "mnt-library.automount",
+        "mnt-asiair.mount",
+        "mnt-library.mount",
         "wg show wg0",
         "MemoryCurrent",
         "CPUUsageNSec",
         "vcgencmd get_throttled",
     ] {
         assert!(
-            guide.contains(signal),
+            diagnostics.contains(signal),
             "missing diagnostic signal: {signal}"
         );
     }
-    assert!(!guide.contains("wg show wg1"));
+    assert!(diagnostics.contains("--lines=100"));
+    assert!(!diagnostics.contains("wg1"));
+    assert!(guide.contains("/usr/local/libexec/obscam/obscam-diagnostics"));
 }
 
 #[test]
