@@ -188,6 +188,7 @@ stage_release() {
         printf 'zwo_sdk_version=1.41\n'
     } >"$staging/release.env"
     (cd "$staging" && find . -type f ! -name SHA256SUMS -print | LC_ALL=C sort | xargs sha256sum >SHA256SUMS)
+    chmod 0444 "$staging/release.env" "$staging/SHA256SUMS"
     chmod -R a-w "$staging"
     "$staging/bin/verify-release" "$staging"
     mv "$staging" "$release_destination"

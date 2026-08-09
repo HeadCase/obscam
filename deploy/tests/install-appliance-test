@@ -75,13 +75,16 @@ fail() {
 install_fixture() {
     fixture_release_id=${1:-gre-226-test-1}
     fixture_obscam_binary=${2:-$obscam_binary}
-    "$fixture_deploy/install-appliance" install \
-        --root "$root" \
-        --release-id "$fixture_release_id" \
-        --obscam-binary "$fixture_obscam_binary" \
-        --mediamtx-binary "$mediamtx_binary" \
-        --zwo-sdk-library "$zwo_sdk" \
-        --host-config "$host_config"
+    (
+        umask 077
+        "$fixture_deploy/install-appliance" install \
+            --root "$root" \
+            --release-id "$fixture_release_id" \
+            --obscam-binary "$fixture_obscam_binary" \
+            --mediamtx-binary "$mediamtx_binary" \
+            --zwo-sdk-library "$zwo_sdk" \
+            --host-config "$host_config"
+    )
 }
 
 install_fixture
@@ -102,6 +105,8 @@ cmp -s "$host_config" "$root/etc/obscam/host.env" ||
     fail "host configuration was not kept outside the release"
 [ -f "$release/release.env" ] || fail "release metadata is missing"
 [ -f "$release/SHA256SUMS" ] || fail "release checksum manifest is missing"
+[ "$(stat -c %a "$release/release.env")" = 444 ] || fail "release metadata is not operator-readable and immutable"
+[ "$(stat -c %a "$release/SHA256SUMS")" = 444 ] || fail "release manifest is not operator-readable and immutable"
 [ -z "$(find "$release" \( -type f -o -type d \) -perm /0222 -print -quit)" ] ||
     fail "release content remains mutable"
 
