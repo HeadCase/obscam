@@ -180,7 +180,32 @@ obscam_binary_2=$tmp/obscam-2
 cp "$obscam_binary" "$obscam_binary_2"
 printf '# release 2\n' >>"$obscam_binary_2"
 chmod +x "$obscam_binary_2"
-install_fixture gre-226-test-2 "$obscam_binary_2"
+
+# An installed upgrade refuses drift in the active compatibility-set sources.
+active_asset=$root/opt/obscam/releases/gre-226-test-1/browser/app.js
+chmod 0644 "$active_asset"
+printf '\n// drift\n' >>"$active_asset"
+if "$root/usr/local/sbin/obscam-release" install \
+    --root "$root" \
+    --release-id gre-226-drifted-source \
+    --obscam-binary "$obscam_binary_2" \
+    --mediamtx-binary "$mediamtx_binary" \
+    --zwo-sdk-library "$zwo_sdk" \
+    --host-config "$host_config" >/dev/null 2>&1; then
+    fail "installed manager laundered drift from its active release"
+fi
+[ "$(readlink "$root/opt/obscam/active")" = releases/gre-226-test-1 ] ||
+    fail "source drift changed the active release"
+cp "$fixture/web/dist/app.js" "$active_asset"
+chmod 0444 "$active_asset"
+
+"$root/usr/local/sbin/obscam-release" install \
+    --root "$root" \
+    --release-id gre-226-test-2 \
+    --obscam-binary "$obscam_binary_2" \
+    --mediamtx-binary "$mediamtx_binary" \
+    --zwo-sdk-library "$zwo_sdk" \
+    --host-config "$host_config"
 [ "$(readlink "$root/opt/obscam/active")" = releases/gre-226-test-2 ] ||
     fail "upgrade did not advance the active release"
 [ "$(readlink "$root/opt/obscam/previous")" = releases/gre-226-test-1 ] ||

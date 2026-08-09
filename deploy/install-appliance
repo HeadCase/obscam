@@ -1,7 +1,31 @@
 #!/bin/sh
 set -eu
 
-deploy_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+script_path=$(readlink -f -- "$0") || {
+    echo "install-appliance: could not resolve installed release manager path: $0" >&2
+    exit 1
+}
+deploy_dir=$(CDPATH= cd -- "$(dirname -- "$script_path")" && pwd)
+if [ -f "$deploy_dir/../release.env" ] && [ -d "$deploy_dir/../browser" ]; then
+    release_source_root=$(CDPATH= cd -- "$deploy_dir/.." && pwd)
+    release_source_is_installed=yes
+    helper_source_dir=$release_source_root/bin
+    config_source_dir=$release_source_root/config
+    browser_source_dir=$release_source_root/browser
+    systemd_source_dir=$release_source_root/systemd
+    allsky_policy_source=$systemd_source_dir/50-obscam-resource-policy.conf
+    sysusers_source_dir=$release_source_root/sysusers.d
+    udev_source_dir=$release_source_root/udev
+else
+    release_source_is_installed=no
+    helper_source_dir=$deploy_dir
+    config_source_dir=$deploy_dir
+    browser_source_dir=$deploy_dir/../web/dist
+    systemd_source_dir=$deploy_dir/systemd
+    allsky_policy_source=$systemd_source_dir/allsky.service.d/50-obscam-resource-policy.conf
+    sysusers_source_dir=$deploy_dir/sysusers.d
+    udev_source_dir=$deploy_dir/udev
+fi
 root=/
 release_id=
 obscam_binary=
@@ -67,14 +91,17 @@ require_live_root() {
 
 require_install_arguments() {
     validate_release_id "$release_id"
+    if [ "$release_source_is_installed" = yes ]; then
+        "$helper_source_dir/verify-release" "$release_source_root"
+    fi
     [ -x "$obscam_binary" ] || fail "ObsCam binary is not executable: $obscam_binary"
     [ -x "$mediamtx_binary" ] || fail "MediaMTX binary is not executable: $mediamtx_binary"
     [ -f "$zwo_sdk_library" ] && [ ! -L "$zwo_sdk_library" ] || fail "ZWO SDK library must be a regular file"
-    "$deploy_dir/validate-host-config" "$host_config"
-    "$deploy_dir/verify-mediamtx" \
-        "$mediamtx_binary" "$deploy_dir/mediamtx.yml" \
-        "$deploy_dir/mediamtx-linux-arm64.sha256" "$deploy_dir/mediamtx-config.sha256"
-    expected_sdk=$(awk 'length($1) == 64 { print $1; exit }' "$deploy_dir/zwo-sdk-linux-arm64.sha256")
+    "$helper_source_dir/validate-host-config" "$host_config"
+    "$helper_source_dir/verify-mediamtx" \
+        "$mediamtx_binary" "$config_source_dir/mediamtx.yml" \
+        "$config_source_dir/mediamtx-linux-arm64.sha256" "$config_source_dir/mediamtx-config.sha256"
+    expected_sdk=$(awk 'length($1) == 64 { print $1; exit }' "$config_source_dir/zwo-sdk-linux-arm64.sha256")
     actual_sdk=$(sha256sum "$zwo_sdk_library" | awk '{ print $1 }')
     [ -n "$expected_sdk" ] && [ "$actual_sdk" = "$expected_sdk" ] || fail "ZWO SDK checksum mismatch"
 }
@@ -100,20 +127,20 @@ verify_reused_release_inputs() {
     require_same_release_member "$mediamtx_binary" "$reused_release/bin/mediamtx"
     require_same_release_member "$zwo_sdk_library" "$reused_release/lib/libASICamera2.so.1.41"
     for reused_executable in check-release install-appliance obscam-diagnostics setup-media-network validate-host-config verify-mediamtx verify-memory-controller verify-release; do
-        require_same_release_member "$deploy_dir/$reused_executable" "$reused_release/bin/$reused_executable"
+        require_same_release_member "$helper_source_dir/$reused_executable" "$reused_release/bin/$reused_executable"
     done
     for reused_config in mediamtx.yml mediamtx-config.sha256 mediamtx-linux-arm64.sha256 obscam-media.nft zwo-sdk-linux-arm64.sha256; do
-        require_same_release_member "$deploy_dir/$reused_config" "$reused_release/config/$reused_config"
+        require_same_release_member "$config_source_dir/$reused_config" "$reused_release/config/$reused_config"
     done
     for reused_asset in index.html app.js styles.css; do
-        require_same_release_member "$deploy_dir/../web/dist/$reused_asset" "$reused_release/browser/$reused_asset"
+        require_same_release_member "$browser_source_dir/$reused_asset" "$reused_release/browser/$reused_asset"
     done
     for reused_unit in obscam.target obscam.service obscam-mediamtx.service obscam-media-network.service; do
-        require_same_release_member "$deploy_dir/systemd/$reused_unit" "$reused_release/systemd/$reused_unit"
+        require_same_release_member "$systemd_source_dir/$reused_unit" "$reused_release/systemd/$reused_unit"
     done
-    require_same_release_member "$deploy_dir/systemd/allsky.service.d/50-obscam-resource-policy.conf" "$reused_release/systemd/50-obscam-resource-policy.conf"
-    require_same_release_member "$deploy_dir/sysusers.d/obscam.conf" "$reused_release/sysusers.d/obscam.conf"
-    require_same_release_member "$deploy_dir/udev/99-z-obscam.rules" "$reused_release/udev/99-z-obscam.rules"
+    require_same_release_member "$allsky_policy_source" "$reused_release/systemd/50-obscam-resource-policy.conf"
+    require_same_release_member "$sysusers_source_dir/obscam.conf" "$reused_release/sysusers.d/obscam.conf"
+    require_same_release_member "$udev_source_dir/99-z-obscam.rules" "$reused_release/udev/99-z-obscam.rules"
 }
 
 stage_release() {
@@ -138,20 +165,20 @@ stage_release() {
     ln -s libASICamera2.so.1.41 "$staging/lib/libASICamera2.so"
 
     for executable in check-release install-appliance obscam-diagnostics setup-media-network validate-host-config verify-mediamtx verify-memory-controller verify-release; do
-        copy_file "$deploy_dir/$executable" "$staging/bin/$executable" 0755
+        copy_file "$helper_source_dir/$executable" "$staging/bin/$executable" 0755
     done
     for config in mediamtx.yml mediamtx-config.sha256 mediamtx-linux-arm64.sha256 obscam-media.nft zwo-sdk-linux-arm64.sha256; do
-        copy_file "$deploy_dir/$config" "$staging/config/$config" 0644
+        copy_file "$config_source_dir/$config" "$staging/config/$config" 0644
     done
     for asset in index.html app.js styles.css; do
-        copy_file "$deploy_dir/../web/dist/$asset" "$staging/browser/$asset" 0644
+        copy_file "$browser_source_dir/$asset" "$staging/browser/$asset" 0644
     done
     for unit in obscam.target obscam.service obscam-mediamtx.service obscam-media-network.service; do
-        copy_file "$deploy_dir/systemd/$unit" "$staging/systemd/$unit" 0644
+        copy_file "$systemd_source_dir/$unit" "$staging/systemd/$unit" 0644
     done
-    copy_file "$deploy_dir/systemd/allsky.service.d/50-obscam-resource-policy.conf" "$staging/systemd/50-obscam-resource-policy.conf" 0644
-    copy_file "$deploy_dir/sysusers.d/obscam.conf" "$staging/sysusers.d/obscam.conf" 0644
-    copy_file "$deploy_dir/udev/99-z-obscam.rules" "$staging/udev/99-z-obscam.rules" 0644
+    copy_file "$allsky_policy_source" "$staging/systemd/50-obscam-resource-policy.conf" 0644
+    copy_file "$sysusers_source_dir/obscam.conf" "$staging/sysusers.d/obscam.conf" 0644
+    copy_file "$udev_source_dir/99-z-obscam.rules" "$staging/udev/99-z-obscam.rules" 0644
 
     {
         printf 'format=1\n'
@@ -176,7 +203,7 @@ install_host_configuration() {
     else
         install -D -m 0640 "$host_config" "$destination"
     fi
-    "$deploy_dir/validate-host-config" "$destination"
+    "$helper_source_dir/validate-host-config" "$destination"
 }
 
 install_stable_link() {
@@ -245,7 +272,7 @@ preflight_host_configuration() {
     if [ -e "$host_destination" ] || [ -L "$host_destination" ]; then
         [ -f "$host_destination" ] && [ ! -L "$host_destination" ] || fail "refusing unowned host configuration path: $host_destination"
         cmp -s "$host_config" "$host_destination" || fail "refusing to overwrite host configuration: $host_destination"
-        "$deploy_dir/validate-host-config" "$host_destination"
+        "$helper_source_dir/validate-host-config" "$host_destination"
     elif [ "$installation_mode" = managed ]; then
         fail "managed host configuration is missing: $host_destination"
     fi
@@ -665,7 +692,7 @@ case "$operation" in
     install)
         require_live_root
         require_install_arguments
-        if [ "$root" = / ]; then "$deploy_dir/verify-memory-controller"; fi
+        if [ "$root" = / ]; then "$helper_source_dir/verify-memory-controller"; fi
         recover_interrupted_activation
         resume_or_preflight_installation
         preflight_host_configuration
