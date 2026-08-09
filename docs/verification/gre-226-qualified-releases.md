@@ -17,27 +17,33 @@ the explicit `--adopt-gre-225` operation after its identities, inputs, relay
 pin, and service paths validate. Replaced definitions remain recoverable with
 the `.pre-gre-226` suffix.
 
-Activation records the candidate, active set, and older rollback candidate,
-then atomically advances relative `active` and `previous` links. The bounded
-live gate verifies service state, local health, exact served browser assets,
-MediaMTX publication, and both independent supervised restart directions. Any
-failure restores both prior links and restarts the former set. A persistent
-marker exposes an untrappably interrupted switch read-only and is recovered
-before the next install or rollback mutation.
+Installation records the candidate and clean, managed, or GRE-225-adoption
+mode before it changes host configuration, bootstrap links, or adopted paths.
+An interrupted installation resumes only for that exact candidate. Activation
+then records the candidate, active set, and older rollback candidate before it
+atomically advances relative `active` and `previous` links. The bounded live
+gate verifies service state, local health at the configured bind address and
+port, exact served browser assets, MediaMTX publication, and both independent
+supervised restart directions. Any failure restores both prior links and runs
+the former set's complete live gate. Persistent markers expose interrupted
+installation and activation state read-only and are recovered before the next
+install or rollback mutation.
 
-`obscam-release status` reports active, previous, and pending state without
-mutation. `obscam-release rollback` validates and swaps the two complete sets,
-then applies the same live gate.
+`obscam-release status` reports active, previous, pending activation, and
+pending installation state without mutation. `obscam-release rollback`
+validates and swaps the two complete sets, then applies the same live gate.
 
 ## Automated evidence
 
 `deploy/tests/install-appliance-test` covers clean installation, idempotence,
 upgrade, immutable and exact manifests, incompatible relay/SDK/host
-configuration, host-path and identity conflicts, explicit GRE-225 adoption,
-automatic rollback, manual rollback, truthful status, and interrupted
-activation recovery. The Rust deployment contract ensures the services and
-helpers consume only the active release and that the post-activation gate
-contains every required bounded public check.
+configuration, malformed bind addresses, host-path and identity conflicts,
+explicit GRE-225 adoption, automatic rollback, manual rollback, truthful
+status, interrupted installation/adoption recovery, interrupted activation
+recovery, traversal-resistant release links, and retained recovery markers
+when restoration cannot be qualified. The Rust deployment contract ensures
+the services and helpers consume only the active release and that the
+post-activation gate contains every required bounded public check.
 
 The following repository gates passed on 2026-08-09:
 

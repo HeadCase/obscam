@@ -88,14 +88,12 @@ Inspect or roll back without rebuilding a release:
 sudo /usr/local/sbin/obscam-release rollback
 ```
 
-`status` is read-only and reports active, previous, and interrupted activation
-state. `rollback` validates the previous set and host configuration, switches
-the whole set, and applies the same post-activation gate. A mutating install or
-rollback first recovers any activation interrupted after its atomic link
-switch.
-
-GRE-226 will replace this binary-copy boundary with immutable compatibility
-sets, a stable active-release link, and automatic rollback.
+`status` is read-only and reports active, previous, interrupted installation,
+and interrupted activation state. `rollback` validates the previous set and
+host configuration, switches the whole set, and applies the same
+post-activation gate. A mutating install resumes an interrupted installation
+only for its recorded candidate; install and rollback recover any activation
+interrupted after its atomic link switch.
 
 ## Start and reboot
 

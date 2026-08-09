@@ -72,6 +72,13 @@ fn live_resource_controller_preflight_fails_closed() {
         .find("stage_release")
         .expect("first release mutation");
     assert!(preflight < first_install);
+    assert!(preflight < live_install.find("recover_interrupted_activation").unwrap());
+    assert!(
+        preflight
+            < live_install
+                .find("resume_or_preflight_installation")
+                .unwrap()
+    );
 }
 
 #[test]
@@ -383,6 +390,9 @@ fn service_runtime_and_host_configuration_follow_one_active_release() {
     assert!(installer.contains("mv -Tf \"$temp\" \"$directory/$name\""));
     assert!(installer.contains("activation-pending"));
     assert!(installer.contains("prior_previous"));
+    assert!(installer.contains("stop_candidate_without_prior_release"));
+    assert!(installer.contains("systemctl stop obscam.target"));
+    assert!(installer.contains("systemctl is-active --quiet obscam.target"));
 }
 
 #[test]
@@ -401,6 +411,8 @@ fn post_activation_gate_is_bounded_and_exercises_public_runtime_contracts() {
         "MainPID",
         "/proc/$obscam_pid/exe",
         "/proc/$obscam_pid/maps",
+        "OBSCAM_BIND_ADDRESS",
+        "health_origin",
     ] {
         assert!(
             checks.contains(evidence),

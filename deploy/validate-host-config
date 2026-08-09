@@ -25,9 +25,34 @@ value() {
 
 bind_address=$(value OBSCAM_BIND_ADDRESS)
 case "$bind_address" in
-    *:*) ;;
+    \[*\]:*)
+        bind_host=${bind_address#\[}
+        bind_host=${bind_host%%\]*}
+        bind_port=${bind_address##*\]:}
+        case "$bind_host" in *[!0-9A-Fa-f:.]*|'') fail "OBSCAM_BIND_ADDRESS contains an invalid IPv6 address" ;; esac
+        ;;
+    *:*)
+        bind_host=${bind_address%:*}
+        bind_port=${bind_address##*:}
+        case "$bind_host" in *[!0-9.]*|'') fail "OBSCAM_BIND_ADDRESS contains an invalid IPv4 address" ;; esac
+        previous_ifs=$IFS
+        IFS=.
+        set -- $bind_host
+        IFS=$previous_ifs
+        [ "$#" -eq 4 ] || fail "OBSCAM_BIND_ADDRESS contains an invalid IPv4 address"
+        for octet in "$@"; do
+            case "$octet" in
+                0) ;;
+                0*|*[!0-9]*|'') fail "OBSCAM_BIND_ADDRESS contains an invalid IPv4 address" ;;
+                *) [ "$octet" -le 255 ] || fail "OBSCAM_BIND_ADDRESS contains an invalid IPv4 address" ;;
+            esac
+        done
+        ;;
     *) fail "OBSCAM_BIND_ADDRESS must be an IP socket address" ;;
 esac
+case "$bind_port" in *[!0-9]*|'') fail "OBSCAM_BIND_ADDRESS port must be numeric" ;; esac
+[ "$bind_port" -ge 1 ] && [ "$bind_port" -le 65535 ] || fail "OBSCAM_BIND_ADDRESS port is out of range"
+getent ahosts "$bind_host" >/dev/null 2>&1 || fail "OBSCAM_BIND_ADDRESS contains an invalid numeric address"
 
 whep_port=$(value OBSCAM_WHEP_PORT)
 case "$whep_port" in *[!0-9]*|'') fail "OBSCAM_WHEP_PORT must be numeric" ;; esac

@@ -31,13 +31,29 @@ release=$(target "/opt/obscam/$release_link")
 [ "$root" != / ] && exit 0
 
 check_timeout_seconds=30
+bind_address=$(sed -n 's/^OBSCAM_BIND_ADDRESS=//p' "$(target /etc/obscam/host.env)")
+case "$bind_address" in
+    \[*\]:*)
+        health_host=${bind_address#\[}
+        health_host=${health_host%%\]*}
+        health_port=${bind_address##*\]:}
+        if [ "$health_host" = :: ]; then health_host=::1; fi
+        health_origin="http://[$health_host]:$health_port"
+        ;;
+    *)
+        health_host=${bind_address%:*}
+        health_port=${bind_address##*:}
+        if [ "$health_host" = 0.0.0.0 ]; then health_host=127.0.0.1; fi
+        health_origin="http://$health_host:$health_port"
+        ;;
+esac
 
 services_ready() {
     systemctl is-active --quiet obscam.target obscam.service obscam-mediamtx.service obscam-media-network.service
 }
 
 health_ready() {
-    health_json=$(curl --fail --silent --show-error --max-time 5 http://127.0.0.1:8080/api/v1/health) || return 1
+    health_json=$(curl --noproxy '*' --fail --silent --show-error --max-time 5 "$health_origin/api/v1/health") || return 1
     for health_component in capture encoder relay; do
         printf '%s\n' "$health_json" | grep -Eq "\"$health_component\":\\{[^}]*\"state\":\"ready\"" || return 1
     done
@@ -70,12 +86,12 @@ trap 'rm -rf "$check_tmp"' EXIT HUP INT TERM
 asset_matches() {
     asset_url=$1
     asset_file=$2
-    curl --fail --silent --show-error --max-time 5 "$asset_url" >"$check_tmp/asset"
+    curl --noproxy '*' --fail --silent --show-error --max-time 5 "$asset_url" >"$check_tmp/asset"
     cmp -s "$check_tmp/asset" "$release/browser/$asset_file"
 }
-asset_matches http://127.0.0.1:8080/ index.html
-asset_matches http://127.0.0.1:8080/assets/app.js app.js
-asset_matches http://127.0.0.1:8080/assets/styles.css styles.css
+asset_matches "$health_origin/" index.html
+asset_matches "$health_origin/assets/app.js" app.js
+asset_matches "$health_origin/assets/styles.css" styles.css
 
 main_pid() {
     systemctl show "$1" --property=MainPID --value

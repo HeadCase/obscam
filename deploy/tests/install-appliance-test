@@ -156,7 +156,24 @@ cp "$tmp/check-release.original" "$fixture_deploy/check-release"
 status=$($fixture_deploy/install-appliance status --root "$root")
 [ "$status" = "active=gre-226-test-1
 previous=none
-pending=none" ] || fail "clean-install status was not truthful"
+pending=none
+installation=none" ] || fail "clean-install status was not truthful"
+
+# Active and previous links accept only one validated release ID component.
+link_root=$tmp/link-root
+mkdir -p "$link_root/opt/obscam"
+ln -s releases/../../tmp "$link_root/opt/obscam/active"
+if "$fixture_deploy/install-appliance" status --root "$link_root" >/dev/null 2>&1; then
+    fail "status accepted a traversing active-release link"
+fi
+rm "$link_root/opt/obscam/active"
+ln -s releases/.. "$link_root/opt/obscam/active"
+if "$fixture_deploy/install-appliance" status --root "$link_root" >/dev/null 2>&1; then
+    fail "status accepted the parent-directory release ID"
+fi
+if install_fixture .. >/dev/null 2>&1; then
+    fail "installer accepted the parent-directory release ID"
+fi
 
 # An upgrade advances the complete set and retains the previous known-good set.
 obscam_binary_2=$tmp/obscam-2
@@ -172,7 +189,8 @@ install_fixture gre-226-test-2 "$obscam_binary_2"
 status=$($fixture_deploy/install-appliance status --root "$root")
 [ "$status" = "active=gre-226-test-2
 previous=gre-226-test-1
-pending=none" ] || fail "upgrade status was not truthful"
+pending=none
+installation=none" ] || fail "upgrade status was not truthful"
 
 # Manual rollback swaps the two complete qualified sets.
 $fixture_deploy/install-appliance rollback --root "$root"
@@ -200,6 +218,41 @@ fi
 [ "$(readlink "$root/opt/obscam/previous")" = releases/gre-226-test-2 ] ||
     fail "automatic rollback did not restore the prior rollback candidate"
 cp "$tmp/check-release.good" "$fixture_deploy/check-release"
+
+# A restoration that cannot pass the old release gate remains explicitly pending.
+restoration_root=$tmp/restoration-root
+mkdir "$restoration_root"
+"$fixture_deploy/install-appliance" install \
+    --root "$restoration_root" \
+    --release-id gre-226-restore-1 \
+    --obscam-binary "$obscam_binary" \
+    --mediamtx-binary "$mediamtx_binary" \
+    --zwo-sdk-library "$zwo_sdk" \
+    --host-config "$host_config"
+cp "$fixture_deploy/check-release" "$tmp/check-release.restore-good"
+cat >"$fixture_deploy/check-release" <<'EOF'
+#!/bin/sh
+set -eu
+test_root=/
+if [ "${1:-}" = --root ]; then test_root=$2; fi
+printf '\n# post-switch failure\n' >>"${test_root%/}/etc/obscam/host.env"
+exit 1
+EOF
+chmod +x "$fixture_deploy/check-release"
+if "$fixture_deploy/install-appliance" install \
+    --root "$restoration_root" \
+    --release-id gre-226-restore-2 \
+    --obscam-binary "$obscam_binary_2" \
+    --mediamtx-binary "$mediamtx_binary" \
+    --zwo-sdk-library "$zwo_sdk" \
+    --host-config "$host_config" >/dev/null 2>&1; then
+    fail "installer claimed an unverified restoration succeeded"
+fi
+[ -f "$restoration_root/var/lib/obscam/activation-pending" ] ||
+    fail "failed restoration cleared its recovery marker"
+[ -f "$restoration_root/var/lib/obscam/installation-pending" ] ||
+    fail "failed restoration cleared its installation journal"
+cp "$tmp/check-release.restore-good" "$fixture_deploy/check-release"
 
 # An interrupted switch is reported read-only and recovered before mutation resumes.
 printf 'candidate=gre-226-test-3\nprevious=gre-226-test-1\nprior_previous=gre-226-test-2\n' \
@@ -246,6 +299,24 @@ fi
 [ -z "$(find "$other_root" -mindepth 1 -print -quit)" ] ||
     fail "pin rejection modified the target root"
 
+# A journaled partial scaffold resumes instead of being silently adopted or refused.
+resume_root=$tmp/resume-root
+mkdir -p "$resume_root/var/lib/obscam" "$resume_root/etc/obscam" "$resume_root/etc/systemd/system"
+printf 'candidate=gre-226-resume\nmode=clean\n' >"$resume_root/var/lib/obscam/installation-pending"
+cp "$host_config" "$resume_root/etc/obscam/host.env"
+ln -s ../../../opt/obscam/active/systemd/obscam.service "$resume_root/etc/systemd/system/obscam.service"
+"$fixture_deploy/install-appliance" install \
+    --root "$resume_root" \
+    --release-id gre-226-resume \
+    --obscam-binary "$obscam_binary_2" \
+    --mediamtx-binary "$tmp/mediamtx-clean" \
+    --zwo-sdk-library "$zwo_sdk" \
+    --host-config "$host_config"
+[ "$(readlink "$resume_root/opt/obscam/active")" = releases/gre-226-resume ] ||
+    fail "journaled partial installation did not resume"
+[ ! -e "$resume_root/var/lib/obscam/installation-pending" ] ||
+    fail "completed resumed installation retained its journal"
+
 # An incompatible SDK is rejected before target mutation.
 sdk_root=$tmp/sdk-root
 mkdir "$sdk_root"
@@ -279,6 +350,38 @@ if "$fixture_deploy/install-appliance" install \
     fail "installer accepted invalid host configuration"
 fi
 [ -z "$(find "$config_root" -mindepth 1 -print -quit)" ] || fail "configuration rejection modified the target root"
+
+bind_root=$tmp/bind-root
+mkdir "$bind_root"
+bad_bind_config=$tmp/bad-bind.env
+cp "$host_config" "$bad_bind_config"
+sed -i 's/OBSCAM_BIND_ADDRESS=0.0.0.0:8080/OBSCAM_BIND_ADDRESS=garbage:anything/' "$bad_bind_config"
+if "$fixture_deploy/install-appliance" install \
+    --root "$bind_root" \
+    --release-id gre-226-bad-bind \
+    --obscam-binary "$obscam_binary_2" \
+    --mediamtx-binary "$tmp/mediamtx-clean" \
+    --zwo-sdk-library "$zwo_sdk" \
+    --host-config "$bad_bind_config" >/dev/null 2>&1; then
+    fail "installer accepted a malformed bind socket"
+fi
+[ -z "$(find "$bind_root" -mindepth 1 -print -quit)" ] || fail "bind rejection modified the target root"
+
+abbreviated_bind_root=$tmp/abbreviated-bind-root
+mkdir "$abbreviated_bind_root"
+abbreviated_bind_config=$tmp/abbreviated-bind.env
+cp "$host_config" "$abbreviated_bind_config"
+sed -i 's/OBSCAM_BIND_ADDRESS=0.0.0.0:8080/OBSCAM_BIND_ADDRESS=1.2.3:8080/' "$abbreviated_bind_config"
+if "$fixture_deploy/install-appliance" install \
+    --root "$abbreviated_bind_root" \
+    --release-id gre-226-abbreviated-bind \
+    --obscam-binary "$obscam_binary_2" \
+    --mediamtx-binary "$tmp/mediamtx-clean" \
+    --zwo-sdk-library "$zwo_sdk" \
+    --host-config "$abbreviated_bind_config" >/dev/null 2>&1; then
+    fail "installer accepted an abbreviated IPv4 socket rejected by Rust"
+fi
+[ -z "$(find "$abbreviated_bind_root" -mindepth 1 -print -quit)" ] || fail "abbreviated bind rejection modified the target root"
 
 # Existing unowned host paths and identities are refused without adoption.
 ownership_root=$tmp/ownership-root
@@ -345,6 +448,10 @@ if "$fixture_deploy/install-appliance" install \
     --host-config "$host_config" >/dev/null 2>&1; then
     fail "installer adopted GRE-225 without explicit authority"
 fi
+mkdir -p "$legacy_root/var/lib/obscam"
+printf 'candidate=gre-226-adopted\nmode=adopt-gre-225\n' >"$legacy_root/var/lib/obscam/installation-pending"
+mv "$legacy_root/etc/systemd/system/obscam.service" \
+    "$legacy_root/etc/systemd/system/obscam.service.pre-gre-226"
 "$fixture_deploy/install-appliance" install \
     --root "$legacy_root" \
     --release-id gre-226-adopted \
