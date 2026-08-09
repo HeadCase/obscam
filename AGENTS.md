@@ -24,11 +24,11 @@ Historical evidence and deleted implementations remain in Git history, not the
 active tree. Do not inspect or recover them unless the user explicitly requests
 historical investigation.
 
-### Temporary production startup
+### Qualified appliance releases
 
-Until GRE-224 and GRE-226 provide managed appliance services and qualified
-release activation, follow `docs/agents/local-startup.md`. Do not improvise a
-custom media stack or allow browser testing to inspect or advertise `wg1`.
+Use `docs/agents/qualified-releases.md` to install, activate, roll back, and
+diagnose the managed appliance. Do not improvise a custom media stack or allow
+browser testing to inspect or advertise `wg1`.
 
 ## Decision Policy
 

@@ -45,7 +45,8 @@ the curated exposure choices, a 0–600 gain detent in steps of 50, and either
 See:
 
 - `docs/agents/architecture.md` for binding local architecture guardrails
-- `docs/agents/local-startup.md` for managed appliance installation and startup
+- `docs/agents/qualified-releases.md` for managed appliance installation,
+  activation, rollback, and diagnostics
 - `docs/agents/issue-tracker.md` for the Linear workflow
 - `docs/operations/asiair-sync.md` for ASIAIR synchronization operations and
   recovery
