@@ -8,6 +8,31 @@ fn repository_file(path: &str) -> String {
 }
 
 #[test]
+fn readme_covers_qualified_install_and_launch() {
+    let readme = repository_file("README.md");
+
+    for required_instruction in [
+        "## Install and run",
+        "npm ci",
+        "cargo build --release -p obscam",
+        "obscam_release_id=obscam-$(git rev-parse --short HEAD)",
+        "deploy/install-appliance install",
+        "--release-id \"$obscam_release_id\"",
+        "sudo systemctl start obscam.target",
+        "curl --fail http://127.0.0.1:8080/api/v1/health",
+        "http://192.168.1.200:8080",
+        "http://10.44.0.1:8080",
+        "docs/agents/qualified-releases.md",
+    ] {
+        assert!(
+            readme.contains(required_instruction),
+            "README is missing qualified install or launch instruction: {required_instruction}"
+        );
+    }
+    assert!(!readme.contains("<release-id>"));
+}
+
+#[test]
 fn appliance_installer_preserves_owned_paths_and_rejects_drift() {
     let installer_test = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("../..")
